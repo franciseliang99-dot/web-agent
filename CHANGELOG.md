@@ -2,6 +2,24 @@
 
 All notable changes to web-agent. 版本号遵循 SemVer 简化形式（V<major>.<minor>.<patch>）。
 
+## [0.1.2] - 2026-05-01
+
+### Refactored
+- 抽 `LLMClient` Protocol 到 `src/web_agent/llm/`（base.py / _schema.py / anthropic.py / __init__.py）
+- 拆 `planner.py` → `llm/` 子包：SYSTEM_PROMPT + TOOL_SCHEMAS（中性）+ AnthropicClient + factory
+- 删 `planner.py`（功能全部搬入 llm/）
+- `loop.run_react_loop` signature 改：`client: AsyncAnthropic, model: str` → `client: LLMClient`，model 由 client 持有
+- `cli.run_task` signature 加 `provider: str | None`；调用 `make_client(provider=, model=)` 装配
+- 增加 `WEB_AGENT_LLM_PROVIDER` env 支持 + `--provider` CLI 参数
+- AnthropicClient 顺便把 `ANTHROPIC_BASE_URL` env 接进来（透传给 SDK，支持 OpenRouter Anthropic skin / 自部署 LiteLLM 代理）
+
+### Why
+- 为 V0.2.0 加 OpenAI client 做铺垫；按用户全局 CLAUDE.md「解耦优先」原则：domain (perceiver/trace) ← ports (llm/base.py) ← 业务层 (loop.py) ← 组合根 (cli.py)
+- 中性 schema + per-provider 转换：避免业务工具语义重复定义在多个 client（SSOT）
+- factory 在 `llm/__init__.py`：cli 仍是组合根，factory 是 llm 模块的「公开入口」
+
+行为零变化（Anthropic 路径完全等价；新加的 OpenAI 分支在 C2 实现，C1 阶段 import 时友好报错）。pytest 7/7 通过（原 2 个 actuator + 新 5 个 schema 转换）。
+
 ## [0.1.1] - 2026-05-01
 
 ### Refactored

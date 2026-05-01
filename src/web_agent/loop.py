@@ -7,12 +7,11 @@ import time
 import uuid
 from pathlib import Path
 
-from anthropic import AsyncAnthropic
 from playwright.async_api import Page
 
 from web_agent.actuator import human_like_click, human_like_type, scroll, think
+from web_agent.llm import Action, LLMClient
 from web_agent.perceiver import Mark, perceive
-from web_agent.planner import Action, plan
 from web_agent.trace import Step, Trace, end_task, init_db, start_task, write_step
 
 
@@ -22,8 +21,7 @@ def _find_mark(marks: list[Mark], mark_id: int) -> Mark | None:
 
 async def run_react_loop(
     page: Page,
-    client: AsyncAnthropic,
-    model: str,
+    client: LLMClient,
     goal: str,
     max_steps: int = 20,
     db_path: Path = Path("data/trace.db"),
@@ -48,8 +46,8 @@ async def run_react_loop(
 
             print(f"\n[step {step_i}] perceive: {len(marks)} marks, screenshot {shot_path}")
 
-            action: Action = await plan(client, model, goal, screenshot_b64, marks, trace)
-            print(f"[step {step_i}] action: {action.type} {action.args} | thought: {action.thought[:120]}")
+            action: Action = await client.plan(goal, screenshot_b64, marks, trace)
+            print(f"[step {step_i}] action ({client.name}): {action.type} {action.args} | thought: {action.thought[:120]}")
 
             obs = ""
             if action.type == "click":

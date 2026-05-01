@@ -1,4 +1,4 @@
-"""组合根：装配 browser + planner + loop，对外暴露 run_task / main entry。"""
+"""组合根：装配 browser + llm + loop，对外暴露 run_task / main entry。"""
 
 from __future__ import annotations
 
@@ -11,8 +11,8 @@ from dotenv import load_dotenv
 from playwright.async_api import async_playwright
 
 from web_agent.browser import apply_stealth, connect
+from web_agent.llm import make_client
 from web_agent.loop import run_react_loop
-from web_agent.planner import make_client
 
 
 async def run_task(
@@ -20,11 +20,11 @@ async def run_task(
     start_url: str | None = None,
     max_steps: int | None = None,
     cdp_url: str | None = None,
+    provider: str | None = None,
     model: str | None = None,
 ) -> str:
     load_dotenv()
     cdp_url = cdp_url or os.environ.get("WEB_AGENT_CDP_URL", "http://localhost:9222")
-    model = model or os.environ.get("WEB_AGENT_MODEL", "claude-sonnet-4-6")
     if max_steps is None:
         max_steps = int(os.environ.get("WEB_AGENT_MAX_STEPS", "20"))
 
@@ -43,11 +43,11 @@ async def run_task(
             print(f"[cli] navigating to {start_url}")
             await page.goto(start_url, wait_until="domcontentloaded")
 
-        client = make_client()
+        client = make_client(provider=provider, model=model)
+        print(f"[cli] LLM provider={client.name} model={client.model}")
         result = await run_react_loop(
             page=page,
             client=client,
-            model=model,
             goal=goal,
             max_steps=max_steps,
             db_path=Path("data/trace.db"),
@@ -62,6 +62,7 @@ def main() -> None:
     parser.add_argument("--url", default=None, help="起始 URL（可选）")
     parser.add_argument("--max-steps", type=int, default=None)
     parser.add_argument("--cdp-url", default=None, help="覆盖 WEB_AGENT_CDP_URL（默认 http://localhost:9222）")
+    parser.add_argument("--provider", default=None, help="覆盖 WEB_AGENT_LLM_PROVIDER（anthropic/openai）")
     parser.add_argument("--model", default=None, help="覆盖 WEB_AGENT_MODEL")
     args = parser.parse_args()
 
@@ -71,6 +72,7 @@ def main() -> None:
             start_url=args.url,
             max_steps=args.max_steps,
             cdp_url=args.cdp_url,
+            provider=args.provider,
             model=args.model,
         )
     )
