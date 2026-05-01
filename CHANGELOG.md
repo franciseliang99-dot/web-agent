@@ -2,6 +2,14 @@
 
 All notable changes to web-agent. 版本号遵循 SemVer 简化形式（V<major>.<minor>.<patch>）。
 
+## [0.4.3] - 2026-05-01
+
+### Fixed
+- 默认 CDP URL `http://localhost:9222` → `http://127.0.0.1:9222`（browser.py / cli.py / .env.example）
+  - 部分 Linux 发行版（含 Ubuntu 22.04+）IPv6 优先，`localhost` resolve 到 `::1`，但 chrome `--remote-debugging-port` 只 listen IPv4 → `ECONNREFUSED ::1:9222`
+  - 实测 W2-B demo 跑出错的根因
+- 用户可通过 WEB_AGENT_CDP_URL env 覆盖（如需 IPv6 端点 / 远程 chrome）
+
 ## [0.4.2] - 2026-05-01
 
 ### Added

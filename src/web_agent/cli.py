@@ -24,7 +24,7 @@ async def run_task(
     model: str | None = None,
 ) -> str:
     load_dotenv()
-    cdp_url = cdp_url or os.environ.get("WEB_AGENT_CDP_URL", "http://localhost:9222")
+    cdp_url = cdp_url or os.environ.get("WEB_AGENT_CDP_URL", "http://127.0.0.1:9222")
     if max_steps is None:
         max_steps = int(os.environ.get("WEB_AGENT_MAX_STEPS", "20"))
 

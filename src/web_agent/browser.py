@@ -7,11 +7,15 @@ from playwright.async_api import Browser, BrowserContext, Page, Playwright
 
 async def connect(
     p: Playwright,
-    cdp_url: str = "http://localhost:9222",
+    cdp_url: str = "http://127.0.0.1:9222",
 ) -> tuple[Browser, BrowserContext, Page]:
     """连接已启动的 Chrome 调试端口，返回 (browser, context, page)。
 
     用户必须先在终端跑 `bash scripts/start_chrome.sh` 启动带 9222 端口的 Chrome。
+
+    注：默认用 127.0.0.1 而非 localhost — 部分 Linux 发行版 IPv6 优先，
+    `localhost` 会 resolve 到 ::1，但 chrome `--remote-debugging-port` 只 listen IPv4。
+    用户可通过 WEB_AGENT_CDP_URL env 覆盖（cli.py 读）。
     """
     browser = await p.chromium.connect_over_cdp(cdp_url)
     if not browser.contexts:
