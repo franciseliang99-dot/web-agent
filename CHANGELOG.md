@@ -2,6 +2,30 @@
 
 All notable changes to web-agent. 版本号遵循 SemVer 简化形式（V<major>.<minor>.<patch>）。
 
+## [0.2.0] - 2026-05-01
+
+### Added
+- `src/web_agent/llm/openai.py` — `OpenAIClient` 实现 LLMClient Protocol
+  - vision: `image_url` 内嵌 base64 data URL，`detail: high` 保 SoM 编号清晰度
+  - tool-use: strict mode (`additionalProperties:false` + 全字段进 required + `function.strict:true`)
+  - `tool_choice="required"` 强制工具调用
+  - `max_completion_tokens` (GPT-5.x 系列参数)
+  - 自动 prompt caching（OpenAI ≥1024 token 前缀匹配，无需显式 cache_control）
+  - 接 `OPENAI_BASE_URL` env：支持 OpenRouter OpenAI skin / 自部署 LiteLLM / Azure OpenAI
+  - DEFAULT_MODEL = `gpt-5.5`（2026-04-24 release）
+- `pyproject.toml::[project.optional-dependencies]`：`openai = ["openai>=2.33,<3"]`，`uv sync --extra openai` 按需装
+- `tests/test_llm_openai.py` 6 个新测试（pytest.importorskip 让未装 openai 时整文件跳过）
+- `.env.example` 加 OPENAI_API_KEY / OPENAI_BASE_URL / WEB_AGENT_LLM_PROVIDER 注释
+- `README.md` 加 「BYO LLM API key」 节，覆盖 Anthropic / OpenAI / OpenRouter / 自部署 LiteLLM 4 种用法
+
+### Why
+- 用户问「可以用其他 LLM 的 API key 吗」 → 选路线 B（自抽 LLMClient Protocol）
+- W1 范围 = Anthropic + OpenAI 两家：Gemini cache+schema 差异最大，硬塞会让 Protocol 抽象设计被 Gemini 反向绑架，留 `provider_from_model` 推断位 + factory raise 友好报错，等真用户提需求再实现 GeminiClient
+
+### Compatibility
+- 完全向后兼容：未设 OPENAI_API_KEY / WEB_AGENT_LLM_PROVIDER 时默认走 Anthropic，与 V0.1.x 行为一致
+- 不装 openai 可选依赖时：`make_client(provider="openai")` 抛 RuntimeError 提示「uv sync --extra openai」
+
 ## [0.1.2] - 2026-05-01
 
 ### Refactored

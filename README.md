@@ -6,7 +6,7 @@ MultiOn 风格的「高度模仿人操作网页」AI web agent。
 
 ## 当前状态
 
-V0.1.0 (2026-05-01) — 骨架 + Wikipedia W1 demo
+V0.2.0 (2026-05-01) — 骨架 + Wikipedia W1 demo + 多 LLM 支持 (Anthropic / OpenAI)
 
 ## 栈
 
@@ -53,6 +53,44 @@ uv run web-agent "在维基百科搜量子纠缠并提取首段" --url https://z
 - **W2**: GitHub 搜 repo + 看 README; 拟人精度升级（3 阶贝塞尔 + 正态键入 + 偶尔纠错）
 - **W3**: 登录态场景（Gmail 总结）+ 授权确认 UI（`safety.py` 白名单：付款/发件/密码/DELETE）
 - **W4**: 多步真实任务 + replay 日志面板 + Cloudflare Turnstile 接管 UI
+
+## BYO LLM API key
+
+通过 `LLMClient` Protocol 支持多 provider，按 env 选：
+
+```bash
+# === Anthropic Claude（默认）===
+ANTHROPIC_API_KEY=sk-ant-...
+WEB_AGENT_MODEL=claude-sonnet-4-6      # 可选
+
+# === OpenAI GPT（先装可选依赖）===
+# uv sync --extra openai
+OPENAI_API_KEY=sk-...
+WEB_AGENT_LLM_PROVIDER=openai          # 显式指定，或省略让 model 名前缀自动推断
+WEB_AGENT_MODEL=gpt-5.5                 # 或 gpt-4o / o3-vision...
+
+# === 走代理（OpenRouter / 自部署 LiteLLM / Azure OpenAI）===
+ANTHROPIC_BASE_URL=https://openrouter.ai/api
+ANTHROPIC_API_KEY=sk-or-v1-...        # OpenRouter key
+WEB_AGENT_MODEL=anthropic/claude-sonnet-4.6
+# 或 OpenAI 风格代理
+OPENAI_BASE_URL=https://openrouter.ai/api/v1
+OPENAI_API_KEY=sk-or-v1-...
+WEB_AGENT_LLM_PROVIDER=openai
+WEB_AGENT_MODEL=openai/gpt-4o
+```
+
+CLI 也可临时覆盖：
+
+```bash
+uv run web-agent "..." --provider openai --model gpt-5.5
+```
+
+provider 自动推断规则（`provider_from_model`）：
+- `claude-*`, `anthropic/*` → anthropic
+- `gpt-*`, `o[1-5]-*`, `openai/*` → openai
+- `gemini-*` → gemini（暂未实现 client，留扩展位）
+- 其他 → 默认 anthropic
 
 ## 反检测层（按需升级）
 

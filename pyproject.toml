@@ -4,8 +4,8 @@ build-backend = "hatchling.build"
 
 [project]
 name = "web-agent"
-version = "0.1.2"
-description = "MultiOn-style 高度拟人 AI web agent (Python + Playwright + VLM/SoM + stealth)"
+version = "0.2.0"
+description = "MultiOn-style 高度拟人 AI web agent (Python + Playwright + VLM/SoM + stealth, multi-LLM)"
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
@@ -15,6 +15,10 @@ dependencies = [
     "pillow>=10.4",
     "python-dotenv>=1.0",
 ]
+
+[project.optional-dependencies]
+openai = ["openai>=2.33,<3"]
+all = ["openai>=2.33,<3"]
 
 [project.scripts]
 web-agent = "web_agent.cli:main"
