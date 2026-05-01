@@ -5,6 +5,8 @@
 兼容补丁：检测到 base_url 含 "moonshot"（Kimi 国际/国内端点）时，自动：
 - `max_completion_tokens` → `max_tokens`（Kimi 不识 GPT-5.x 新参数名）
 - `tool_choice="required"` → `tool_choice="auto"`（Kimi 不支持 required，会拒）
+- 加 `extra_body={"thinking": {"type": "disabled"}}` 关 thinking 模式（K2.6/K2.5 默认开）；
+  Moonshot 官方对 tool-heavy agent flow 推荐关 thinking（reasoning_content 会吃光 max_tokens）
 
 注：OpenAI prompt caching 是自动的（≥1024 token 前缀匹配），无需显式 cache_control；
 Kimi 也是自动 cache，命中后 ~6× 折扣。
@@ -78,8 +80,11 @@ class OpenAIClient:
             "tools": self._tools,
         }
         if self._is_kimi:
-            kwargs["max_tokens"] = 2048
+            # Kimi K2.6/K2.5 默认开 thinking mode，reasoning_content 会吃光 max_tokens 导致没机会
+            # emit tool_call。Moonshot 官方对 tool-heavy agent flow 推荐关 thinking。
+            kwargs["max_tokens"] = 4096
             kwargs["tool_choice"] = "auto"
+            kwargs["extra_body"] = {"thinking": {"type": "disabled"}}
         else:
             kwargs["max_completion_tokens"] = 2048
             kwargs["tool_choice"] = "required"
@@ -87,7 +92,14 @@ class OpenAIClient:
 
         msg = resp.choices[0].message
         if not msg.tool_calls:
-            raise RuntimeError(f"OpenAI 没返回 tool_call: {msg!r}")
+            # Kimi thinking 模式下偶尔 reasoning 占满 token 没吐 tool_call。
+            # 用 reasoning_content / content 作为提示信息抛 RuntimeError 让 loop 重试或上抛。
+            reasoning = getattr(msg, "reasoning_content", None) or ""
+            preview = (reasoning or msg.content or "").strip()[:300]
+            raise RuntimeError(
+                f"{self.name}({self.model}) 没返回 tool_call（可能 thinking 占满 max_tokens）。"
+                f"reasoning/content 预览: {preview!r}"
+            )
         call = msg.tool_calls[0]
         args = json.loads(call.function.arguments)
         thought = args.pop("thought", "")
