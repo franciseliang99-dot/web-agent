@@ -2,6 +2,17 @@
 
 All notable changes to web-agent. 版本号遵循 SemVer 简化形式（V<major>.<minor>.<patch>）。
 
+## [0.1.1] - 2026-05-01
+
+### Refactored
+- `loop.py::_find_mark`: for-loop → `next(generator, None)`（5 行 → 1 行）
+- `loop.py::run_react_loop`: 合并 `done` 分支与底部统一的 `Step` 写入路径，去掉 10 行重复构造（`done` 分支只设 `obs=result`，落到统一 write_step 后用 `if action.type == "done"` 收尾 end_task）
+
+行为零变化：done 路径仍写一次 Step、调一次 end_task、返回同样 result。pytest 2/2 仍绿。
+
+### Why
+- 由 simplify subagent 触发的代码质量审查；其余 simplify 候选（jitter_sleep helper、_env_int helper、Action enum 等）经评估属过度抽象未采纳
+
 ## [0.1.0] - 2026-05-01
 
 ### Added

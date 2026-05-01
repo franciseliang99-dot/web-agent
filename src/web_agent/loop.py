@@ -17,10 +17,7 @@ from web_agent.trace import Step, Trace, end_task, init_db, start_task, write_st
 
 
 def _find_mark(marks: list[Mark], mark_id: int) -> Mark | None:
-    for m in marks:
-        if m.id == mark_id:
-            return m
-    return None
+    return next((m for m in marks if m.id == mark_id), None)
 
 
 async def run_react_loop(
@@ -89,19 +86,7 @@ async def run_react_loop(
 
             elif action.type == "done":
                 result = action.args.get("result", "")
-                step = Step(
-                    step=step_i,
-                    ts=time.time(),
-                    thought=action.thought,
-                    action_type=action.type,
-                    action_args=action.args,
-                    observation=result,
-                )
-                trace.append(step)
-                write_step(conn, task_id, step, str(shot_path))
-                end_task(conn, task_id, result)
-                print(f"\n[done] {result[:200]}")
-                return result
+                obs = result
             else:
                 obs = f"unknown action type: {action.type}"
 
@@ -115,6 +100,11 @@ async def run_react_loop(
             )
             trace.append(step)
             write_step(conn, task_id, step, str(shot_path))
+
+            if action.type == "done":
+                end_task(conn, task_id, result)
+                print(f"\n[done] {result[:200]}")
+                return result
 
         result = "(max_steps 耗尽未完成)"
         end_task(conn, task_id, result)
