@@ -2,6 +2,19 @@
 
 All notable changes to web-agent. 版本号遵循 SemVer 简化形式（V<major>.<minor>.<patch>）。
 
+## [0.4.2] - 2026-05-01
+
+### Added
+- `demos/github_search.py` — W2-B 第二个 demo：在 GitHub 搜 repo → 切「Most stars」排序 → 进第一个 repo → 提取 star 数 + README 一句话简介
+  - 验证非 Wikipedia 站（GitHub SPA 路由 / 动态加载 / 多 step 任务）
+  - max_steps=18（W1 是 12，W2-B 估 7-10 步留 80% 余量）
+  - 复用现有 stack 不动 actuator / perceiver / loop / llm
+
+### Why
+- W1 (Wikipedia) 验证了 stack 在传统多页面 + form submit 站工作，但 SPA 路由 / 动态加载 / 多步任务 / sort UI 切换都没碰过
+- W2-B 用 GitHub 这种"反 bot 弱 + 全 SPA + 真实生产 UI"的典型站，最快暴露 stack 边界
+- 故意先单 commit 提 demo（不动核心代码），跑出失败再决定要不要 patch loop（SPA wait_for_load_state 可能不准）/ perceiver（README 区域 marks 过多）
+
 ## [0.4.1] - 2026-05-01
 
 ### Refactored
