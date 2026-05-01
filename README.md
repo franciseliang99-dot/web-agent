@@ -35,6 +35,18 @@ cp .env.example .env
 bash scripts/start_chrome.sh
 ```
 
+脚本默认 `CHROME_MODE=auto`，按环境自选：
+
+| 环境 | 自动选 | 说明 |
+|---|---|---|
+| 装了 `xvfb` | **xvfb**（推荐）| 虚拟 X server，Chrome 拿到的所有 API 与有界面一致，符合反爬"非 headless"偏好 |
+| 设了 `$DISPLAY`（本机 GUI / `ssh -X`）| headed | 有界面 Chrome |
+| 都没（SSH 无 GUI 裸服）| **headless** | `--headless=new`，零依赖，能跑普通站；CDP 指纹仍可被 Cloudflare/DataDome 识别 |
+
+显式覆盖：`CHROME_MODE=xvfb bash scripts/start_chrome.sh`（或 `headless`/`headed`）。
+
+**SSH headless server 推荐**：先 `sudo apt install xvfb`，之后 auto 自动升级到 xvfb；不想装也行，默认 fallback 到 `--headless=new` 跑普通站没问题。
+
 终端 B — 跑 demo：
 
 ```bash
