@@ -19,7 +19,7 @@ class Mark:
 
 _SOM_INJECT_JS = """
 () => {
-  const sel = 'a, button, input, textarea, select, [role="button"], [role="link"], [role="textbox"], [role="checkbox"], [role="tab"], [contenteditable="true"]';
+  const sel = 'a, button, input, textarea, select, [role="button"], [role="link"], [role="textbox"], [role="checkbox"], [role="tab"], [role="menuitem"], [role="menuitemradio"], [role="menuitemcheckbox"], [role="option"], [role="combobox"], [role="switch"], [role="radio"], [contenteditable="true"]';
   const all = Array.from(document.querySelectorAll(sel));
   const els = all.filter(e => {
     const r = e.getBoundingClientRect();

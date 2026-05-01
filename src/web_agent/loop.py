@@ -3,8 +3,10 @@
 from __future__ import annotations
 
 import base64
+import json
 import time
 import uuid
+from collections import deque
 from pathlib import Path
 
 from playwright.async_api import Page
@@ -17,6 +19,11 @@ from web_agent.trace import Step, Trace, end_task, init_db, start_task, write_st
 
 def _find_mark(marks: list[Mark], mark_id: int) -> Mark | None:
     return next((m for m in marks if m.id == mark_id), None)
+
+
+def _action_signature(action: Action) -> str:
+    """归一化 action 用于死循环检测。"""
+    return f"{action.type}:{json.dumps(action.args, sort_keys=True, ensure_ascii=False)}"
 
 
 async def run_react_loop(
@@ -34,6 +41,7 @@ async def run_react_loop(
     screenshots_dir.mkdir(parents=True, exist_ok=True)
 
     trace = Trace(task_id=task_id, goal=goal)
+    recent_actions: deque[str] = deque(maxlen=3)
     result = "(no result)"
 
     try:
@@ -48,6 +56,26 @@ async def run_react_loop(
 
             action: Action = await client.plan(goal, screenshot_b64, marks, trace)
             print(f"[step {step_i}] action ({client.name}): {action.type} {action.args} | thought: {action.thought[:120]}")
+
+            # 死循环检测：连续 3 次完全相同 action（type + args）→ abort
+            sig = _action_signature(action)
+            if len(recent_actions) == 3 and all(s == sig for s in recent_actions):
+                result = (
+                    f"LOOP_DETECTED 在 step {step_i}：连续 3+ 次同一 action {sig[:200]}。"
+                    f"agent 卡死, 已强制中止。常见原因：SoM 没标到目标元素 / "
+                    f"页面状态未按 LLM 预期变化 / system prompt 没说服 LLM 换策略。"
+                )
+                print(f"\n[anti-loop] {result}")
+                step = Step(
+                    step=step_i, ts=time.time(), thought=action.thought,
+                    action_type=action.type, action_args=action.args,
+                    observation="LOOP_DETECTED — aborted",
+                )
+                trace.append(step)
+                write_step(conn, task_id, step, str(shot_path))
+                end_task(conn, task_id, result)
+                return result
+            recent_actions.append(sig)
 
             obs = ""
             if action.type == "click":

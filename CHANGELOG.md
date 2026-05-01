@@ -2,6 +2,29 @@
 
 All notable changes to web-agent. 版本号遵循 SemVer 简化形式（V<major>.<minor>.<patch>）。
 
+## [0.5.0] - 2026-05-01
+
+### Added
+- **perceiver SoM 选择器扩展**：原 selector 漏 menu/option/combobox 类 ARIA role，导致 GitHub sort dropdown 等 React 复杂组件展开后 LLM 看到选项但元素清单里没编号 → 死循环
+  - 新增 role：`menuitem`, `menuitemradio`, `menuitemcheckbox`, `option`, `combobox`, `switch`, `radio`
+  - 与原有 `button/link/textbox/checkbox/tab` + `a/button/input/textarea/select` 合并
+
+- **loop 死循环检测**（loop.py 新 helper `_action_signature` + `recent_actions deque(maxlen=3)`）：
+  - 连续 3 次完全相同 action（type + args，忽略 thought）→ 强制 abort + 写 trace + 友好错误信息
+  - signature 归一化：`type:json(args, sort_keys=True)`，args key 顺序不影响判定
+  - 错误消息包含常见根因提示（SoM 漏标 / 页面未按预期变化 / prompt 没说服 LLM 换策略）
+
+- `tests/test_loop_anti_loop.py` 5 个 signature 单测（identical / mark_id 差异 / type 差异 / arg key order 不变 / 中文不乱码）
+
+### Why
+- 实测 W2-B GitHub demo 第二次跑 click mark_id 30 重复 14 次（LLM 想点"Most stars"但 dropdown 选项没被 SoM mark）
+- system prompt 写了"连续 2 步无变化换策略"但 LLM 没遵守 → loop 必须有硬性 guard，不能完全信赖 LLM 自律
+
+### Compatibility
+- 行为变化：LLM 自我循环（同一 action 3 次）会被 abort，而非耗尽 max_steps —— user-facing 改善（更早返回 + 更精确错误消息）→ minor bump 0.5.0
+- 公共函数签名 100% 不变；Action 类不变；CLI/demo 不需改
+- 新 SoM role 仅扩展覆盖，不影响原本就被 mark 的元素
+
 ## [0.4.4] - 2026-05-01
 
 ### Fixed
