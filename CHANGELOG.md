@@ -2,6 +2,30 @@
 
 All notable changes to web-agent. 版本号遵循 SemVer 简化形式（V<major>.<minor>.<patch>）。
 
+## [0.6.2] - 2026-05-01
+
+### Added (W3-B Gmail demo + smoke test)
+- **`demos/gmail_summary.py`** — read-only 任务: 读取 Gmail 收件箱 Primary tab 最新 5 封邮件的发件人 + 主题
+  - 前置检测 `_check_logged_in()`：goto Gmail 看 URL 是否跳到 accounts.google.com / signin / mail.google.com/about / "browser may not be secure" → fail-fast 打印登录指引并 exit 2，不浪费 LLM token
+  - goal 钉死「Primary tab 不看 Promotions/Social」+「禁止点击任何邮件行 / archive / delete / mark-read」防 LLM 误操作
+  - max_steps=15（W2-B 是 18，read-only Gmail 估 5-7 步路径 + 8 步 buffer 给 Loading retry）
+  - 不动 stack：完全靠现有 V0.6.1 (safety + actuator + loop + perceiver) 跑通
+- **`tests/test_demos_smoke.py`** — 每个 demo 文件 import + main 是 async coroutine factory 零成本验证
+  - 用 `importlib.util.spec_from_file_location` 从 demos/ 路径直接 load（demos/ 不在 src layout）
+  - 不跑 main()，挡住 demo 静默腐烂（如未来 `run_task` 签名变了）
+  - 覆盖 3 个 demo: wikipedia_search / github_search / gmail_summary
+
+### Why
+- W3-A safety 完成需要一个 read-only 真实场景验证不误拦 + 验证登录态持久化路径
+- Gmail 是「重 SPA + 用户登录态 + Google 反 bot」三轴最严苛站点，比 Wikipedia/GitHub 上一档
+- subagent 评估：read-only 单跑 Gmail 即可暴露所有新轴；写操作（archive/mark-read）单独 W3-C 测 safety auto_approve 流程
+- 不抽 `require_login` helper（YAGNI，N=1）
+- 不预先改 perceiver 加 Loading retry（failure-driven，先跑看真实失败）
+
+### Limitations
+- **Google `--headless=new` 反 bot 检测最狠**，subagent 警告即使 cookies 有效首次进 mail.google.com 仍可能弹 "browser may not be secure"
+- demo 已加 fail-fast 检测，不会浪费 LLM token；用户看到提示后按 README 方式登录即可
+
 ## [0.6.1] - 2026-05-01
 
 ### Refactored (V0.6.0 simplify pass)
