@@ -1,4 +1,4 @@
-"""中性工具 schema 定义 + 各 provider 格式转换 + 共享 SYSTEM_PROMPT。
+"""中性工具 schema 定义 + 各 provider 格式转换 + 共享 SYSTEM_PROMPT + user-text 构造。
 
 业务工具语义（5 个 action）写一份中性 dict（接近 JSON Schema 通用子集），
 各 provider client 内部转换为自己的格式：
@@ -9,7 +9,11 @@
 
 from __future__ import annotations
 
+import json
 from typing import Any
+
+from web_agent.perceiver import Mark, marks_to_text
+from web_agent.trace import Trace
 
 SYSTEM_PROMPT = """你是一个高度拟人的浏览器自动化 agent。每步给你当前页面的标注截图（每个可交互元素都有彩色边框 + 数字 ID）和元素清单，请按以下规则输出下一步操作：
 
@@ -132,3 +136,22 @@ def to_openai_tools(
             tool["function"]["strict"] = True
         tools.append(tool)
     return tools
+
+
+def build_user_text(goal: str, marks: list[Mark], trace: Trace) -> str:
+    """构造各 provider plan() 通用的 user 消息 text 部分（截图 image block 由各 client 自己拼）。
+
+    包括 goal、历史 trace JSON 序列化、当前 SoM 元素清单。Anthropic 和 OpenAI 共用此文本，
+    差异只在 image content block 格式（Anthropic source.base64 vs OpenAI image_url data: URL）。
+    """
+    history_text = (
+        json.dumps(trace.for_llm(), ensure_ascii=False, indent=2)
+        if trace.steps
+        else "(空)"
+    )
+    return (
+        f"# 任务目标\n{goal}\n\n"
+        f"# 历史 Action Trace\n{history_text}\n\n"
+        f"# 当前可交互元素清单（编号对应截图边框）\n{marks_to_text(marks)}\n\n"
+        f"请通过 tool 返回下一步操作。"
+    )

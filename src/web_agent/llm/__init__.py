@@ -26,12 +26,16 @@ def provider_from_model(model: str) -> str:
         return "openai"
     if m.startswith("gemini"):
         return "gemini"
-    if "/" in m:  # OpenRouter 风格 "anthropic/claude-..." → 走 anthropic skin
+    if "/" in m:  # OpenRouter 风格 "anthropic/claude-..." → 走对应 skin
         prefix = m.split("/", 1)[0]
-        if prefix in ("anthropic", "openai", "google", "gemini"):
-            return "anthropic" if prefix == "anthropic" else (
-                "openai" if prefix == "openai" else "gemini"
-            )
+        openrouter_map = {
+            "anthropic": "anthropic",
+            "openai": "openai",
+            "google": "gemini",
+            "gemini": "gemini",
+        }
+        if prefix in openrouter_map:
+            return openrouter_map[prefix]
     return "anthropic"
 
 

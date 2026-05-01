@@ -12,9 +12,9 @@ import os
 
 from openai import AsyncOpenAI
 
-from web_agent.llm._schema import SYSTEM_PROMPT, to_openai_tools
+from web_agent.llm._schema import SYSTEM_PROMPT, build_user_text, to_openai_tools
 from web_agent.llm.base import Action
-from web_agent.perceiver import Mark, marks_to_text
+from web_agent.perceiver import Mark
 from web_agent.trace import Trace
 
 DEFAULT_MODEL = "gpt-5.5"  # 2026-04-24 release，vision-capable；用户可 override
@@ -51,11 +51,6 @@ class OpenAIClient:
         marks: list[Mark],
         trace: Trace,
     ) -> Action:
-        history_text = (
-            json.dumps(trace.for_llm(), ensure_ascii=False, indent=2)
-            if trace.steps
-            else "(空)"
-        )
         user_content: list[dict] = [
             {
                 "type": "image_url",
@@ -64,15 +59,7 @@ class OpenAIClient:
                     "detail": "high",  # 'low' 省 token 但 SoM 编号易看不清；'high' 更稳
                 },
             },
-            {
-                "type": "text",
-                "text": (
-                    f"# 任务目标\n{goal}\n\n"
-                    f"# 历史 Action Trace\n{history_text}\n\n"
-                    f"# 当前可交互元素清单（编号对应截图边框）\n{marks_to_text(marks)}\n\n"
-                    f"请通过 tool 返回下一步操作。"
-                ),
-            },
+            {"type": "text", "text": build_user_text(goal, marks, trace)},
         ]
 
         resp = await self._client.chat.completions.create(
