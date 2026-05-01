@@ -2,6 +2,27 @@
 
 All notable changes to web-agent. 版本号遵循 SemVer 简化形式（V<major>.<minor>.<patch>）。
 
+## [0.5.1] - 2026-05-01
+
+### Added
+- **perceiver 自动关 cookie/GDPR/通知弹窗**（`maybe_auto_dismiss` 在 SoM 注入之前执行）：
+  - 容器白名单：必须含 `cookie/consent/gdpr/notif/policy/banner` 关键词（class/id/innerText）
+  - 按钮文本严格 anchored regex 匹配「接受/同意/got it/ok/allow」(中英文)
+  - 黑名单文本（password/sign in/login/pay/支付/付款/checkout/确认订单/delete）→ skip 整个容器，保护 OAuth/付款/真业务 dialog 不被误关
+  - 关弹窗后 wait 300ms 等动画结束再 mark
+- env `WEB_AGENT_AUTO_DISMISS=true`（默认 on，设 false/0/no 关闭）
+- `.env.example` 加注释
+
+### Why
+- W1/W2/W2-B 三个 demo 都浪费 1-2 步在让 LLM 自己识别 cookie banner 关闭，token 浪费
+- 弹窗关闭是机械任务，不该让 LLM 来做；perceive 层 JS 一次扫即可
+- subagent 评估 5 项 reliability ROI 时此项排第一
+
+### Compatibility
+- 默认行为变化：cookie banner 在 perceive 时被自动关；user-facing 表现是「demo 少 1-2 步」+「不会再看到 LLM 跟 cookie banner 较劲」
+- 黑名单保护：含 password/sign in/pay 的 dialog 不被关（OAuth/付款流程安全）
+- 出问题一行 `WEB_AGENT_AUTO_DISMISS=false` 关掉
+
 ## [0.5.0] - 2026-05-01
 
 ### Added
