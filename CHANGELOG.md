@@ -2,6 +2,34 @@
 
 All notable changes to web-agent. 版本号遵循 SemVer 简化形式（V<major>.<minor>.<patch>）。
 
+## [0.4.0] - 2026-05-01
+
+### Changed
+- **拟人 actuator W2 升级**（src/web_agent/actuator.py 全替换 W1 占位实现，参数已按反爬研究 + 打字研究优化）：
+  - **鼠标轨迹**：直线 `page.mouse.move(steps=15-25)` → 3 阶贝塞尔（P0/P3 端点 + P1/P2 在 1/3 和 2/3 处垂直 N(0, jitter*dist) 偏移、clamp ±80px）+ **smootherstep (6t⁵-15t⁴+10t³)** ease（加加速度连续，minimum-jerk 廉价近似，比 smoothstep 更难被反爬识别）
+  - **鼠标起点**：W1 直线 → **WeakKeyDictionary[Page, (x,y)]** 跟踪 per-page 上次落点（连贯轨迹；W3 multi-tab 不串扰；Page GC 后自动清）
+  - **步数自适应**：固定 15-25 → `max(15, min(40, dist/20 + 5-10))`，远距离多走几步
+  - **键入间隔**：uniform(80, 200)ms → 截断正态 N(120, 40)ms ∈ [40, 300]
+  - **键入 typo**：~2% 概率（`typo_rate=0.02`，参考 Salthouse 1986 + IKI 数据集）+ **触发门槛：最近 3 字平均间隔 < 150ms**（慢打字不会频繁错）+ **真人 reaction time 200-400ms 后 backspace**（打错→察觉→删除，不是瞬间退格）
+  - **点击坐标**：均匀 ±5px → 截断正态 std=`max(3, min(w/6, 15))` + 截断到按钮 **90% 内区**（小按钮加底防视觉太集中，大按钮加顶防离散过分；80%→90% 让点击偶尔落到近边缘，更真人）
+  - **滚动**：单次 wheel → 4-7 段 sin 包络 + **段间停顿 50-120ms**（避免连发被反爬识别）+ 末段补差防舍入丢失
+  - 新内部 helper：`_bezier_path` / `_type_delay` / `_is_qwerty_letter`
+  - 新 state：`_last_mouse_pos: WeakKeyDictionary[Page, tuple[float,float]]`
+- **测试重写**（tests/test_actuator.py）：原 2 个 ±5 假设测试废，新 14 个测试覆盖：
+  - `_click_point`: 不出按钮 / 均值居中 / 集中度 >50% 在 ±std 内 / 1px tiny button / 0x0 退化 / 小按钮 std 不退化到 0
+  - `_bezier_path`: 步数 / 端点匹配 / 无突跳 / 零距离 corner case / smootherstep 开始慢 / jitter=0 时 x 单调
+  - `_type_delay`: 截断范围 / 均值近 120ms
+
+### Why
+- 用户技术蓝本核心要求：「鼠标移动不应是直线，使用 n 阶贝塞尔曲线模拟人类手部的微颤和非匀速弧形轨迹」+「按键间隔随机延迟」+「偶尔打错一个字母，然后退格修正」+「点击不要点在几何中心点，而是按钮范围内服从正态分布的随机点」
+- W1 占位实现（直线鼠标 / 均匀间隔 / 中心 ±5）已挂账技术债；W1 demo 跑通后立刻还
+- Plan subagent 反馈优化（jitter 0.15→0.08、smoothstep→smootherstep、typo 0.04→0.02 + 速度门槛 + reaction time、std 公式带底+顶、滚动段间停顿、_last_mouse_pos→WeakKeyDictionary）合并进同一 commit，避免发布已知不优的版本
+
+### Compatibility
+- 公共函数签名 100% 向后兼容：`human_like_click(page, mark)` / `human_like_type(page, text, typo_rate=0.02)` / `scroll(page, dy)` / `think()` — `loop.py` 零改动
+- 新参数 `typo_rate` 有 default，旧调用站点零改动
+- 行为变化：鼠标轨迹明显不同（弧线 vs 直线）、键入会偶现 typo+backspace、滚动有惯性 — user-facing 拟人度提升 → minor bump 0.4.0
+
 ## [0.3.2] - 2026-05-01
 
 ### Fixed
