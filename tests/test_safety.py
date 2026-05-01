@@ -51,7 +51,7 @@ def _type(text: str = "hi") -> Action:
     ("Search", False),
     ("Sender Name", False),  # word boundary 防 "sender" 误撞 "send"
     ("Login", False),
-    ("Submit", True),  # subagent 列出
+    ("Submit", True),
 ])
 def test_click_button_text_english(text, should_block, monkeypatch):
     monkeypatch.delenv("WEB_AGENT_AUTO_APPROVE", raising=False)

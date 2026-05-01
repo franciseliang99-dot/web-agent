@@ -2,6 +2,21 @@
 
 All notable changes to web-agent. 版本号遵循 SemVer 简化形式（V<major>.<minor>.<patch>）。
 
+## [0.6.1] - 2026-05-01
+
+### Refactored (V0.6.0 simplify pass)
+- **`safety.py` 黑名单 patterns 模块加载时 compile**：`_DANGER_BUTTON_PATTERNS` 改 `list[tuple[re.Pattern, str]]`（原 `list[tuple[str, str]]`），与 `_DANGER_INPUT_NAME_RE` 风格一致；avoids per-call re-cache lookup（每步 4 次 → 0 次）
+- **`check()` 4 段 if-命中-then-block 抽 `_block(rule, reason)` helper**：返回 `SafetyDecision | None`，封装 "auto_approve check + 构造 SafetyDecision + 拼 reason 后缀"。check() 函数体 ~80 行 → ~50 行，行为零变化（73/73 仍绿）
+- **`check()` 入口 short-circuit `mark is None`**：把 click/type 两个分支共享的 `mark is not None` guard 上提，减一层缩进
+- **去掉 `tests/test_safety.py` 一行 `# subagent 列出` narrating-the-change comment**
+
+### Why
+- W3-A 落地后例行 simplify 审查；用户列出 4 个候选优化点，2 个采纳（pre-compile + `_block` helper），2 个否（loop.py 5 个 abort 路径仍 "差异 > 共性"；`_DANGER_BUTTON_PATTERNS` 不改 frozenset 因 list 顺序与可读性更重要）
+
+### Compatibility
+- 公共 API 零变化：`check(action, mark, marks)` 签名 + `SafetyDecision` 字段 + 规则名全保留
+- 73/73 测试零修改全过
+
 ## [0.6.0] - 2026-05-01
 
 ### Added (W3-A: 授权白名单层)
