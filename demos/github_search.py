@@ -20,13 +20,15 @@ async def main() -> None:
         sys.exit(1)
     keyword = sys.argv[1]
     goal = (
-        f"在 GitHub 顶部搜索框输入「{keyword}」并提交搜索（回车）。"
+        f"在 GitHub 顶部搜索框输入「{keyword}」并回车提交。"
         f"搜索结果页打开后，找到 Repositories 类别下星数最高的开源 repo——"
-        f"如果默认排序不是按 star，请点击 sort 下拉切到「Most stars」。"
-        f"点击进入排在第一位的 repo 详情页，从 README 区域读取该 repo 的一句话简介（约 30-100 字），"
-        f"同时提取页面顶部显示的 star 数（如「12.5k」）。"
-        f"最终用 done 工具返回结果，格式为: "
-        f"'repo: <owner/name>, stars: <count>, summary: <一句话简介>'"
+        f"如果默认排序不是按 star，点击 sort 下拉切到「Most stars」。"
+        f"点击进入排第一的 repo 详情页。"
+        f"从**右侧 About 区域**读取该 repo 的一句话简介（不必从 README 正文找，About sidebar 的描述就是权威），"
+        f"同时记下 repo 名称（owner/name 形式）和 star 数（如「12.5k」）。"
+        f"**拿到这三个字段后立即用 done 工具返回**，格式为: "
+        f"'repo: <owner/name>, stars: <count>, summary: <一句话简介>'。"
+        f"不要反复 scroll 验证，已经拿到的答案就是答案。"
     )
     result = await run_task(
         goal=goal,

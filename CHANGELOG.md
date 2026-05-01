@@ -2,6 +2,18 @@
 
 All notable changes to web-agent. 版本号遵循 SemVer 简化形式（V<major>.<minor>.<patch>）。
 
+## [0.4.4] - 2026-05-01
+
+### Fixed
+- `demos/github_search.py` goal prompt 调优：W2-B 首次跑跑出"max_steps 耗尽"（实质是 LLM 在 step 6 已拿到答案但反复 scroll 在 README vs About 间纠结）
+  - 改 "从 README 区域读取" → "从右侧 About 区域读取（不必 README 正文，About sidebar 的描述就是权威）"
+  - 加 "拿到三个字段立即用 done 工具，不要反复 scroll 验证"
+  - 不动 system prompt（W1 demo 没这个问题，避免污染通用行为）
+
+### Why
+- LLM extract 工具拿到完整答案后没主动 done，反复确认（典型 over-verification）
+- 通过 demo-specific prompt 指明"哪里是权威 + 何时收手"，比改 system prompt 通用化更安全
+
 ## [0.4.3] - 2026-05-01
 
 ### Fixed
