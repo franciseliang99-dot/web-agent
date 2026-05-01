@@ -19,6 +19,7 @@ async def run_task(
     goal: str,
     start_url: str | None = None,
     max_steps: int | None = None,
+    max_wallclock_s: float | None = None,
     cdp_url: str | None = None,
     provider: str | None = None,
     model: str | None = None,
@@ -27,6 +28,8 @@ async def run_task(
     cdp_url = cdp_url or os.environ.get("WEB_AGENT_CDP_URL", "http://127.0.0.1:9222")
     if max_steps is None:
         max_steps = int(os.environ.get("WEB_AGENT_MAX_STEPS", "20"))
+    if max_wallclock_s is None:
+        max_wallclock_s = float(os.environ.get("WEB_AGENT_MAX_WALLCLOCK_S", "300"))
 
     async with async_playwright() as p:
         browser, ctx, page = await connect(p, cdp_url=cdp_url)
@@ -50,6 +53,7 @@ async def run_task(
             client=client,
             goal=goal,
             max_steps=max_steps,
+            max_wallclock_s=max_wallclock_s,
             db_path=Path("data/trace.db"),
             screenshots_dir=Path("data/screenshots"),
         )
@@ -61,6 +65,7 @@ def main() -> None:
     parser.add_argument("goal", help="自然语言任务描述")
     parser.add_argument("--url", default=None, help="起始 URL（可选）")
     parser.add_argument("--max-steps", type=int, default=None)
+    parser.add_argument("--max-wallclock-s", type=float, default=None, help="覆盖 WEB_AGENT_MAX_WALLCLOCK_S（默认 300s）")
     parser.add_argument("--cdp-url", default=None, help="覆盖 WEB_AGENT_CDP_URL（默认 http://localhost:9222）")
     parser.add_argument("--provider", default=None, help="覆盖 WEB_AGENT_LLM_PROVIDER（anthropic/openai）")
     parser.add_argument("--model", default=None, help="覆盖 WEB_AGENT_MODEL")
@@ -71,6 +76,7 @@ def main() -> None:
             goal=args.goal,
             start_url=args.url,
             max_steps=args.max_steps,
+            max_wallclock_s=args.max_wallclock_s,
             cdp_url=args.cdp_url,
             provider=args.provider,
             model=args.model,

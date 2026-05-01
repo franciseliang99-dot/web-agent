@@ -31,10 +31,17 @@ async def run_react_loop(
     client: LLMClient,
     goal: str,
     max_steps: int = 20,
+    max_wallclock_s: float = 300.0,
     db_path: Path = Path("data/trace.db"),
     screenshots_dir: Path = Path("data/screenshots"),
 ) -> str:
-    """跑 ReAct 循环直到 done 或 max_steps。返回最终结果文本。"""
+    """跑 ReAct 循环直到 done / max_steps / max_wallclock_s / 死循环 / LLM 失败。返回最终结果文本。
+
+    异常处理：
+    - LLM API 失败（SDK 内置 max_retries=4 后仍挂）→ catch + 写 trace + graceful return
+    - wallclock 超时 → 同上，避免卡 perceive/network 比 max_steps 更早 abort
+    - 死循环（连续 3 次同 action）→ 同上
+    """
     task_id = uuid.uuid4().hex[:12]
     conn = init_db(db_path)
     start_task(conn, task_id, goal)
@@ -43,18 +50,45 @@ async def run_react_loop(
     trace = Trace(task_id=task_id, goal=goal)
     recent_actions: deque[str] = deque(maxlen=3)
     result = "(no result)"
+    t_start = time.time()
 
     try:
         for step_i in range(max_steps):
+            elapsed = time.time() - t_start
+            if elapsed > max_wallclock_s:
+                result = (
+                    f"WALLCLOCK_EXCEEDED at step {step_i}: 已 {elapsed:.1f}s 超过 max_wallclock_s={max_wallclock_s}s。"
+                    f"常见原因：perceive/网络卡顿、LLM 响应慢、SDK retry 累积。"
+                )
+                print(f"\n[wallclock] {result}")
+                end_task(conn, task_id, result)
+                return result
+
             await think()
             marks, screenshot_b64 = await perceive(page)
 
             shot_path = screenshots_dir / f"{task_id}-{step_i:02d}.png"
             shot_path.write_bytes(base64.b64decode(screenshot_b64))
 
-            print(f"\n[step {step_i}] perceive: {len(marks)} marks, screenshot {shot_path}")
+            print(f"\n[step {step_i}] perceive: {len(marks)} marks, screenshot {shot_path} | t+{elapsed:.1f}s")
 
-            action: Action = await client.plan(goal, screenshot_b64, marks, trace)
+            try:
+                action: Action = await client.plan(goal, screenshot_b64, marks, trace)
+            except Exception as e:
+                # SDK 内置 retry 已耗尽 / network / tool_call=None / 其他 LLM 异常
+                result = (
+                    f"LLM_FAILED at step {step_i}: {type(e).__name__}: {e}"
+                )
+                print(f"\n[llm-failed] {result}")
+                step = Step(
+                    step=step_i, ts=time.time(), thought="(LLM 调用失败)",
+                    action_type="error", action_args={"error": str(e)[:200]},
+                    observation=result,
+                )
+                trace.append(step)
+                write_step(conn, task_id, step, str(shot_path))
+                end_task(conn, task_id, result)
+                return result
             print(f"[step {step_i}] action ({client.name}): {action.type} {action.args} | thought: {action.thought[:120]}")
 
             # 死循环检测：连续 3 次完全相同 action（type + args）→ abort

@@ -33,7 +33,7 @@ class AnthropicClient:
             raise RuntimeError(
                 "ANTHROPIC_API_KEY 未设置 — 请填 .env 或 export 环境变量"
             )
-        kwargs: dict = {"api_key": api_key}
+        kwargs: dict = {"api_key": api_key, "max_retries": 4, "timeout": 120.0}
         base_url = base_url or os.environ.get("ANTHROPIC_BASE_URL")
         if base_url:
             kwargs["base_url"] = base_url

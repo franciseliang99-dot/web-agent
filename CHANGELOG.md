@@ -2,6 +2,31 @@
 
 All notable changes to web-agent. 版本号遵循 SemVer 简化形式（V<major>.<minor>.<patch>）。
 
+## [0.5.2] - 2026-05-01
+
+### Added
+- **LLM SDK retry + timeout 调宽**：AnthropicClient / OpenAIClient `__init__` 显式传 `max_retries=4, timeout=120.0` 给 AsyncAnthropic/AsyncOpenAI（原本依赖 SDK default：anthropic max_retries=2/timeout=NOT_GIVEN，openai max_retries=2/timeout=600s）
+  - 4 次指数退避（2/4/8/16s）覆盖大部分网络抖动
+  - 120s 单调用上限，避免 OpenAI default 600s 让 agent 一步等 10 分钟
+- **loop wallclock guard**：`run_react_loop` 加 `max_wallclock_s: float = 300.0` 参数
+  - 每 step 开头 check `time.time() - t_start > max_wallclock_s` → graceful abort + 写 trace
+  - 防御 SDK retry + perceive 卡顿累积超过 max_steps × 平均步耗时
+  - cli/run_task 加 `max_wallclock_s` 参数 + `--max-wallclock-s` CLI flag + env `WEB_AGENT_MAX_WALLCLOCK_S=300`
+- **loop LLM 异常 graceful capture**：`await client.plan(...)` 包 try/except Exception
+  - SDK retries 耗尽 / network / tool_call=None / 任何 LLM 侧异常 → 写 trace `Step(action_type="error", ...)` + 友好错误信息 + 优雅返回
+  - 之前会 raise 直接逃出 try/finally 外层让用户看 traceback
+- 每 step 打印 `t+<elapsed>s` 便于排查耗时分布
+
+### Why
+- subagent 评估 5 项 reliability ROI：弹窗自动关 + LLM retry 排前两名（V0.5.1 + V0.5.2 各一）
+- LLM API 终极失败时整个 task 挂掉用户体验差；SDK 内置 retry 够用，loop 层只补 catch + wallclock
+- subagent 关键调整：不在 loop 写自定义 retry 循环（避免 retry × retry 雪上加霜），SDK max_retries 调宽更干净
+
+### Compatibility
+- 公共函数签名加新参数（默认值兼容旧调用站点）：`run_task(max_wallclock_s=None)`、`run_react_loop(max_wallclock_s=300.0)`
+- demo/CLI 不需改（默认值生效）
+- 行为变化：LLM 失败 / 卡 5 分钟以上 → 返回字符串而非 raise，更易脚本化
+
 ## [0.5.1] - 2026-05-01
 
 ### Added
