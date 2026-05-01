@@ -16,6 +16,9 @@ class Mark:
     role: str
     text: str
     bbox: dict  # {x, y, w, h}（相对页面坐标，含 scroll）
+    input_type: str = ""  # input.type（password/tel/text/email/...），仅 input 标签有
+    name: str = ""  # input.name 或 input.id（用于敏感字段名匹配 amount/cvv/...）
+    href: str = ""  # a.href（绝对 URL），仅 a 标签有
 
 
 _SOM_INJECT_JS = """
@@ -58,9 +61,10 @@ _SOM_INJECT_JS = """
     document.body.appendChild(box);
     document.body.appendChild(tag);
     const text = (el.innerText || el.value || el.placeholder || el.getAttribute('aria-label') || '') + '';
+    const tagName = el.tagName.toLowerCase();
     return {
       id,
-      tag: el.tagName.toLowerCase(),
+      tag: tagName,
       role: el.getAttribute('role') || '',
       text: text.trim().slice(0, 80),
       bbox: {
@@ -69,6 +73,9 @@ _SOM_INJECT_JS = """
         w: r.width,
         h: r.height,
       },
+      input_type: tagName === 'input' ? (el.type || '') : '',
+      name: el.name || el.id || '',
+      href: tagName === 'a' ? (el.href || '') : '',
     };
   });
 }
@@ -144,7 +151,10 @@ async def perceive(page: Page) -> tuple[list[Mark], str]:
         print(f"[perceive] auto-dismissed {len(dismissed)} popup(s): {dismissed}")
     raw = await page.evaluate(_SOM_INJECT_JS)
     marks = [
-        Mark(id=m["id"], tag=m["tag"], role=m["role"], text=m["text"], bbox=m["bbox"])
+        Mark(
+            id=m["id"], tag=m["tag"], role=m["role"], text=m["text"], bbox=m["bbox"],
+            input_type=m.get("input_type", ""), name=m.get("name", ""), href=m.get("href", ""),
+        )
         for m in raw
     ]
     screenshot_bytes = await page.screenshot(type="png", full_page=False)

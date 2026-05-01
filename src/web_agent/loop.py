@@ -14,6 +14,7 @@ from playwright.async_api import Page
 from web_agent.actuator import human_like_click, human_like_type, scroll, think
 from web_agent.llm import Action, LLMClient
 from web_agent.perceiver import Mark, perceive
+from web_agent.safety import check as safety_check
 from web_agent.trace import Step, Trace, end_task, init_db, start_task, write_step
 
 
@@ -49,6 +50,7 @@ async def run_react_loop(
 
     trace = Trace(task_id=task_id, goal=goal)
     recent_actions: deque[str] = deque(maxlen=3)
+    last_clicked_mark: Mark | None = None  # type action 的 safety check 需要上次 click 的元素
     result = "(no result)"
     t_start = time.time()
 
@@ -91,6 +93,28 @@ async def run_react_loop(
                 return result
             print(f"[step {step_i}] action ({client.name}): {action.type} {action.args} | thought: {action.thought[:120]}")
 
+            # safety check：在 actuator 之前 intercept 敏感 action（send/pay/delete/密码字段...）
+            if action.type in ("click", "type"):
+                check_mark: Mark | None = None
+                if action.type == "click":
+                    check_mark = _find_mark(marks, action.args.get("mark_id", -1))
+                else:  # type
+                    check_mark = last_clicked_mark
+                decision = safety_check(action, check_mark, marks)
+                if not decision.allow:
+                    result = f"SAFETY_BLOCK at step {step_i}: {decision.reason}"
+                    print(f"\n[safety] {result}")
+                    step = Step(
+                        step=step_i, ts=time.time(), thought=action.thought,
+                        action_type="safety_block",
+                        action_args={"original_type": action.type, "rule": decision.rule, **action.args},
+                        observation=result,
+                    )
+                    trace.append(step)
+                    write_step(conn, task_id, step, str(shot_path))
+                    end_task(conn, task_id, result)
+                    return result
+
             # 死循环检测：连续 3 次完全相同 action（type + args）→ abort
             sig = _action_signature(action)
             if len(recent_actions) == 3 and all(s == sig for s in recent_actions):
@@ -118,6 +142,7 @@ async def run_react_loop(
                     obs = f"ERROR: mark_id={action.args.get('mark_id')} 不在当前 marks 里"
                 else:
                     await human_like_click(page, m)
+                    last_clicked_mark = m  # 给下一步 type action 的 safety check 用
                     try:
                         await page.wait_for_load_state("domcontentloaded", timeout=5000)
                     except Exception:

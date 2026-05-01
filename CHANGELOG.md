@@ -2,6 +2,39 @@
 
 All notable changes to web-agent. 版本号遵循 SemVer 简化形式（V<major>.<minor>.<patch>）。
 
+## [0.6.0] - 2026-05-01
+
+### Added (W3-A: 授权白名单层)
+- **新模块** `src/web_agent/safety.py`：`SafetyDecision` dataclass + `check(action, mark, marks) -> SafetyDecision` 纯函数
+  - 在 actuator 之前 intercept 敏感 action（send/pay/delete/转账/确认订单/订阅取消等）
+  - 默认拦：英文按钮文本（send/submit/pay/delete/checkout/wire/transfer/confirm/authorize/...）+ 中文（发送/支付/删除/转账/立即支付/确认订单/...）+ input type=password|tel + input name=amount|cvv|card|otp|code|...
+  - `WEB_AGENT_AUTO_APPROVE=rule1,rule2,...` env 预授权（CSV，规则名见 safety.py）
+  - `WEB_AGENT_AUTO_APPROVE=*` 全开（dev/可信场景；生产慎用）
+  - 触发即 graceful abort（loop 写 trace `Step(action_type="safety_block", action_args={"original_type":..., "rule":...})`），不让 LLM 重撞
+- **`Mark` dataclass 加字段**（perceiver schema 升级，向后兼容 default 空字符串）：
+  - `input_type: str = ""` — input.type（password/tel/text/email/...）
+  - `name: str = ""` — input.name 或 id（用于敏感字段名匹配）
+  - `href: str = ""` — a.href（绝对 URL）
+  - perceiver SoM JS 一并采集，每 step 零额外 RTT
+- **loop.py 接入 safety check**：在 `await client.plan(...)` 后、actuator 路由前；click 用当前 mark / type 用 `last_clicked_mark`（loop 维护 stateful 跟踪）
+- **测试** `tests/test_safety.py` 30+ case：英文 14 / 中文 9 / input 类型 4 / type action 3 / auto_approve env 4 / 边界 5（scroll/extract/done always allow / mark=None / 空 text / 大小写 / "sender" word boundary）
+
+### Why
+- 用户技术蓝本明确要求：「付款 / Gmail send / DELETE / 密码字段填充 — 强制弹用户确认，不让 LLM 自己决定」
+- W3-B 接下来 Gmail demo 没 safety 防护就有真实风险（误发邮件 / 误删）
+- subagent 评估架构：safety.py 独立 + loop 一行调用 > inline check（避免污染 loop 重构压力）+ > actuator wrap（5 个 action 各加重复）
+- subagent 4 处优化全采纳：Mark 加字段（C），黑名单加金额/2FA/form action（B），CSV 加 `*` 通配（D），CHANGELOG 标行为变化（F）
+
+### ⚠️ Behavior change（demo 用户必读）
+- **默认拦 send/pay/delete 类 action** — 之前 demo 没 safety，LLM 可以随意 click "Send"；V0.6.0 起会强制 abort
+- 影响：W3-B Gmail send 邮件 demo 必须显式 `WEB_AGENT_AUTO_APPROVE=send-or-pay` 才能跑
+- 出问题一行 `WEB_AGENT_AUTO_APPROVE=*` 全开 + `WEB_AGENT_AUTO_APPROVE=` 空字符串 = 全拦回到默认
+
+### Compatibility
+- 公共函数签名 100% 不变：`run_react_loop / run_task / make_client` 都不动
+- Mark 加字段有 default 空字符串，旧代码（含已写测试）零破坏
+- W1/W2-A/W2-B 现有 demo（Wikipedia / GitHub）不操作敏感 action，不受影响
+
 ## [0.5.2] - 2026-05-01
 
 ### Added
