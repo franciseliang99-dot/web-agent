@@ -64,3 +64,46 @@ def test_make_client_factory_picks_openai_by_model_prefix(monkeypatch):
     c = make_client(model="gpt-4o")
     assert c.name == "openai"
     assert c.model == "gpt-4o"
+
+
+def test_provider_from_model_kimi_and_moonshot():
+    """Kimi/Moonshot model 名前缀应推断到 openai（走 OpenAIClient + base_url）。"""
+    from web_agent.llm import provider_from_model
+
+    for m in [
+        "kimi-k2.6",
+        "kimi-latest",
+        "kimi-thinking-preview",
+        "moonshot-v1-128k-vision-preview",
+        "moonshotai/kimi-k2.6",  # OpenRouter 路径
+    ]:
+        assert provider_from_model(m) == "openai", f"{m!r} should infer openai"
+
+
+def test_openai_client_kimi_detection_via_base_url(monkeypatch):
+    """base_url 含 "moonshot" → _is_kimi=True，启用兼容补丁。"""
+    monkeypatch.setenv("OPENAI_API_KEY", "sk-test")
+    monkeypatch.setenv("OPENAI_BASE_URL", "https://api.moonshot.ai/v1")
+    client = OpenAIClient()
+    assert client._is_kimi is True
+
+
+def test_openai_client_kimi_cn_endpoint_detection(monkeypatch):
+    monkeypatch.setenv("OPENAI_API_KEY", "sk-test")
+    monkeypatch.setenv("OPENAI_BASE_URL", "https://api.moonshot.cn/v1")
+    client = OpenAIClient()
+    assert client._is_kimi is True
+
+
+def test_openai_client_default_not_kimi(monkeypatch):
+    monkeypatch.setenv("OPENAI_API_KEY", "sk-test")
+    monkeypatch.delenv("OPENAI_BASE_URL", raising=False)
+    client = OpenAIClient()
+    assert client._is_kimi is False
+
+
+def test_openai_client_openrouter_not_kimi(monkeypatch):
+    monkeypatch.setenv("OPENAI_API_KEY", "sk-test")
+    monkeypatch.setenv("OPENAI_BASE_URL", "https://openrouter.ai/api/v1")
+    client = OpenAIClient()
+    assert client._is_kimi is False

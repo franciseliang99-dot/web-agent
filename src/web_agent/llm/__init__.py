@@ -18,12 +18,19 @@ from web_agent.llm.base import Action, LLMClient
 
 
 def provider_from_model(model: str) -> str:
-    """按 model 名前缀推断 provider；不识别则返回 'anthropic'。"""
+    """按 model 名前缀推断 provider；不识别则返回 'anthropic'。
+
+    OpenAI 兼容端点（Kimi / Moonshot / DeepSeek 等）走 'openai' provider，
+    用户需配 OPENAI_BASE_URL 指向对应供应商的 v1 端点。OpenAIClient 会按
+    base_url 自动检测 Kimi 兼容性补丁（max_tokens / tool_choice='auto'）。
+    """
     m = model.lower().strip()
     if m.startswith("claude"):
         return "anthropic"
     if m.startswith(("gpt", "o1", "o3", "o4", "o5")):
         return "openai"
+    if m.startswith(("kimi", "moonshot")):
+        return "openai"  # Kimi/Moonshot OpenAI compat 端点
     if m.startswith("gemini"):
         return "gemini"
     if "/" in m:  # OpenRouter 风格 "anthropic/claude-..." → 走对应 skin
@@ -31,6 +38,7 @@ def provider_from_model(model: str) -> str:
         openrouter_map = {
             "anthropic": "anthropic",
             "openai": "openai",
+            "moonshotai": "openai",  # OpenRouter 路径 "moonshotai/kimi-k2.6"
             "google": "gemini",
             "gemini": "gemini",
         }

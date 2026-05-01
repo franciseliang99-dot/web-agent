@@ -2,7 +2,12 @@
 
 实现 LLMClient Protocol。支持 OPENAI_BASE_URL 走第三方代理（OpenRouter OpenAI skin / 自部署 LiteLLM / Azure OpenAI）。
 
-注：OpenAI prompt caching 是自动的（≥1024 token 前缀匹配），无需显式 cache_control。
+兼容补丁：检测到 base_url 含 "moonshot"（Kimi 国际/国内端点）时，自动：
+- `max_completion_tokens` → `max_tokens`（Kimi 不识 GPT-5.x 新参数名）
+- `tool_choice="required"` → `tool_choice="auto"`（Kimi 不支持 required，会拒）
+
+注：OpenAI prompt caching 是自动的（≥1024 token 前缀匹配），无需显式 cache_control；
+Kimi 也是自动 cache，命中后 ~6× 折扣。
 """
 
 from __future__ import annotations
@@ -43,6 +48,8 @@ class OpenAIClient:
         self._client = AsyncOpenAI(**kwargs)
         self.model = model
         self._tools = to_openai_tools(strict=True)
+        # Kimi (Moonshot) OpenAI-compat 端点不支持 tool_choice="required" + 不识 max_completion_tokens
+        self._is_kimi = bool(base_url and "moonshot" in base_url.lower())
 
     async def plan(
         self,
@@ -62,16 +69,21 @@ class OpenAIClient:
             {"type": "text", "text": build_user_text(goal, marks, trace)},
         ]
 
-        resp = await self._client.chat.completions.create(
-            model=self.model,
-            max_completion_tokens=2048,
-            messages=[
+        kwargs: dict = {
+            "model": self.model,
+            "messages": [
                 {"role": "system", "content": SYSTEM_PROMPT},
                 {"role": "user", "content": user_content},
             ],
-            tools=self._tools,
-            tool_choice="required",
-        )
+            "tools": self._tools,
+        }
+        if self._is_kimi:
+            kwargs["max_tokens"] = 2048
+            kwargs["tool_choice"] = "auto"
+        else:
+            kwargs["max_completion_tokens"] = 2048
+            kwargs["tool_choice"] = "required"
+        resp = await self._client.chat.completions.create(**kwargs)
 
         msg = resp.choices[0].message
         if not msg.tool_calls:

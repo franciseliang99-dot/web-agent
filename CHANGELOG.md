@@ -2,6 +2,29 @@
 
 All notable changes to web-agent. 版本号遵循 SemVer 简化形式（V<major>.<minor>.<patch>）。
 
+## [0.3.0] - 2026-05-01
+
+### Added
+- **Kimi / Moonshot 支持**（走 OpenAIClient + base_url），无需新增 client 类
+  - `provider_from_model` 加 `kimi-*` / `moonshot-*` 前缀 → openai 推断
+  - OpenRouter 路径 `moonshotai/kimi-k2.6` 也走 openai
+  - `OpenAIClient.__init__` 加 `_is_kimi` 自动检测（base_url 含 "moonshot" 时 True）
+  - `OpenAIClient.plan()` 在 Kimi 模式下：
+    - `max_completion_tokens` → `max_tokens`（Kimi 不识 GPT-5.x 新参数名）
+    - `tool_choice="required"` → `"auto"`（Kimi OpenAI compat 端点不支持 required，会拒）
+- `.env.example` 加 Kimi 国际版 / 国内版配置注释
+- `README.md` BYO LLM 节加 Kimi 用法 + 单步成本估算（cache miss ≈ $0.004 / hit ≈ $0.001）
+- `tests/test_llm_openai.py` 加 Kimi 检测 + provider_from_model 推断的测试
+
+### Why
+- 用户问「我想用 kimi2.5 key」
+- 选路径 B（subagent 评估 A 即"零改动直接走 OpenAIClient"会因 `tool_choice="required"` + `max_completion_tokens` 双爆而 broken；C 即独立 KimiClient 与 OpenAIClient 90% 重复违反 DRY）
+- 不引入新 client 类、不动 LLMClient Protocol；增量是 OpenAIClient 内的兼容性 if 分支，符合「不引入新耦合」
+
+### Compatibility
+- 完全向后兼容：未配 `OPENAI_BASE_URL=...moonshot...` 时 `_is_kimi=False`，OpenAI 路径行为 100% 等价 V0.2.x
+- Anthropic 路径完全不动
+
 ## [0.2.1] - 2026-05-01
 
 ### Refactored

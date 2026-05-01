@@ -78,7 +78,19 @@ OPENAI_BASE_URL=https://openrouter.ai/api/v1
 OPENAI_API_KEY=sk-or-v1-...
 WEB_AGENT_LLM_PROVIDER=openai
 WEB_AGENT_MODEL=openai/gpt-4o
+
+# === Kimi / Moonshot (OpenAI compat) ===
+# 国际版 https://platform.kimi.ai
+OPENAI_API_KEY=sk-xxx
+OPENAI_BASE_URL=https://api.moonshot.ai/v1
+WEB_AGENT_MODEL=kimi-k2.6              # 自动推断 provider=openai
+# 国内版 https://platform.moonshot.cn 用 https://api.moonshot.cn/v1
 ```
+
+OpenAIClient 会按 `base_url` 自动检测 Kimi 兼容性补丁：
+- `max_completion_tokens` → `max_tokens`（Kimi 不识 GPT-5.x 新参数名）
+- `tool_choice="required"` → `"auto"`（Kimi 拒 required）
+- 单步成本（kimi-k2.6, ~3k input + 200 output）：cache miss ≈ $0.004，cache hit ≈ $0.001（自动 cache，6× 折扣）
 
 CLI 也可临时覆盖：
 
