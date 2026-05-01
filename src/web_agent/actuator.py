@@ -15,6 +15,7 @@ from __future__ import annotations
 import asyncio
 import math
 import random
+from collections import deque
 from collections.abc import Iterable
 from weakref import WeakKeyDictionary
 
@@ -143,15 +144,15 @@ async def human_like_type(page: Page, text: str, typo_rate: float = 0.02) -> Non
     typo 触发条件：① ASCII 字母（中文 IME 单字符 typo 不真实）② 概率命中 ③ 中速以上
     （最近 3 字平均间隔 < 150ms，慢打字不会频繁错）。typo_rate 默认 2%（参考 Salthouse 1986 + IKI 数据集）。
     """
-    recent_delays: list[float] = []
+    recent_delays: deque[float] = deque(maxlen=3)
     for ch in text:
         delay = _type_delay()
         fast_enough = (
             len(recent_delays) < 3
-            or sum(recent_delays[-3:]) / 3 < 0.15
+            or sum(recent_delays) / len(recent_delays) < 0.15
         )
         if _is_qwerty_letter(ch) and fast_enough and random.random() < typo_rate:
-            wrong = random.choice(_QWERTY_NEIGHBORS.get(ch.lower(), "x"))
+            wrong = random.choice(_QWERTY_NEIGHBORS[ch.lower()])
             if ch.isupper():
                 wrong = wrong.upper()
             await page.keyboard.type(wrong)

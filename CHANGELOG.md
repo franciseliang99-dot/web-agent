@@ -2,6 +2,22 @@
 
 All notable changes to web-agent. 版本号遵循 SemVer 简化形式（V<major>.<minor>.<patch>）。
 
+## [0.4.1] - 2026-05-01
+
+### Refactored
+- `actuator.py::human_like_type` simplify pass（V0.4.0 simplify subagent 审查产物）：
+  - `_QWERTY_NEIGHBORS.get(ch.lower(), "x")` → `_QWERTY_NEIGHBORS[ch.lower()]`：fallback `"x"` 死代码（外层 `_is_qwerty_letter` 已保证 `ch.lower() ∈ a-z`，dict 26 字母全覆盖），删 fallback 让"未覆盖触发兜底 x"这个不真实的契约消失，KeyError 直接暴露真 bug
+  - `recent_delays: list[float] = []` → `deque[float] = deque(maxlen=3)`：原 list 只读 `[-3:]` 但每步 `append` 无界增长（200 字 input 涨到 200 entries 仅看末 3），改 deque 内存恒定 + 意图自描述；`sum(recent_delays[-3:]) / 3` 同步精简为 `sum(recent_delays) / len(recent_delays)`（deque maxlen=3 满后 len 恒为 3，与原均值等价）
+- 5 个 simplify 候选中其余 3 个跳过：
+  - `_bezier_path` off1/off2 抽 `_perp_offset` helper：仅 2 处相邻使用，按用户硬约束 (>2 处才抽) 跳过
+  - `_click_point` sx/sy + clamp 抽 `_truncated_gauss` helper：同上，2 处相邻使用跳过
+  - `wrong.upper()` 大小写处理：`random.choice("gyujnb")` 返回单字符，`.upper()` 是 "G"（不是 "GY"），逻辑正确无 bug
+
+### Compatibility
+- 行为 100% 等价：`deque(maxlen=3)` 满后 `sum/len == sum([-3:])/3`，未满时 `len(recent_delays) < 3` 短路防御对齐；典型 ASCII letter 输入 `_QWERTY_NEIGHBORS[ch.lower()]` 永远命中
+- pytest 30/30 仍绿
+- 公共函数签名零变化（`human_like_type(page, text, typo_rate=0.02)` 不动）
+
 ## [0.4.0] - 2026-05-01
 
 ### Changed
