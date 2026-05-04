@@ -2,6 +2,30 @@
 
 All notable changes to web-agent. 版本号遵循 SemVer 简化形式（V<major>.<minor>.<patch>）。
 
+## [0.16.2] - 2026-05-04
+
+### Refactor (V0.16.1 mcp_server /simplify pass)
+- **`mcp_server.py`** 164 → 159 行 (-5):
+  - **删 dead progress_cb 块** (4 行): 之前构造 progress_cb 但没透传到 cli_run_task (V0.16.2 wiring 待补), 占位 `_ = ctx` 防 unused-arg lint, 真 wire 留 V0.16.3+
+  - **`asyncio.to_thread(_check_chrome_alive, cdp_url)`**: 阻塞 urllib (≤2s timeout) 包到 thread 执行, 防 MCP 事件循环被卡, 主路径仍 fail-fast
+  - **去掉 redundant `out_dir = Path("data/replays")`**: `replay.render_to_file` 已 default `DEFAULT_OUT`, mcp tool 不必重复传
+- **`tests/test_mcp_server.py`** 256 → 233 行 (-23):
+  - **hoisted imports**: 9 处 inline `from web_agent.mcp_server import mcp` + 2 处 `import json/sys/logging` 提到 module 级, 删多余 `from pathlib import Path`
+  - **Case 10 root-logger leak fix**: 之前 `removeHandler` 不 restore 污染后续 test, 改用 `monkeypatch.setattr(root, "handlers", [])` auto-restore on teardown
+
+### Why
+- V0.16.1 commit b958a7f 后跑 /simplify subagent 检出 5 处优化, 全采纳
+- subagent 跳过 5 项 (false positive / out of scope):
+  - `extract_domain` URL guard 必要 (urlparse("github.com").netloc == "" 把 bare domain 当 path)
+  - hardcode `127.0.0.1:9222` 是 pre-existing pattern, 不是 V0.16.1 引入
+  - `_check_chrome_alive` 11 行已是 stdlib 最简 (替代 `browser.connect()` 更重)
+  - `replay.render_to_file` 18 行已最简 (mkdir + load + write + return)
+  - 测试 `async with create_connected_server_and_client_session` boilerplate 显式更可读
+
+### Compatibility
+- 公共 API 零变化 (mcp tools / _RUN_LOCK / _check_chrome_alive 签名不动)
+- 230 passed + 2 skipped 与 V0.16.1 一致 (行为 100% 等价)
+
 ## [0.16.1] - 2026-05-04
 
 ### Added (MCP server: 暴露 web-agent 为 Model Context Protocol server)

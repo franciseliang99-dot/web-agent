@@ -47,7 +47,10 @@ mcp = FastMCP("web-agent")
 
 
 def _check_chrome_alive(cdp_url: str, timeout: float = 2.0) -> None:
-    """检查 9222 端口可达, 不可达 raise RuntimeError. 仅 web_agent_run 需调."""
+    """检查 9222 端口可达, 不可达 raise RuntimeError. 仅 web_agent_run 需调.
+
+    阻塞 urllib 调用; async 调用方应包 asyncio.to_thread 释放事件循环.
+    """
     probe_url = f"{cdp_url.rstrip('/')}/json/version"
     try:
         with urllib.request.urlopen(probe_url, timeout=timeout):
@@ -79,18 +82,11 @@ async def web_agent_run(
         RuntimeError: Chrome 9222 不可达 (用户没起 Chrome).
     """
     cdp_url = os.environ.get("WEB_AGENT_CDP_URL", "http://127.0.0.1:9222")
-    _check_chrome_alive(cdp_url)
+    await asyncio.to_thread(_check_chrome_alive, cdp_url)
 
-    progress_cb = None
-    if ctx is not None:
-        async def _cb(step_i: int, total: int, message: str | None) -> None:
-            await ctx.report_progress(step_i, total=total, message=message)
-        progress_cb = _cb
-
+    # ctx.report_progress wiring 留 V0.16.2: 需 cli.run_task → loop 加 progress_cb 透传.
+    _ = ctx  # 占位防 unused-arg lint, V0.16.2 wire 时启用
     async with _RUN_LOCK:
-        # 复用 cli.run_task 不重写主路径; 仅 progress_cb 通过 kwarg 透传到 loop
-        # cli.run_task 当前不接 progress_cb, 待 V0.16.2 cli 加 kwarg; V0.16.1 先用现状无心跳跑通
-        # NOTE: progress_cb 暂未 wired 到 cli.run_task → loop, 留 V0.16.2 完整接通
         return await cli_run_task(
             goal=goal,
             start_url=url or None,
@@ -110,12 +106,11 @@ async def web_agent_get_replay(task_id: str) -> dict:
     Raises:
         RuntimeError: db 不存在 / task_id 不存在 (replay.load_task SystemExit 转译).
     """
-    out_dir = Path("data/replays")
     try:
-        return replay_render_to_file(task_id or None, out_dir=out_dir)
+        return replay_render_to_file(task_id or None)
     except SystemExit as e:
-        # replay.load_task 用 sys.exit() 报错 (CLI 行为), MCP tool 不能让进程退出
-        # FastMCP 不 catch BaseException, 转为 Exception 让 SDK 序列化为 tool error
+        # replay.load_task 用 sys.exit() 报错 (CLI 行为); FastMCP 不 catch BaseException,
+        # 必须转为 Exception 让 SDK 序列化为 tool error 而不让 server 进程退出.
         raise RuntimeError(f"replay 失败: {e}") from e
 
 

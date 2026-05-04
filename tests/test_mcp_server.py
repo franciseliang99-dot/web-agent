@@ -17,23 +17,26 @@
 from __future__ import annotations
 
 import asyncio
+import json
+import logging
+import sys
 import time
-from pathlib import Path
 
 import pytest
 
 from mcp.shared.memory import create_connected_server_and_client_session
 
+import web_agent.mcp_server as mcp_mod
+from web_agent.mcp_server import mcp
+
 
 @pytest.fixture
 def reset_run_lock():
     """每 test 重置 _RUN_LOCK 防 case 间状态泄漏."""
-    import web_agent.mcp_server as mod
-
-    old_lock = mod._RUN_LOCK
-    mod._RUN_LOCK = asyncio.Lock()
+    old_lock = mcp_mod._RUN_LOCK
+    mcp_mod._RUN_LOCK = asyncio.Lock()
     yield
-    mod._RUN_LOCK = old_lock
+    mcp_mod._RUN_LOCK = old_lock
 
 
 @pytest.fixture
@@ -57,8 +60,6 @@ def fake_chrome_dead(monkeypatch):
 # ---------- Case 1: list_tools ----------
 
 async def test_list_tools_returns_three(reset_run_lock):
-    from web_agent.mcp_server import mcp
-
     async with create_connected_server_and_client_session(mcp) as session:
         resp = await session.list_tools()
         names = {t.name for t in resp.tools}
@@ -68,8 +69,6 @@ async def test_list_tools_returns_three(reset_run_lock):
 # ---------- Case 2: web_agent_run forwards args ----------
 
 async def test_web_agent_run_forwards_args(monkeypatch, reset_run_lock, fake_chrome_alive):
-    from web_agent.mcp_server import mcp
-
     captured = {}
 
     async def fake_run_task(goal, start_url=None, max_steps=20, **kw):
@@ -90,8 +89,6 @@ async def test_web_agent_run_forwards_args(monkeypatch, reset_run_lock, fake_chr
 # ---------- Case 3: chrome_not_running ----------
 
 async def test_web_agent_run_chrome_not_running(reset_run_lock, fake_chrome_dead):
-    from web_agent.mcp_server import mcp
-
     async with create_connected_server_and_client_session(mcp) as session:
         result = await session.call_tool("web_agent_run", {"goal": "x"})
         assert result.isError
@@ -102,8 +99,6 @@ async def test_web_agent_run_chrome_not_running(reset_run_lock, fake_chrome_dead
 # ---------- Case 4: concurrent serialized ----------
 
 async def test_web_agent_run_serialized_via_lock(monkeypatch, reset_run_lock, fake_chrome_alive):
-    from web_agent.mcp_server import mcp
-
     order = []
 
     async def fake_run_task(goal, start_url=None, max_steps=20, **kw):
@@ -132,12 +127,10 @@ async def test_web_agent_run_serialized_via_lock(monkeypatch, reset_run_lock, fa
 # ---------- Case 5: get_replay returns dict ----------
 
 async def test_get_replay_returns_dict(monkeypatch, reset_run_lock, tmp_path):
-    from web_agent.mcp_server import mcp
-
     fake_html = tmp_path / "fake-task.html"
     fake_html.write_text("<html>fake</html>")
 
-    def fake_render(task_id, out_dir, db_path=None):
+    def fake_render(task_id, out_dir=None, db_path=None):
         return {
             "task_id": "fake-task",
             "html_path": str(fake_html.resolve()),
@@ -150,8 +143,7 @@ async def test_get_replay_returns_dict(monkeypatch, reset_run_lock, tmp_path):
     async with create_connected_server_and_client_session(mcp) as session:
         result = await session.call_tool("web_agent_get_replay", {"task_id": "fake-task"})
         assert not result.isError
-        # FastMCP 自动把 dict serialize 为 JSON content; 解析回来验证
-        import json
+        # FastMCP 自动 dict→JSON content 序列化, 解回 dict 比较
         text = " ".join(c.text for c in result.content if hasattr(c, "text"))
         parsed = json.loads(text)
         assert parsed["task_id"] == "fake-task"
@@ -162,9 +154,7 @@ async def test_get_replay_returns_dict(monkeypatch, reset_run_lock, tmp_path):
 # ---------- Case 6: get_replay non-existent → error ----------
 
 async def test_get_replay_non_existent_errors(monkeypatch, reset_run_lock):
-    from web_agent.mcp_server import mcp
-
-    def boom(task_id, out_dir, db_path=None):
+    def boom(task_id, out_dir=None, db_path=None):
         raise SystemExit("replay: db 不存在: data/trace.db")
 
     monkeypatch.setattr("web_agent.mcp_server.replay_render_to_file", boom)
@@ -177,8 +167,6 @@ async def test_get_replay_non_existent_errors(monkeypatch, reset_run_lock):
 # ---------- Case 7: query_memory empty → [] ----------
 
 async def test_query_memory_empty_domain_returns_empty(reset_run_lock):
-    from web_agent.mcp_server import mcp
-
     async with create_connected_server_and_client_session(mcp) as session:
         result = await session.call_tool("web_agent_query_memory", {"domain": ""})
         assert not result.isError
@@ -189,8 +177,6 @@ async def test_query_memory_empty_domain_returns_empty(reset_run_lock):
 # ---------- Case 8: query_memory URL form normalize ----------
 
 async def test_query_memory_normalizes_url_to_domain(monkeypatch, reset_run_lock):
-    from web_agent.mcp_server import mcp
-
     captured = {}
 
     def fake_recall(db, domain, limit=5):
@@ -212,7 +198,6 @@ async def test_query_memory_normalizes_url_to_domain(monkeypatch, reset_run_lock
 
 async def test_query_memory_returns_serialized_entries(monkeypatch, reset_run_lock):
     from web_agent.memory import MemoryEntry
-    from web_agent.mcp_server import mcp
 
     fake_entries = [
         MemoryEntry(ts=1714850400.0, domain="github.com", goal="g1", result="r1", success=True),
@@ -236,21 +221,13 @@ async def test_query_memory_returns_serialized_entries(monkeypatch, reset_run_lo
 
 def test_main_configures_logging_stderr(monkeypatch):
     """main() 必须在 mcp.run() 前 logging.basicConfig stream=stderr 防 stdout 污染."""
-    import logging
+    monkeypatch.setattr(mcp_mod.mcp, "run", lambda: None)
+    # monkeypatch 自动 teardown restore root.handlers, 防本 test 污染后续 test logging
+    monkeypatch.setattr(logging.getLogger(), "handlers", [])
 
-    from web_agent import mcp_server as mod
+    mcp_mod.main()
 
-    # 拦截 mcp.run() 不真起 server
-    monkeypatch.setattr(mod.mcp, "run", lambda: None)
-    # 清空 root logger handlers 让 basicConfig 重新配
-    root = logging.getLogger()
-    for h in list(root.handlers):
-        root.removeHandler(h)
-
-    mod.main()
-
-    # 验证 root logger 至少 1 个 handler 走 stderr
-    import sys
-    stream_handlers = [h for h in root.handlers if isinstance(h, logging.StreamHandler)]
+    root_handlers = logging.getLogger().handlers
+    stream_handlers = [h for h in root_handlers if isinstance(h, logging.StreamHandler)]
     assert any(h.stream is sys.stderr for h in stream_handlers), \
         f"main() 应配 stderr handler, got {[h.stream for h in stream_handlers]}"
