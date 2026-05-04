@@ -11,6 +11,7 @@ tests/_smoke_helpers.py. 单录成本 (claude-sonnet-4-6 vision): ~$0.006.
 
 from __future__ import annotations
 
+import os
 from collections import deque
 
 import pytest
@@ -18,7 +19,6 @@ import pytest
 from tests._smoke_helpers import (
     TINY_GRAY_PNG_B64,
     assert_smoke_action,
-    ensure_dummy_key,
     smoke_skip_marker,
 )
 
@@ -33,10 +33,9 @@ pytestmark = smoke_skip_marker(
 @pytest.mark.asyncio
 async def test_anthropic_plan_smoke_pipeline_alive():
     from web_agent.llm.anthropic import AnthropicClient
-    from web_agent.llm.base import Action
     from web_agent.trace import Trace
 
-    ensure_dummy_key("ANTHROPIC_API_KEY", "sk-ant-cassette-replay-not-real")
+    os.environ.setdefault("ANTHROPIC_API_KEY", "sk-ant-cassette-replay-not-real")
 
     client = AnthropicClient()
     trace = Trace(task_id="smoke-real", goal="搜苹果价格", steps=deque())
@@ -46,4 +45,4 @@ async def test_anthropic_plan_smoke_pipeline_alive():
         marks=[],  # Anthropic tool_choice="any" 强制 emit tool, 空 marks 也能 PASS
         trace=trace,
     )
-    assert_smoke_action(action, Action)
+    assert_smoke_action(action)

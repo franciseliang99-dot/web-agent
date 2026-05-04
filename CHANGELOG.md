@@ -2,6 +2,29 @@
 
 All notable changes to web-agent. 版本号遵循 SemVer 简化形式（V<major>.<minor>.<patch>）。
 
+## [0.15.9] - 2026-05-04
+
+### Refactor (W5-E smoke helpers /simplify pass)
+- **`tests/_smoke_helpers.py`** 简化 4 处:
+  - `assert_smoke_action(action, Action_cls)` → `assert_smoke_action(action)`: 去掉 Action_cls 参数, helper 直接 `from web_agent.llm.base import Action`. 仅 1 个 Action class 不需要参数化, 3 smoke files 调用各砍 1 个 import + 简化 1 行
+  - `ensure_dummy_key(env_var, dummy_value)` 整 helper 删除: 2 行 wrapper 等价 `os.environ.setdefault(env_var, dummy)`. 3 smoke files 改用 stdlib 直接调
+  - `_VALID_ACTION_TYPES = {...}` 抽常量, `assert_smoke_action` 用 `in _VALID_ACTION_TYPES` 替代 inline set literal
+  - `smoke_skip_marker` reason f-string 嵌套三元 (重复 3×) flatten: 计算 `blocker_name` / `blocker_hint` 各 1 次
+  - docstring: helpers 模块顶部 18 行 → 5 行; smoke_skip_marker 18 → 5; GPT smoke top docstring 24 → 13 (caller history 留 CHANGELOG)
+- **统计**: 267 → 232 行 (-35 行 / -13%) 跨 4 文件; 220 passed + 2 skipped 行为 100% 一致
+- **本次未动**: Action 5 合法 type 集移到 src/llm/base.py (out of scope, src/ 不动); blocker_env tuple 改 callable (2 字段 tuple 已是简单形式)
+
+### Why
+- V0.15.8 抽 helper 为去重, 但 helper 自身也露出可 simplify 项 (4 处) — `/simplify` subagent 自动检出后跑通
+- `assert_smoke_action(action, Action_cls)` 参数化是过早泛化: web-agent 仅 1 个 Action class, 现状参数化反而让 caller 多写 import
+- `ensure_dummy_key` 是 stdlib `os.environ.setdefault` 的 2 行 wrapper, 删除让代码更直接
+- subagent 跳过 2 项: ① inline imports inside test funcs (repo-wide pattern, V0.15.8 没引入); ② `_VALID_ACTION_TYPES` 移到 src/ (本 commit src/ no-touch)
+
+### Compatibility
+- 公共 API 零变化, src/ 业务代码 0 行改动 (仅 __init__ version bump)
+- helper 公开 API 变窄 (assert_smoke_action 签名 -1 param, ensure_dummy_key 删) — 仅 tests/ 内部用, 无外部 caller
+- 220 passed + 2 skipped 与 V0.15.8 一致
+
 ## [0.15.8] - 2026-05-04
 
 ### Tests (W5-E smoke helpers 抽象 + GPT smoke 骨架 + blocker_env 防错路由)

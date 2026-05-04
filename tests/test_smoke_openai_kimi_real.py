@@ -9,6 +9,7 @@ hardcode .cn: cassette vcr URL match 锁 host, 跨端点 (.ai vs .cn) 不能 rep
 
 from __future__ import annotations
 
+import os
 from collections import deque
 
 import pytest
@@ -16,7 +17,6 @@ import pytest
 from tests._smoke_helpers import (
     TINY_GRAY_PNG_B64,
     assert_smoke_action,
-    ensure_dummy_key,
     smoke_skip_marker,
 )
 
@@ -33,12 +33,11 @@ pytestmark = smoke_skip_marker(
 @pytest.mark.vcr
 @pytest.mark.asyncio
 async def test_kimi_plan_smoke_pipeline_alive():
-    from web_agent.llm.base import Action
     from web_agent.llm.openai import OpenAIClient
     from web_agent.perceiver import Mark
     from web_agent.trace import Trace
 
-    ensure_dummy_key("OPENAI_API_KEY", "sk-kimi-cassette-replay-not-real")
+    os.environ.setdefault("OPENAI_API_KEY", "sk-kimi-cassette-replay-not-real")
 
     client = OpenAIClient(base_url=_KIMI_BASE_URL, model=_KIMI_MODEL)
     # dummy Mark: tool_choice="auto" + 空 marks 易不吐 tool_call, 给明确点击目标
@@ -56,4 +55,4 @@ async def test_kimi_plan_smoke_pipeline_alive():
         marks=[dummy_mark],
         trace=trace,
     )
-    assert_smoke_action(action, Action)
+    assert_smoke_action(action)
