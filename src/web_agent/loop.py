@@ -43,6 +43,32 @@ def _page_fingerprint(url: str, marks: list[Mark]) -> str:
     )
 
 
+_REFLECT_HINT = (
+    "[reflect] 页面 3 步无变化 (url+marks 同). 建议: "
+    "① scroll 看视口外内容 ② 后退/换 selector "
+    "③ 检查 SoM 是否漏标目标元素 ④ 当前 strategy 大概率撞墙, 换思路."
+)
+
+
+def _maybe_inject_reflect_hint(trace: Trace, recent_pages: deque[str], fp: str) -> None:
+    """W5-A: 页面 3 步无变化 → 把 hint 追加到上一步 observation, mutate in-memory Trace。
+
+    LLM 下一次 plan() 通过 Trace.for_llm() 自然看到 (软提示而非硬 abort, 与 V0.5.0
+    anti-loop 同 action 3 次硬 abort 互补)。in-place mutate, 调用方负责先 push fp。
+    幂等: "[reflect]" 已在 obs 则跳过, 防同一 step 被双重 append。
+    """
+    if not (
+        len(recent_pages) == 3
+        and all(p == fp for p in recent_pages)
+        and trace.steps
+        and "[reflect]" not in trace.steps[-1].observation
+    ):
+        return
+    trace.steps[-1].observation = (
+        trace.steps[-1].observation + "\n" + _REFLECT_HINT
+    ).strip()
+
+
 def _captcha_enabled() -> bool:
     return os.environ.get("WEB_AGENT_CAPTCHA_DISABLE", "").lower() not in ("true", "1", "yes")
 
@@ -135,25 +161,10 @@ async def run_react_loop(
 
             marks, screenshot_b64 = await perceive(page)
 
-            # W5-A 自反思: 检测页面 3 步无变化 → 把 hint 追加到上一步 observation,
-            # LLM 下一次 plan() 通过 Trace.for_llm() 自然看到, 软提示而非硬 abort
-            # (与 V0.5.0 anti-loop 同 action 3 次硬 abort 互补, 双层防御)。
+            # W5-A 自反思: 页面 3 步无变化 → 软提示 (与 V0.5.0 anti-loop 硬 abort 互补)
             fp = _page_fingerprint(getattr(page, "url", "") or "", marks)
             recent_pages.append(fp)
-            if (
-                len(recent_pages) == 3
-                and all(p == fp for p in recent_pages)
-                and trace.steps
-                and "[reflect]" not in trace.steps[-1].observation
-            ):
-                hint = (
-                    "[reflect] 页面 3 步无变化 (url+marks 同). 建议: "
-                    "① scroll 看视口外内容 ② 后退/换 selector "
-                    "③ 检查 SoM 是否漏标目标元素 ④ 当前 strategy 大概率撞墙, 换思路."
-                )
-                trace.steps[-1].observation = (
-                    trace.steps[-1].observation + "\n" + hint
-                ).strip()
+            _maybe_inject_reflect_hint(trace, recent_pages, fp)
 
             shot_path = screenshots_dir / f"{task_id}-{step_i:02d}.png"
             shot_path.write_bytes(base64.b64decode(screenshot_b64))

@@ -2,6 +2,20 @@
 
 All notable changes to web-agent. 版本号遵循 SemVer 简化形式（V<major>.<minor>.<patch>）。
 
+## [0.11.1] - 2026-05-03
+
+### Refactor (/simplify W5-A reflect)
+- **抽 `_maybe_inject_reflect_hint(trace, recent_pages, fp)` helper + `_REFLECT_HINT` 模块常量**: 把 V0.11.0 内联在主循环 perceive 之后的 ~19 行 reflect 逻辑 (4 行布尔 and + hint 字符串字面量 + obs mutate) 抽成独立 helper, 主循环 body 从 19 行降到 4 行 (`fp = _page_fingerprint(...)` / `recent_pages.append(fp)` / `_maybe_inject_reflect_hint(...)` + 1 行注释)
+  - helper 纯 in-place mutate, 调用方负责先 push fp; 行为 100% 等价 (同样的判断条件 / 同样的幂等检查 / 同样的字符串拼接)
+  - 提高可读性 (主循环看 1 行就懂在做啥) + 可测性 (helper 可独立测, 不必经 run_react_loop 集成路径)
+- 跳过的检查项:
+  - `getattr(page, "url", "") or ""` 不简化为 `page.url`: 现有 test fakes (FakePage in test_captcha/test_safety_loop_integration) 没定义 url 属性, 真删 getattr 6 个测试挂掉; 防御写法保留
+  - `_page_fingerprint` 与 `_action_signature` 不合并: 功能正交 (一个 hash action, 一个 hash page), 风格平行已满足
+  - 测试 fixture 重复 (db/shots/client setup × 3 case): N=2 影响小, 跳过
+  - `len == 3` vs `>= maxlen=3`: 保持与 `_action_signature` 路径对称 (loop.py L206 也是 == 3), 跳过
+- 不破坏 V0.11.0 reflection 行为: 3 步无变化触发 / 幂等不重复 / not-stuck 不注入 全保留
+- 118/118 tests 全绿, 行为零变化
+
 ## [0.11.0] - 2026-05-03
 
 ### Added (W5-A: 自反思 — page-stuck soft hint)
