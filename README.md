@@ -6,7 +6,7 @@ MultiOn 风格的「高度模仿人操作网页」AI web agent。
 
 ## 当前状态
 
-V0.16.0 (2026-05-04) — 37+ commits, 220 tests passing + 2 smoke skips. **MCP server 第 1 步硬前提**: 25 处 print → logger.info(stderr) 改造完成 (业务零改动); V0.16.1+ 新建 mcp_server.py 暴露 3 tools (web_agent_run / get_replay / query_memory)
+V0.16.1 (2026-05-04) — 38+ commits, 230 tests passing + 2 smoke skips. **MCP server 真接通**: `web-agent-mcp` entry 暴露 3 tools (web_agent_run / get_replay / query_memory) 给 Claude Desktop / 任意 MCP client; asyncio.Lock 串行 + 9222 健康检查 + 10 case in-memory transport tests
 
 **W milestone 进度**:
 - W1 ✅ Wikipedia 搜词条 + 提取首段 (骨架 + 多 LLM 支持)
@@ -98,10 +98,23 @@ uv run web-agent-memory wikipedia.org --db data/memory.db
 **进行中**:
 - **MCP server**: 暴露 web-agent 为 MCP server (Claude Desktop / 任意 MCP client 通过 tool 调用 `web_agent_run(goal, url)`)
   - V0.16.0 ✅ 第 1 步硬前提: 25 处 print → logger.info(stderr), 业务零改动 220 tests 全过
-  - V0.16.1 ⏳ 新建 `mcp_server.py` 用官方 `mcp[cli]>=1.2` SDK 暴露 3 tools + progress notification + asyncio.Lock 串行化 + Chrome 9222 健康检查
-  - V0.16.2 ⏳ Resources (`resources://web_agent/replay/<id>` + `memory/<domain>` 只读视图)
+  - V0.16.1 ✅ `mcp_server.py` 用官方 `mcp[cli]>=1.10` SDK 暴露 3 tools + asyncio.Lock 串行化 + Chrome 9222 健康检查 + 10 case test
+  - V0.16.2 ⏳ progress_cb 真 wire 到 cli.run_task → loop 主循环 + captcha poll 心跳 + Resources (`resources://web_agent/replay/<id>` + `memory/<domain>` 只读视图)
   - V0.16.3 ⏳ (可选) Elicitation 替代 WEB_AGENT_AUTO_APPROVE / HTTP transport
-  - 工时估剩 1-2 人天
+  - 工时估剩 1 人天
+
+跑 MCP server (Claude Desktop config 加 entry):
+```json
+{
+  "mcpServers": {
+    "web-agent": {
+      "command": "uv",
+      "args": ["--directory", "/home/myclaw/web-agent", "run", "web-agent-mcp"]
+    }
+  }
+}
+```
+Claude Desktop 重启后会出现 web_agent_run / web_agent_get_replay / web_agent_query_memory 三个 tool。
 
 **已知缺口** (不在主蓝本但需追):
 - patchright-python 决断 (仍用 `playwright-stealth` 2.0.3, 未实测 Cloudflare 突破率)

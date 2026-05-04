@@ -265,6 +265,27 @@ def render_html(task: dict) -> str:
     )
 
 
+def render_to_file(
+    task_id: str | None,
+    out_dir: Path = DEFAULT_OUT,
+    db_path: Path = DEFAULT_DB,
+) -> dict:
+    """渲染单个 task 到 HTML 文件 (V0.16.1 mcp_server 抽出, main() 与 web_agent_get_replay tool 共用).
+
+    Returns: {"task_id", "html_path", "step_count", "result"} dict, 给 MCP tool 返结构化数据
+    """
+    out_dir.mkdir(parents=True, exist_ok=True)
+    task = load_task(task_id, db_path=db_path)
+    out_path = out_dir / f"{task['task_id']}.html"
+    out_path.write_text(render_html(task), encoding="utf-8")
+    return {
+        "task_id": task["task_id"],
+        "html_path": str(out_path.resolve()),
+        "step_count": len(task["steps"]),
+        "result": task.get("result", ""),
+    }
+
+
 def main(argv: list[str] | None = None) -> int:
     p = argparse.ArgumentParser(prog="web-agent-replay",
                                 description="渲染 trace.db 单次 task / 全部 task + 索引页")
@@ -293,10 +314,8 @@ def main(argv: list[str] | None = None) -> int:
         print(f"wrote {len(metas)} task pages + {index_path}")
         return 0
 
-    task = load_task(args.task_id, db_path=db_path)
-    out_path = out_dir / f"{task['task_id']}.html"
-    out_path.write_text(render_html(task), encoding="utf-8")
-    print(f"wrote {out_path} ({len(task['steps'])} steps)")
+    info = render_to_file(args.task_id, out_dir=out_dir, db_path=db_path)
+    print(f"wrote {info['html_path']} ({info['step_count']} steps)")
     return 0
 
 

@@ -1,0 +1,164 @@
+"""V0.16.1 MCP server: 暴露 web-agent 为 MCP server (Claude Desktop / 任意 MCP client 调).
+
+3 tools:
+- `web_agent_run(goal, url, max_steps)`: 跑一个 task, 返 result string
+- `web_agent_get_replay(task_id)`: 渲染 replay HTML, 返 {task_id, html_path, step_count, result}
+- `web_agent_query_memory(domain, limit)`: 长期记忆 by domain, 返 list[dict]
+
+设计 (subagent V0.16.1 审核反馈采纳):
+- FastMCP decorator 风格 (官方推荐)
+- Module-level `_RUN_LOCK` 串行化并发 task (Chrome CDP 单 tab 抢, 测试 monkeypatch 可重置)
+- per-tool-call Chrome 9222 健康检查 (urllib stdlib, 不引 aiohttp), 仅 web_agent_run 需; query_memory/get_replay 无需
+- progress notification 通过 ctx.report_progress(step_i, max_steps, message) — DI 到 loop 不破坏 loop/mcp 解耦
+- exception → 返 structured tool error (FastMCP 自动序列化)
+
+CLI:
+  uv run web-agent-mcp                 # stdio mode (Claude Desktop 默认)
+  uv run web-agent-mcp --http <port>   # HTTP mode 留 V0.16.3
+"""
+
+from __future__ import annotations
+
+import asyncio
+import logging
+import os
+import sys
+import urllib.error
+import urllib.request
+from pathlib import Path
+
+from mcp.server.fastmcp import Context, FastMCP
+
+from web_agent.cli import run_task as cli_run_task
+from web_agent.memory import (
+    DEFAULT_DB as _MEM_DB,
+    extract_domain,
+    recall_by_domain,
+)
+from web_agent.replay import render_to_file as replay_render_to_file
+
+logger = logging.getLogger(__name__)
+
+# 同时只跑一个 web_agent_run task: Chrome CDP 单 tab, 并发抢会撞 SoM 注入 / actuator 鼠标 race.
+# 第二个并发 call 会 await 此 lock 等待第一个完成 (不 fail-fast 直接 reject 让 client 自然排队).
+_RUN_LOCK = asyncio.Lock()
+
+mcp = FastMCP("web-agent")
+
+
+def _check_chrome_alive(cdp_url: str, timeout: float = 2.0) -> None:
+    """检查 9222 端口可达, 不可达 raise RuntimeError. 仅 web_agent_run 需调."""
+    probe_url = f"{cdp_url.rstrip('/')}/json/version"
+    try:
+        with urllib.request.urlopen(probe_url, timeout=timeout):
+            return
+    except (urllib.error.URLError, TimeoutError, OSError) as e:
+        raise RuntimeError(
+            f"chrome_not_running: {cdp_url} 无响应 ({e!r}). "
+            "提示: 先在另一终端跑 `bash scripts/start_chrome.sh` 启 9222 调试端口的 Chrome."
+        )
+
+
+@mcp.tool()
+async def web_agent_run(
+    goal: str,
+    url: str = "",
+    max_steps: int = 20,
+    ctx: Context | None = None,
+) -> str:
+    """跑一个 web-agent task: 用 ReAct loop 在 Chrome 里完成 goal.
+
+    Args:
+        goal: 自然语言任务描述 (e.g. "在维基百科搜量子纠缠并提取首段")
+        url: 起始 URL, 空则从 Chrome 当前 tab 开始
+        max_steps: 最大步数 (默认 20, ReAct loop 上限)
+
+    Returns: 最终结果文本 (如 "result: ...", 或 SAFETY_BLOCK / WALLCLOCK_EXCEEDED 等错误).
+
+    Raises:
+        RuntimeError: Chrome 9222 不可达 (用户没起 Chrome).
+    """
+    cdp_url = os.environ.get("WEB_AGENT_CDP_URL", "http://127.0.0.1:9222")
+    _check_chrome_alive(cdp_url)
+
+    progress_cb = None
+    if ctx is not None:
+        async def _cb(step_i: int, total: int, message: str | None) -> None:
+            await ctx.report_progress(step_i, total=total, message=message)
+        progress_cb = _cb
+
+    async with _RUN_LOCK:
+        # 复用 cli.run_task 不重写主路径; 仅 progress_cb 通过 kwarg 透传到 loop
+        # cli.run_task 当前不接 progress_cb, 待 V0.16.2 cli 加 kwarg; V0.16.1 先用现状无心跳跑通
+        # NOTE: progress_cb 暂未 wired 到 cli.run_task → loop, 留 V0.16.2 完整接通
+        return await cli_run_task(
+            goal=goal,
+            start_url=url or None,
+            max_steps=max_steps,
+        )
+
+
+@mcp.tool()
+async def web_agent_get_replay(task_id: str) -> dict:
+    """渲染指定 task 的 replay HTML, 返结构化路径.
+
+    Args:
+        task_id: trace.db 里的 task_id (12 字符 hex). 空字符串表"最新一次".
+
+    Returns: {"task_id", "html_path" (绝对路径), "step_count", "result"}.
+
+    Raises:
+        RuntimeError: db 不存在 / task_id 不存在 (replay.load_task SystemExit 转译).
+    """
+    out_dir = Path("data/replays")
+    try:
+        return replay_render_to_file(task_id or None, out_dir=out_dir)
+    except SystemExit as e:
+        # replay.load_task 用 sys.exit() 报错 (CLI 行为), MCP tool 不能让进程退出
+        # FastMCP 不 catch BaseException, 转为 Exception 让 SDK 序列化为 tool error
+        raise RuntimeError(f"replay 失败: {e}") from e
+
+
+@mcp.tool()
+async def web_agent_query_memory(domain: str, limit: int = 5) -> list[dict]:
+    """查询长期记忆: 按 domain 拉历史 task outcome.
+
+    Args:
+        domain: 域名 (e.g. "github.com") 或 URL ("https://github.com/x"), 后者自动 extract domain.
+        limit: 返条数上限 (默认 5).
+
+    Returns: list[dict] 每条 {ts, domain, goal, result, success}, 按 ts DESC 排序.
+    """
+    if not domain:
+        return []
+    if domain.startswith("http://") or domain.startswith("https://"):
+        domain = extract_domain(domain)
+    mem_db = Path(os.environ.get("WEB_AGENT_MEMORY_DB", str(_MEM_DB)))
+    entries = recall_by_domain(mem_db, domain, limit=limit)
+    return [
+        {
+            "ts": e.ts,
+            "domain": e.domain,
+            "goal": e.goal,
+            "result": e.result,
+            "success": e.success,
+        }
+        for e in entries
+    ]
+
+
+def main() -> None:
+    """stdio mode entry: 走 JSON-RPC over stdio (Claude Desktop 默认 transport).
+
+    必须在 mcp.run() 前 basicConfig logging 走 stderr, 防业务模块 logger 输出污染 stdout.
+    """
+    logging.basicConfig(
+        level=logging.INFO,
+        stream=sys.stderr,
+        format="[%(name)s] %(message)s",
+    )
+    mcp.run()
+
+
+if __name__ == "__main__":
+    main()

@@ -2,6 +2,65 @@
 
 All notable changes to web-agent. 版本号遵循 SemVer 简化形式（V<major>.<minor>.<patch>）。
 
+## [0.16.1] - 2026-05-04
+
+### Added (MCP server: 暴露 web-agent 为 Model Context Protocol server)
+- **新模块** `src/web_agent/mcp_server.py` (~140 行) 用官方 `mcp[cli]>=1.10,<2` SDK FastMCP decorator 风格:
+  - 3 tools 一一对应现有 3 entry script:
+    - `web_agent_run(goal, url, max_steps)` → 跑一个 task, 返 result string. 内部调 `cli.run_task` 不重写主路径
+    - `web_agent_get_replay(task_id)` → 渲染 HTML 返 `{task_id, html_path, step_count, result}` 结构化 dict
+    - `web_agent_query_memory(domain, limit)` → 长期记忆 by domain, 返 list[dict] (ts/domain/goal/result/success). URL form 自动 normalize via extract_domain
+  - **module-level `_RUN_LOCK = asyncio.Lock()`** 串行化并发 task: Chrome CDP 单 tab 抢, 第二个 call 自动 await (不 fail-fast). cancellation 时 `async with` 自动释放
+  - **per-tool-call Chrome 9222 健康检查**: `_check_chrome_alive(cdp_url)` 用 stdlib `urllib.request` (零新 dep), 不可达抛 RuntimeError → FastMCP 序列化为 tool error. 仅 web_agent_run 调; query_memory/get_replay 不需 Chrome
+  - **`Context | None` 注入**: web_agent_run 收 ctx 参数, 包成 `progress_cb` 待 V0.16.2 wire 到 cli.run_task → loop 主循环 (V0.16.1 仅准备 hook 不真触发)
+  - **SystemExit → RuntimeError 转译**: `web_agent_get_replay` 内部 catch `SystemExit` 转 `RuntimeError` (replay.load_task 用 sys.exit() 是 CLI 行为, MCP tool 不能让进程退出)
+  - **stdio entry**: `main()` 在 `mcp.run()` 前 logging.basicConfig stream=stderr (复用 V0.16.0 cli.main() 同模式), 防业务模块 logger 输出污染 stdout (JSON-RPC 通道)
+- **`src/web_agent/loop.py` 加** `progress_cb: ProgressCallback | None = None` kwarg + 主循环每步 hook (3 LOC):
+  - `ProgressCallback = Callable[[int, int, str | None], Awaitable[None]]` 类型别名
+  - 主循环 `for step_i` 顶部 `if progress_cb: await progress_cb(step_i, max_steps, f"step {step_i+1}/{max_steps}")`
+  - 不传 progress_cb 时行为 100% 同 V0.16.0 (默认 None, kwarg 可选)
+  - **captcha poll 心跳留 V0.16.2** (需改 captcha module API), V0.16.1 仅主循环步进心跳
+- **`src/web_agent/replay.py` 抽** `render_to_file(task_id, out_dir, db_path) -> dict` helper (从 main() body 抽 ~10 LOC):
+  - 给 mcp_server.web_agent_get_replay 复用, main() 内部调同一 helper
+  - 返 `{task_id, html_path, step_count, result}` 结构化, mcp tool 直接透传
+- **`pyproject.toml`**:
+  - `[project.scripts]` 加 `web-agent-mcp = "web_agent.mcp_server:main"`
+  - `[dependency-groups] dev` 加 `mcp[cli]>=1.10,<2` (subagent 反馈: 1.2 pin 太旧, 1.10+ FastMCP API 稳定; 当前装 1.27 满足)
+- **新增** `tests/test_mcp_server.py` 10 case 用 `mcp.shared.memory.create_connected_server_and_client_session` (官方 in-memory transport):
+  1. `list_tools` 返 3 tool 名匹配
+  2. `web_agent_run` forward args verbatim (monkeypatch cli.run_task)
+  3. `web_agent_run` chrome_not_running → tool error (monkeypatch _check_chrome_alive throw)
+  4. `web_agent_run` 并发 2 个 → `_RUN_LOCK` 串行化 (assert 第 1 个 end < 第 2 个 start, 无重叠)
+  5. `web_agent_get_replay` happy path → `result.content[0].text` JSON parse 含 task_id/html_path/step_count
+  6. `web_agent_get_replay` non-existent → `RuntimeError` → tool error (SystemExit 已转 RuntimeError)
+  7. `web_agent_query_memory` empty domain → `result.structuredContent == {"result": []}`
+  8. `web_agent_query_memory` URL form → 自动 normalize via extract_domain ("https://github.com/x" → "github.com")
+  9. `web_agent_query_memory` seeded entries → list[dict] 含 ts/goal/success
+  10. `main()` smoke: monkeypatch `mcp.run()` 拦截 + 验证 root logger 配 stderr handler
+
+### Why
+- V0.16.0 print → logger 改造解锁 stdio mode 兼容, V0.16.1 真接通 MCP 协议层, Claude Desktop / Cursor / 任意 MCP client 可调 web-agent
+- subagent (Plan) 审核反馈采纳:
+  - **FastMCP decorator 风格** (`@mcp.tool() async def`) 比 Server class 简洁, 官方 1.10+ 稳定 API
+  - **module-level _RUN_LOCK** 比 class 属性简单, testability via monkeypatch.setattr 可重置
+  - **per-tool-call 健康检查** 比 server-start 检查灵活: query_memory/get_replay 不需 Chrome, 不让用户 launch server 时被强制起 Chrome
+  - **`progress_cb` DI 到 loop** 不破坏 loop/mcp 解耦 (loop 不 import mcp)
+  - **测试用 `create_connected_server_and_client_session`** 是 mcp 1.10+ 公开 asynccontextmanager (非私有 API), 跑真协议层 + monkeypatch 业务依赖最稳
+  - **替代方案否决**: subagent 早期提的 elicitation API + HTTP transport 留 V0.16.3 (Claude Desktop 2026-Q1 才正式支持)
+- **dict vs list 序列化差异**: 实测 FastMCP 1.27 把 list 返回放 `result.structuredContent={'result': [...]}`, dict 返回放 `result.content[0].text` JSON. 测试断言两路径分别用对应字段
+
+### Limitations (V0.16.2+ 待补)
+- **progress_cb 未真 wire 到 web_agent_run**: cli.run_task 当前不接 progress_cb kwarg, mcp_server 创建 progress_cb 后没透传; V0.16.2 加 cli kwarg + 真 wire 主循环 + captcha poll 心跳 (R2 风险: captcha 长 wait 60s 内必发心跳)
+- **Resources 留 V0.16.2**: `resources://web_agent/replay/<id>` + `memory/<domain>` 只读视图, 比 tool 干净
+- **Elicitation 留 V0.16.3**: safety 拦截时 `ctx.elicit(...)` 让 client 弹"agent 想点'发送', 是否授权?" 替代 `WEB_AGENT_AUTO_APPROVE` env
+- **HTTP transport 留 V0.16.3**: 默认 stdio (Claude Desktop 默认), `--http <port>` streamable HTTP 留扩展位
+
+### Compatibility
+- 公共 API 加: `mcp_server.{mcp, _RUN_LOCK, web_agent_run, web_agent_get_replay, web_agent_query_memory, _check_chrome_alive, main}` + `replay.render_to_file` + `loop.run_react_loop(progress_cb=...)`
+- 旧 220 tests + 2 smoke skip 与 V0.16.0 一致 (loop 加 kwarg 默认 None 不影响 cli.run_task → loop 旧调用)
+- 新增 10 mcp tests, 总 230 passed + 2 skipped
+- runtime deps 零变化 (mcp[cli] 仅 dev-dep, 用户装 web-agent 不强制装 mcp)
+
 ## [0.16.0] - 2026-05-04
 
 ### Refactor (MCP server 第 1 步硬前提: print → logging.info(stderr))

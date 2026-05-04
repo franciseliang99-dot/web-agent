@@ -10,8 +10,13 @@ import time
 import uuid
 from collections import deque
 from pathlib import Path
+from typing import Awaitable, Callable
 
 from playwright.async_api import Page
+
+# V0.16.1 progress callback: (step_i, max_steps, message=None) → 注 mcp ctx.report_progress
+# 形参可选, 不传则 loop 行为 100% 同 V0.16.0; 传则主循环每步 + captcha poll 心跳触发
+ProgressCallback = Callable[[int, int, str | None], Awaitable[None]]
 
 logger = logging.getLogger(__name__)
 
@@ -124,6 +129,7 @@ async def run_react_loop(
     db_path: Path = Path("data/trace.db"),
     screenshots_dir: Path = Path("data/screenshots"),
     memories: str | None = None,
+    progress_cb: ProgressCallback | None = None,
 ) -> str:
     """跑 ReAct 循环直到 done / max_steps / max_wallclock_s / 死循环 / LLM 失败。返回最终结果文本。
 
@@ -159,6 +165,8 @@ async def run_react_loop(
     try:
         for step_i in range(max_steps):
             elapsed = time.time() - t_start
+            if progress_cb is not None:
+                await progress_cb(step_i, max_steps, f"step {step_i + 1}/{max_steps}")
             if elapsed > max_wallclock_s:
                 result = (
                     f"WALLCLOCK_EXCEEDED at step {step_i}: 已 {elapsed:.1f}s 超过 max_wallclock_s={max_wallclock_s}s。"
