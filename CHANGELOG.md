@@ -2,6 +2,27 @@
 
 All notable changes to web-agent. 版本号遵循 SemVer 简化形式（V<major>.<minor>.<patch>）。
 
+## [0.16.8] - 2026-05-04
+
+### Docs (ARCHITECTURE.md §5 MCP server 章节 + 附录更新)
+- **新加 `docs/ARCHITECTURE.md` §5 MCP server** ~110 行 6 小节, 文档化 V0.16.0-V0.16.7 累积的协议层架构决策:
+  - **§5.1 三 tools + 两 resources 的语义切分**: tool (主动调用/可能副作用) vs resource (订阅/只读) 决策表; 为什么 replay/memory 双发 (tool + resource) — UI 按钮 vs LLM 上下文订阅; `_render_replay`/`_query_memory` 共享 helper
+  - **§5.2 progress 三轨**: mcp ctx → cli → loop 主循环 + captcha 心跳完整链路图; `ProgressCallback` 与 `ctx.report_progress` 1:1 对齐 (bound method 不需 wrapper); 60s no-traffic timeout 风险 + B 路径决策 (loop 内联 poll vs 改 captcha API)
+  - **§5.3 _RUN_LOCK 串行**: Chrome CDP 单 tab → asyncio.Lock module-level; cancellation 自动释放; 仅锁 web_agent_run
+  - **§5.4 9222 健康检查 per-tool-call**: 不在 server-start (eager 启动 vs 用户场景脱钩); urllib stdlib 用 asyncio.to_thread 包阻塞
+  - **§5.5 SystemExit → RuntimeError 转译**: replay.load_task sys.exit() CLI 行为, MCP 必转 Exception 防 server 退出
+  - **§5.6 print → logging.info(stderr) 硬前提**: stdio stdout 是 JSON-RPC 通道, 25 处 print 改造 + 7 处用户面向 stdout 保留 + capsys → caplog 测试迁移
+- **附录 A 版本里程碑速览** 加 V0.15.3-V0.16.7 共 8 条 (smoke 骨架 + MCP server 5 milestone)
+- **附录 B 硬约束** 219 → 235 tests release gate 同步
+
+### Why
+- V0.16.0-V0.16.7 累积的 MCP 决策散在 8 commit + 5 CHANGELOG 段, 接手人读不到 "为什么 tool/resource 双发" / "progress 为什么 DI 不 ctx threading" / "captcha 心跳为什么 B 路径"
+- subagent (Plan) 审核反馈采纳: V0.16.8 优先 ARCHITECTURE 而非 HTTP transport (用户未提) / OpenRouter 第四 smoke (LLM 三家齐边际价值低) / 真 Chrome smoke (易引入 flaky)
+
+### Compatibility
+- 零代码改动 (仅 docs/ARCHITECTURE.md + CHANGELOG + README + version bump)
+- 235 passed + 2 skipped 与 V0.16.7 一致
+
 ## [0.16.7] - 2026-05-04
 
 ### Refactor (V0.16.6 MCP Resources /simplify pass)
