@@ -27,6 +27,7 @@ from playwright.async_api import async_playwright
 
 from web_agent.browser import connect
 from web_agent.cli import run_task
+from web_agent.safety import _auto_approved  # 复用 safety 层 CSV 解析，避免 demo 用 substring 漏判
 
 
 async def _check_logged_in(cdp_url: str) -> tuple[bool, str]:
@@ -78,9 +79,8 @@ async def main() -> None:
         sys.exit(2)
 
     print(f"\n[gmail_compose] Gmail 已登录 (url={url_or_reason}); 收件人={recipient}")
-    auto_approve = os.environ.get("WEB_AGENT_AUTO_APPROVE", "")
-    if "send-or-pay" in auto_approve or "*" in auto_approve:
-        print("⚠ WEB_AGENT_AUTO_APPROVE 含 send-or-pay/*; 这次会真发邮件。")
+    if _auto_approved("send-or-pay"):
+        print("⚠ WEB_AGENT_AUTO_APPROVE 已放行 send-or-pay; 这次会真发邮件。")
     else:
         print("ℹ 默认 safety abort 模式; 真发: export WEB_AGENT_AUTO_APPROVE=send-or-pay")
 

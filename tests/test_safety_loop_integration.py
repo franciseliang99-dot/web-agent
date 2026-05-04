@@ -27,7 +27,7 @@ _SEND_BUTTON = Mark(
     input_type="", name="", href="",
 )
 # 8-byte 占位 (loop.py write_bytes(b64decode(...)) 需要合法 base64)
-_FAKE_SHOT_B64 = "aGVsbG8h"  # b'hello!'
+_FAKE_SHOT_B64 = "aGVsbG8h"
 
 
 class FakeLLMClient:
