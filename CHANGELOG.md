@@ -2,6 +2,35 @@
 
 All notable changes to web-agent. 版本号遵循 SemVer 简化形式（V<major>.<minor>.<patch>）。
 
+## [0.15.6] - 2026-05-04
+
+### Tools (Moonshot key 401 诊断脚本)
+- **新建** `scripts/diagnose_kimi_key.sh` (~70 行 bash, 零依赖):
+  - 优先读 `.env` 行 (handle 前导空格 `^[[:space:]]*OPENAI_API_KEY=`), fallback shell env
+  - 输出 metadata: 前 6 位 / 字节长度 / 末尾 `od -c` (识别 \n / \r / 空格污染)
+  - 双 curl 对比: raw key 直发 vs `tr -d '\r\n'` 清洗后再发, 都打到 `api.moonshot.cn/v1/models`, 只显示 HTTP code 不显示 key
+  - case 分支按 HTTP code 给修复指引: 401 (无效/未实名/欠费) / 402-429 (quota) / 200 (key OK 但 pytest 链路问题, 可能 vcr cassette stale)
+  - **不打印 key 主体**, 只 metadata + HTTP code, 符合 CLAUDE.md "不把 secret 写日志" 约束
+- 用户使用: `bash scripts/diagnose_kimi_key.sh [.env路径]` 一次跑出根因 + 修复方向
+
+### Why
+- V0.15.5 用户跑 `pytest --record-mode=once` 报 401, 多轮排查后发现两层问题:
+  1. 用户 shell 临时 export 的 `$OPENAI_API_KEY` 含换行 → curl 触发 `CURLE_URL_MALFORMAT`
+  2. `.env` 文件里的 key 干净 (51 bytes, 末尾 ASCII 无换行), 双 curl 都 401 → 真因是账号侧 (未实名/未充值/key 停用) 而非换行
+- 没有诊断脚本时这两层混在一起, 排查耗费 4-5 轮对话; 脚本一步分清"换行污染"vs"账号侧拒绝"
+- 复用价值: 任何后续 401 故障 (任意 user/CI/不同时间) 跑一次脚本就拿根因, 不必每次重新诊断
+- subagent (general-purpose) 审核策略反馈: 不直接 cat .env 读 key (CLAUDE.md "不写日志" 即便会话私密也不破例), 走"脚本读 + 只输出 metadata"路径, 零 key 泄漏面
+
+### Limitations
+- 仅诊断 OPENAI_API_KEY 一种 (Moonshot 国内版); 想覆盖 Anthropic / OpenAI 公网 / Kimi 国际版 需复制改 base_url
+- 不验"key 是国内版还是国际版" (账号系统隔离, curl 401 看不出来源端点错配); 用户得自查控制台来源
+- bash 仅, 假设有 curl + grep + sed + od + tr (POSIX 标配, macOS/Linux 都有, Windows 需 Git Bash 或 WSL)
+
+### Compatibility
+- 公共 API 零变化; src/ 业务代码 0 行改动
+- 219 tests + 2 smoke skip = 221 collected 不变, pytest gate 不影响
+- 脚本独立 tooling, 不挂任何 hook / 不被 pytest / cli 调用
+
 ## [0.15.5] - 2026-05-04
 
 ### Tests (W5-E Kimi smoke 端点切换 国际版 .ai → 国内版 .cn)
