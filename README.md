@@ -6,7 +6,7 @@ MultiOn 风格的「高度模仿人操作网页」AI web agent。
 
 ## 当前状态
 
-V0.15.9 (2026-05-04) — 34+ commits, 220 tests passing + 2 smoke skips (Kimi 国内 .cn cassette 已真录通; Anthropic + GPT 骨架 cassette 待用户接手)
+V0.15.10 (2026-05-04) — 35+ commits, 220 tests + 2 smoke skip; **两形态启动**: Z Chrome 观察面板 Phase 1/4 已落 (扩展骨架 + web-agent-serve helper), A MCP server 串行待 Z 完
 
 **W milestone 进度**:
 - W1 ✅ Wikipedia 搜词条 + 提取首段 (骨架 + 多 LLM 支持)

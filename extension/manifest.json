@@ -1,0 +1,21 @@
+{
+  "manifest_version": 3,
+  "name": "web-agent observer",
+  "version": "0.1.0",
+  "description": "观察 web-agent 已执行 task 的 replay 面板 (read-only, 不执行)",
+  "permissions": ["tabs"],
+  "host_permissions": ["http://localhost:8000/*"],
+  "action": {
+    "default_popup": "popup.html",
+    "default_icon": {
+      "16": "icon-128.png",
+      "32": "icon-128.png",
+      "48": "icon-128.png",
+      "128": "icon-128.png"
+    },
+    "default_title": "web-agent observer"
+  },
+  "icons": {
+    "128": "icon-128.png"
+  }
+}

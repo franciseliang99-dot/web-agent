@@ -2,6 +2,42 @@
 
 All notable changes to web-agent. 版本号遵循 SemVer 简化形式（V<major>.<minor>.<patch>）。
 
+## [0.15.10] - 2026-05-04
+
+### Added (Z 观察面板 Phase 1/4: 扩展骨架 + serve helper)
+- **新建** `extension/` (与 src/ tests/ 同级 sibling 目录, 不污染 python package):
+  - `manifest.json` MV3, name="web-agent observer", permissions=`tabs`, host_permissions=`http://localhost:8000/*`, action.default_popup=popup.html
+  - `popup.html` ~30 行: 480×640 popup, 顶 bar (蓝底 #1976d2 + W 图标 + "↗ Open in tab" 按钮), 下 iframe sandbox=`allow-same-origin allow-scripts allow-popups` 嵌 http://localhost:8000/index.html
+  - `popup.js` ~15 行: `chrome.tabs.create()` 新 tab 打开 + iframe error log 兜底
+  - `icon-128.png` 2143 字节: PIL 生成 128×128 蓝底 (#1976d2) 白色 W 字母, 复用 replay HTML 主色
+  - `README.md` ~50 行: 5 步 dev mode 加载流程 + 故障排查表 + Phase 路线图
+- **新模块** `src/web_agent/serve.py` (~30 行 stdlib only):
+  - `web-agent-serve` entry: 本机 HTTP server 服务 `data/replays/`, 默认端口 8000, 默认 bind 127.0.0.1 (仅本机访问)
+  - `--dir` / `--port` / `--bind` 三个 argparse 选项, 简单覆盖
+  - 给扩展 popup iframe 用 — 选项 A 本机服务 (subagent 审核 vs file:// 跨 scheme MV3 几乎必崩 / vs background fetch+inline 渲染太复杂)
+- **`pyproject.toml`** `[project.scripts]` 加 `web-agent-serve = "web_agent.serve:main"`
+
+### Why
+- 用户选 "A 全做" = Z (Chrome 观察面板, 3-5 天) + A (MCP server, 1-2 周) 串行
+- ARCHITECTURE.md §1.1 否决 MV3 重写执行栈 — Z 观察面板是唯一 ROI 高的 MV3 路径: 不动主架构, 仅 iframe 嵌入现 web-agent-replay 已生成的 HTML
+- subagent (Plan) 审核反馈采纳:
+  - **`extension/` 在 repo 根**而非 `src/web_agent/extension/`: ARCHITECTURE.md src/ 表只列 python 业务模块, sibling 目录不破坏 layout
+  - **选项 A 本机 HTTP 服务**: file:// 跨 scheme MV3 必崩, 本机 HTTP 最简, 加 `web-agent-serve` entry 一行命令更顺
+  - **patch bump V0.15.10 而非 minor V0.16.0**: V0.16.0 留 Z 全 4 phase + A 全完成再合 tag, Phase 1 仅工具骨架 (无业务逻辑) 走 patch
+  - **icon 128 size 偷懒**: MV3 manifest 推荐多 size (16/32/48/128), Phase 1 单 128 重用够 (Chrome 自动缩); 多 size 留 Phase 4 web store 上传时
+
+### Limitations
+- **Phase 1 仅骨架**: popup iframe hardcode http://localhost:8000/index.html, 不动态选 task; Phase 2 才加默认显示最新 task
+- **要求用户跑 `web-agent-serve` 才能看 popup**: 没起服务 popup 显示连接错误; Phase 3 加 chrome.runtime 状态检测
+- **不可执行**: 蓝本约束, 仅 read-only 观察, 用户操作浏览器仍走 `web-agent` CLI 主体
+- **扩展未上 Chrome Web Store**: dev mode load unpacked 即用; 上架留 Phase 4 后 V0.16.0+
+
+### Compatibility
+- 公共 API 加 `web_agent.serve.main` (entry script `web-agent-serve`)
+- src/ 业务模块零变化 (`serve.py` 是新增独立 module, 不被 cli/loop/perceiver 引用)
+- runtime deps 零变化 (stdlib only)
+- 220 tests + 2 smoke skip 不变 (serve.py 单测留 Phase 2/3 加, Phase 1 手测)
+
 ## [0.15.9] - 2026-05-04
 
 ### Refactor (W5-E smoke helpers /simplify pass)
