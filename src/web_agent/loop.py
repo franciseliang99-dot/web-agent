@@ -30,6 +30,48 @@ def _action_signature(action: Action) -> str:
     return f"{action.type}:{json.dumps(action.args, sort_keys=True, ensure_ascii=False)}"
 
 
+def _captcha_enabled() -> bool:
+    return os.environ.get("WEB_AGENT_CAPTCHA_DISABLE", "").lower() not in ("true", "1", "yes")
+
+
+async def _handle_captcha(page: Page, step_i: int, trace: Trace, conn, task_id: str) -> str | None:
+    """检测 captcha; 命中 → wait → 解决返回 None (loop 继续) / 超时返回 result 字符串 (loop abort)。
+
+    在 perceive() 之前调: 避 SoM 注入污染 captcha 页 + 省 perceive 开销。
+    超时路径写 trace captcha_timeout step + end_task, 镜像 V0.6.0 safety_block。
+    """
+    if not _captcha_enabled():
+        return None
+    info = await captcha_detect(page)
+    if info is None:
+        return None
+    timeout_s = float(os.environ.get("WEB_AGENT_CAPTCHA_TIMEOUT_S", "300"))
+    poll_s = float(os.environ.get("WEB_AGENT_CAPTCHA_POLL_S", "3"))
+    print(
+        f"\n[captcha] {info.vendor} 命中 @ {info.url[:80]} — "
+        f"请在浏览器手动解决, agent 每 {poll_s}s 重检 (超时 {timeout_s}s)",
+        flush=True,
+    )
+    if await captcha_wait(page, timeout_s=timeout_s, poll_s=poll_s):
+        print(f"[captcha] {info.vendor} 已清除, loop 继续", flush=True)
+        return None
+    result = (
+        f"CAPTCHA_TIMEOUT at step {step_i}: {info.vendor} 未在 "
+        f"{timeout_s}s 内解决 (url={info.url})"
+    )
+    print(f"\n[captcha] {result}")
+    step = Step(
+        step=step_i, ts=time.time(), thought="(captcha 超时)",
+        action_type="captcha_timeout",
+        action_args={"vendor": info.vendor, "url": info.url, "timeout_s": timeout_s},
+        observation=result,
+    )
+    trace.append(step)
+    write_step(conn, task_id, step, "")
+    end_task(conn, task_id, result)
+    return result
+
+
 async def run_react_loop(
     page: Page,
     client: LLMClient,
@@ -71,40 +113,9 @@ async def run_react_loop(
 
             await think()
 
-            # captcha 接管: 检测在 perceive 之前 (避 SoM 注入污染 captcha 页 + 省 perceive 开销)。
-            # 命中 → 轮询 wait_for_resolution 让用户在浏览器手解, 超时 graceful abort 写 trace。
-            if os.environ.get("WEB_AGENT_CAPTCHA_DISABLE", "").lower() not in ("true", "1", "yes"):
-                captcha_info = await captcha_detect(page)
-                if captcha_info is not None:
-                    captcha_timeout_s = float(os.environ.get("WEB_AGENT_CAPTCHA_TIMEOUT_S", "300"))
-                    captcha_poll_s = float(os.environ.get("WEB_AGENT_CAPTCHA_POLL_S", "3"))
-                    print(
-                        f"\n[captcha] {captcha_info.vendor} 命中 @ {captcha_info.url[:80]} — "
-                        f"请在浏览器手动解决, agent 每 {captcha_poll_s}s 重检 (超时 {captcha_timeout_s}s)",
-                        flush=True,
-                    )
-                    ok = await captcha_wait(page, timeout_s=captcha_timeout_s, poll_s=captcha_poll_s)
-                    if not ok:
-                        result = (
-                            f"CAPTCHA_TIMEOUT at step {step_i}: {captcha_info.vendor} 未在 "
-                            f"{captcha_timeout_s}s 内解决 (url={captcha_info.url})"
-                        )
-                        print(f"\n[captcha] {result}")
-                        step = Step(
-                            step=step_i, ts=time.time(), thought="(captcha 超时)",
-                            action_type="captcha_timeout",
-                            action_args={
-                                "vendor": captcha_info.vendor,
-                                "url": captcha_info.url,
-                                "timeout_s": captcha_timeout_s,
-                            },
-                            observation=result,
-                        )
-                        trace.append(step)
-                        write_step(conn, task_id, step, "")
-                        end_task(conn, task_id, result)
-                        return result
-                    print(f"[captcha] {captcha_info.vendor} 已清除, loop 继续", flush=True)
+            captcha_abort = await _handle_captcha(page, step_i, trace, conn, task_id)
+            if captcha_abort is not None:
+                return captcha_abort
 
             marks, screenshot_b64 = await perceive(page)
 

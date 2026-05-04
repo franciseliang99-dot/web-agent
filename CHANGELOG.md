@@ -2,6 +2,15 @@
 
 All notable changes to web-agent. 版本号遵循 SemVer 简化形式（V<major>.<minor>.<patch>）。
 
+## [0.9.1] - 2026-05-03
+
+### Refactor (V0.9.0 W4-2 simplify)
+- `loop.py`: 抽 `_handle_captcha(page, step_i, trace, conn, task_id) -> str | None` + `_captcha_enabled()` helper
+  - 主循环里 35 行三层嵌套 (`if env != disabled` → `if info` → `if not ok`) → 3 行 (`captcha_abort = await _handle_captcha(...); if captcha_abort: return`)
+  - 双否定 env check `not in ("true", "1", "yes")` 抽到 `_captcha_enabled()` 正向返回
+  - 行为零变化: env 取值时机 (每步重读) / vendor/url 80 字截断 / trace step 字段全保留, 103/103 tests 全绿
+- 触发: 用户 CLAUDE.md `/simplify` 自动化判据 ① 新增公共方法 + ③ >30 行 + ④ 引入新抽象 三命中
+
 ## [0.9.0] - 2026-05-03
 
 ### Added (W4-2: 验证码接管 UX)
