@@ -2,6 +2,48 @@
 
 All notable changes to web-agent. 版本号遵循 SemVer 简化形式（V<major>.<minor>.<patch>）。
 
+## [0.12.0] - 2026-05-03
+
+### Added (W5-B: Shadow DOM 穿透 + perceiver 单测填补)
+- **`perceiver.py` `_SOM_INJECT_JS` 加 stack-based shadow walker**:
+  - 原 `Array.from(document.querySelectorAll(sel))` → stack 遍历 [document, shadowRoot1, shadowRoot2, ...]
+  - 收集顺序: light DOM first (id 1..K) → 各 open shadowRoot (id K+1..)
+  - `WeakSet visited` 防自引用死循环 (规范禁止 host===self 但防御)
+  - **只穿 open shadowRoot** (closed mode JS 不可达, W3C 设计, 文档化为 known limitation)
+  - bbox `getBoundingClientRect()` 跨 shadow 仍是视口相对 → 红框注入仍 `document.body.appendChild` (zIndex 2147483646 几乎最大)
+- **`_SOM_INJECT_JS` 改签名为 `(opts)`** + perceive() 入口 lazy 读 env:
+  - `WEB_AGENT_SOM_SHADOW=false` (或 0/no/off) 退化到 V0.11.x light-DOM only 行为
+  - 默认 ON, 与 V0.5.1 `WEB_AGENT_AUTO_DISMISS` 风格对称
+- **新测** `tests/test_perceiver.py` 12 case (audit gap 填补, V0.6.0 之前 perceiver 0 单测):
+  - `marks_to_text` 7 case: 空 / 无 role 无 text / 含 role / 含 text / role+text / 多 marks join / 中文
+  - `Mark` dataclass 2 case: 默认 input_type/name/href 空字符串 / 全字段
+  - `_SOM_INJECT_JS` smoke 3 case: shadowRoot+open+visited 三关键词共现 / opts 参数签名 / 现有 visibility 过滤保留
+
+### Why
+- 蓝本 `docs/高度模仿人操作网页的agent技术路径图.txt` 明确点了「Shadow DOM 穿透」, 至今未落地
+- 现代 SaaS 大量用 Shadow DOM: Stripe checkout / 部分 GitHub UI / Salesforce Lightning / 各种 Web Components — 不穿透则 SoM 漏标这些组件 → LLM 看到截图但 mark 列表里没 id → 死循环 (V0.5.0 anti-loop / W5-A reflect 兜底但浪费 step)
+- subagent (Plan) 评估 6 决策点全采纳:
+  - 红框 mounting: 都 `document.body.appendChild` 浮层 (zIndex 已最大几乎不被遮)
+  - closed shadowRoot: 不穿 (规范不可达 + 用户体验等价 V0.11.1)
+  - id 顺序: light first → shadow last (兼容 demo 视觉习惯)
+  - 版本 V0.12.0 minor (蓝本 Shadow DOM 与 W5-A 反思并列独立能力)
+  - env 名 `WEB_AGENT_SOM_SHADOW` (与 `WEB_AGENT_AUTO_DISMISS` 前缀对齐, true/false 双向)
+  - JS setter 时机: per-call `page.evaluate(_SOM_INJECT_JS, {shadow: bool})` (而非 `add_init_script` next-nav 才生效)
+
+### Limitations
+- **iframe ≠ shadow DOM**: 跨域 iframe 走 `page.frames()` 路径不在本任务覆盖
+- **closed shadowRoot 漏标**: W3C 设计, 规范上无解; 罕见生产场景 (大多数组件用 open mode)
+- **性能**: 大型 SaaS (几百 shadowRoot) 每步 perceive 多 50-200ms; 可接受 (perceive 本身 ~1s 量级); env opt-out 是 escape hatch
+- **z-index 罕见冲突**: shadow 内 dialog 用 max int 时红框被遮; 可接受 (LLM 仍能看截图轮廓)
+- **JS smoke test 弱**: substring 检测易受 refactor 影响; 选 `shadowRoot + open + visited` 三关键词共现降误报概率
+- **真行为单测缺**: shadow DOM 跨度需真 browser + fixture 验证, 沿 V0.5.0 anti-loop / V0.7.0 safety-loop 同档 — 用集成跑 demo 验真; CI 单测保 JS 字符串完整性
+
+### Compatibility
+- 公共 API 零变化 (Mark schema / perceive 签名 / marks_to_text 全保留)
+- 行为变化: shadow 内组件首次进 marks 列表 → mark id 总数可能增加 → LLM 看到的元素列表更长 (这正是 W5-B 目标)
+- 现有 demo (Wikipedia / GitHub / Gmail) light DOM 主导, 影响最小; 真触发 shadow 路径的站需用户实测
+- 旧 118 测试零修改全过; 新增 12 case, 总 130 tests 全绿
+
 ## [0.11.1] - 2026-05-03
 
 ### Refactor (/simplify W5-A reflect)

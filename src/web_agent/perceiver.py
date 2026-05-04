@@ -22,9 +22,27 @@ class Mark:
 
 
 _SOM_INJECT_JS = """
-() => {
+(opts) => {
   const sel = 'a, button, input, textarea, select, [role="button"], [role="link"], [role="textbox"], [role="checkbox"], [role="tab"], [role="menuitem"], [role="menuitemradio"], [role="menuitemcheckbox"], [role="option"], [role="combobox"], [role="switch"], [role="radio"], [contenteditable="true"]';
-  const all = Array.from(document.querySelectorAll(sel));
+  // W5-B Shadow DOM 穿透: stack-based open shadowRoot walker
+  // light DOM first → 各 open shadowRoot, WeakSet visited 防自引用; closed mode 跳过 (W3C 设计 JS 不可达)
+  const SHADOW_ON = !opts || opts.shadow !== false;
+  const collected = [];
+  const visited = new WeakSet();
+  const stack = [document];
+  while (stack.length) {
+    const root = stack.pop();
+    if (visited.has(root)) continue;
+    visited.add(root);
+    root.querySelectorAll(sel).forEach(e => collected.push(e));
+    if (!SHADOW_ON) continue;
+    root.querySelectorAll('*').forEach(e => {
+      if (e.shadowRoot && e.shadowRoot.mode === 'open' && !visited.has(e.shadowRoot)) {
+        stack.push(e.shadowRoot);
+      }
+    });
+  }
+  const all = collected;
   const els = all.filter(e => {
     const r = e.getBoundingClientRect();
     if (r.width <= 1 || r.height <= 1) return false;
@@ -149,7 +167,9 @@ async def perceive(page: Page) -> tuple[list[Mark], str]:
     dismissed = await maybe_auto_dismiss(page)
     if dismissed:
         print(f"[perceive] auto-dismissed {len(dismissed)} popup(s): {dismissed}")
-    raw = await page.evaluate(_SOM_INJECT_JS)
+    # W5-B: WEB_AGENT_SOM_SHADOW=false 退化到 V0.11.x light-DOM only 行为
+    shadow_on = os.environ.get("WEB_AGENT_SOM_SHADOW", "true").lower() not in ("false", "0", "no", "off")
+    raw = await page.evaluate(_SOM_INJECT_JS, {"shadow": shadow_on})
     marks = [
         Mark(
             id=m["id"], tag=m["tag"], role=m["role"], text=m["text"], bbox=m["bbox"],
