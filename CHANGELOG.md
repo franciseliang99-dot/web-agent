@@ -2,6 +2,46 @@
 
 All notable changes to web-agent. 版本号遵循 SemVer 简化形式（V<major>.<minor>.<patch>）。
 
+## [0.9.0] - 2026-05-03
+
+### Added (W4-2: 验证码接管 UX)
+- **新模块** `src/web_agent/captcha.py`: `CaptchaInfo` dataclass + `detect(page)` 纯检测 + `wait_for_resolution(page, timeout_s, poll_s)` 异步轮询
+  - 4 vendor: cloudflare-turnstile / recaptcha (v2 visible) / hcaptcha / google-verify (body 文本兜底)
+  - visibility 过滤排除 0×0 隐形 reCAPTCHA v3 (常驻 SaaS 站, 永远存在则无意义)
+  - detect except Exception → None: page navigating / fake page 缺 evaluate 不该崩 loop
+- **`loop.py` 接入**: 在 `await think()` 后、`perceive()` 前插 captcha 检测分支
+  - 命中 → 终端打印 vendor + url + 倒计时 → 异步轮询 wait_for_resolution
+  - 用户在浏览器手解 → detect 清除 → loop 自然继续
+  - 超时 → graceful abort + 写 trace `Step(action_type="captcha_timeout", action_args={vendor, url, timeout_s})` (镜像 V0.6.0 safety_block 路径)
+- **env**:
+  - `WEB_AGENT_CAPTCHA_DISABLE` (true/1/yes 跳过检测, 退化到 V0.8.0 行为)
+  - `WEB_AGENT_CAPTCHA_TIMEOUT_S` 默认 300.0
+  - `WEB_AGENT_CAPTCHA_POLL_S` 默认 3.0
+- **测试** `tests/test_captcha.py` 12 case:
+  - detect: 4 vendor (parametrized) / no captcha / page.evaluate 抛异常 / page 缺 evaluate
+  - wait_for_resolution: 清除返回 True / 超时返回 False
+  - loop 集成: pause-resume / 超时 abort 写 trace / DISABLE env 跳过 detect
+
+### Why
+- 蓝本 + README line 125 明示「不接 2Captcha 自动绕(越线), 用「暂停 → 弹窗让用户解 → 恢复循环」UX」— W4-2 之前一直只在文档承诺, 零落地
+- subagent (Plan) 评估架构 3 维:
+  - 检测在 perceive **前** > 后: 避 SoM JS 注入污染 captcha 页 + 省 perceive 开销 (perceive 是重操作, 解 captcha 期间无意义重跑)
+  - `asyncio.sleep` 轮询 > `page.wait_for_function`: 轮询 detect() 路径与单测一致, JS 端轮询逻辑要复杂 4 倍 (4 vendor selectors)
+  - inline FakePage/FakeLLMClient > conftest.py 抽: V0.7.0 决策一致 (N=2 仍按 YAGNI 不抽 helper, 抽 conftest 等于"修改" V0.7.0 测试违反零修改约束)
+- captcha_timeout step 与 safety_block 平行 镜像: 调试一致性 + replay UI 已支持 special action 颜色高亮 (W4-1 已加 step--error / step--safety / step--done / step--loop, W4-2 trace 自动适配)
+
+### Limitations
+- **headless / SSH 无桌面**: 用户无法在浏览器手解 captcha; 设 `WEB_AGENT_CAPTCHA_DISABLE=true` 退化到 V0.8.0 行为或接受 captcha_timeout 抛错
+- **后台跑 demo**: 终端 print 用 flush=True 但仍可能被日志重定向掩盖; 未来 W4-3 可加 desktop notification (osascript / notify-send)
+- **Cloudflare invisible Turnstile**: 一些配置不需用户点, 几秒自动通过; 体验路径走 wait → 自动清除 → 继续, 正常工作 (但 timeout 倒计时显示可能让用户疑惑)
+- **多 captcha 同存** (罕见): 优先级返回首个, 解决后下一步若另一个再触发 → 自然串行处理, 无需特殊路径
+
+### Compatibility
+- 公共 API 零变化: `run_react_loop / run_task / make_client` 签名全保留
+- V0.7.0 `test_safety_loop_integration.py` FakePage 缺 evaluate, detect 异常吞掉 → None → 旧 91 测试零修改全过 (这正是 detect 设计 except Exception 的目的)
+- 行为变化: 默认 ON; 首次跑现有 demo (Wikipedia / GitHub / Gmail) 不会触发 (这些站无 captcha); 未来撞 Cloudflare 站点会自动暂停。出问题 `WEB_AGENT_CAPTCHA_DISABLE=true` 全关
+- 总测试: 旧 91 + 新 12 = 103 全绿
+
 ## [0.8.0] - 2026-05-03
 
 ### Added (W4-1: replay 日志面板)

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import base64
 import json
+import os
 import time
 import uuid
 from collections import deque
@@ -12,6 +13,8 @@ from pathlib import Path
 from playwright.async_api import Page
 
 from web_agent.actuator import human_like_click, human_like_type, scroll, think
+from web_agent.captcha import detect as captcha_detect
+from web_agent.captcha import wait_for_resolution as captcha_wait
 from web_agent.llm import Action, LLMClient
 from web_agent.perceiver import Mark, perceive
 from web_agent.safety import check as safety_check
@@ -67,6 +70,42 @@ async def run_react_loop(
                 return result
 
             await think()
+
+            # captcha 接管: 检测在 perceive 之前 (避 SoM 注入污染 captcha 页 + 省 perceive 开销)。
+            # 命中 → 轮询 wait_for_resolution 让用户在浏览器手解, 超时 graceful abort 写 trace。
+            if os.environ.get("WEB_AGENT_CAPTCHA_DISABLE", "").lower() not in ("true", "1", "yes"):
+                captcha_info = await captcha_detect(page)
+                if captcha_info is not None:
+                    captcha_timeout_s = float(os.environ.get("WEB_AGENT_CAPTCHA_TIMEOUT_S", "300"))
+                    captcha_poll_s = float(os.environ.get("WEB_AGENT_CAPTCHA_POLL_S", "3"))
+                    print(
+                        f"\n[captcha] {captcha_info.vendor} 命中 @ {captcha_info.url[:80]} — "
+                        f"请在浏览器手动解决, agent 每 {captcha_poll_s}s 重检 (超时 {captcha_timeout_s}s)",
+                        flush=True,
+                    )
+                    ok = await captcha_wait(page, timeout_s=captcha_timeout_s, poll_s=captcha_poll_s)
+                    if not ok:
+                        result = (
+                            f"CAPTCHA_TIMEOUT at step {step_i}: {captcha_info.vendor} 未在 "
+                            f"{captcha_timeout_s}s 内解决 (url={captcha_info.url})"
+                        )
+                        print(f"\n[captcha] {result}")
+                        step = Step(
+                            step=step_i, ts=time.time(), thought="(captcha 超时)",
+                            action_type="captcha_timeout",
+                            action_args={
+                                "vendor": captcha_info.vendor,
+                                "url": captcha_info.url,
+                                "timeout_s": captcha_timeout_s,
+                            },
+                            observation=result,
+                        )
+                        trace.append(step)
+                        write_step(conn, task_id, step, "")
+                        end_task(conn, task_id, result)
+                        return result
+                    print(f"[captcha] {captcha_info.vendor} 已清除, loop 继续", flush=True)
+
             marks, screenshot_b64 = await perceive(page)
 
             shot_path = screenshots_dir / f"{task_id}-{step_i:02d}.png"
