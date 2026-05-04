@@ -2,6 +2,28 @@
 
 All notable changes to web-agent. 版本号遵循 SemVer 简化形式（V<major>.<minor>.<patch>）。
 
+## [0.12.6] - 2026-05-03
+
+### Tests (audit gap fill: cli.py 9 case)
+- **新建** `tests/test_cli.py`: cli.py 入口 (W3-C/W4-1/W4-2/W4-3 多次改过, 仅 demo smoke 间接覆盖) 9 case 收尾 audit gap
+  - **基础 signature** 1: `run_task` 是 coroutine function (与 demos_smoke 同档防 sync 改动)
+  - **argparse 解析** 5: goal-only / 全 flags / max_steps int 强制失败 SystemExit / missing goal SystemExit / main 打印结果带 `=== 任务结果 ===` 标题
+  - **env precedence** 3: cli arg > env > default 三档全测 (max_steps default=20 / max_wallclock_s default=300; arg=7 覆盖 env=99; env=50 当 arg 缺时生效)
+- 实现要点:
+  - `_RunTaskRecorder` patch `web_agent.cli.run_task` 收 main() 透传的 kwargs (argparse 测路径)
+  - `patch_run_task_io_chain` fixture 拦掉 load_dotenv/async_playwright/connect/apply_stealth/make_client/run_react_loop 全套 IO, 只放过 env/参数解析路径
+  - `_FakePlaywrightCtx` async ctx mgr stub; AsyncMock 给 page.set_viewport_size/goto
+
+### Why
+- audit findings 历次列入 cli/browser/loop 主体测试盲区; 此前 perceiver (V0.12.0) + trace (V0.12.4) 已补完, cli 是剩余高 ROI 项
+- W3-C/W4-2/W4-3 引入的 max_wallclock_s / cdp_url / provider / model 全靠 env 路径, 之前只有 demo smoke 间接验证, 改 env precedence 静默破坏风险高
+- 主体 run_react_loop 通过 V0.7.0 / V0.9.0 / V0.11.0 / V0.5.0 多个 integration test 间接覆盖, 不重复测
+
+### Compatibility
+- 零代码改动 (cli.py / loop.py / browser.py 全不动)
+- 旧 148 测试零修改全过; 新 9 case, 总 157 tests 全绿
+- 公共 API 零变化, 行为零变化
+
 ## [0.12.5] - 2026-05-03
 
 ### Docs
