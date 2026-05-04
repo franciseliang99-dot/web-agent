@@ -79,7 +79,6 @@ def load_task(task_id: str | None, db_path: Path = DEFAULT_DB) -> dict:
             "thought": s["thought"] or "",
             "action_type": s["action_type"] or "",
             "action_args": args,
-            "screenshot_path": s["screenshot_path"] or "",
             "observation": s["observation"] or "",
         })
     return {
@@ -144,7 +143,7 @@ def _render_step(task_id: str, step: dict) -> str:
         f'  <pre class="action">{html.escape(args_pretty)}</pre>\n'
         f'  <details class="shot"><summary>screenshot</summary>'
         f'<img src="{html.escape(_shot_src(task_id, step["step"]))}" '
-        f'alt="step {step["step"]:02d} (missing)" loading="lazy"></details>\n'
+        f'alt="step {step["step"]:02d}" loading="lazy"></details>\n'
         f'  <div class="observation">{html.escape(step["observation"])}</div>\n'
         f'</section>\n'
     )
