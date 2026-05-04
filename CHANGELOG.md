@@ -2,6 +2,62 @@
 
 All notable changes to web-agent. 版本号遵循 SemVer 简化形式（V<major>.<minor>.<patch>）。
 
+## [0.13.0] - 2026-05-03
+
+### Added (W5-D: 长期记忆 MVP)
+- **新模块** `src/web_agent/memory.py`: 跨 session 持久化 task outcome by domain
+  - `MemoryEntry` dataclass: ts (float) / domain (str) / goal (str) / result (str, 200 字截断) / success (bool)
+  - `extract_domain(url)` 纯函数: `urlparse(url).netloc.lower()` (空/None/异常返 ""; about:blank, javascript: 等无 netloc URL 自然落到空)
+  - `is_success(result)` 纯函数: 6 类失败 marker substring 命中即 False (与 loop.py V0.5.0/V0.5.2/V0.6.0/V0.9.0 内 graceful abort result 字符串前缀对齐: `(max_steps` / `WALLCLOCK_EXCEEDED` / `SAFETY_BLOCK` / `CAPTCHA_TIMEOUT` / `LOOP_DETECTED` / `LLM_FAILED`)
+  - `init_memory_db(db_path)`: 单表 `memories(id PK AUTOINCREMENT, ts, domain, goal, result, success)` + `idx_memories_domain_ts` 索引
+  - `record_task(db_path, domain, goal, result, success)`: append 一行, 200 字截断 result
+  - `recall_by_domain(db_path, domain, limit=5) -> list[MemoryEntry]`: ORDER BY ts DESC; db 不存在返 [] 友好兜底
+  - 与 `trace.db` **分开** (`data/memory.db`): schema 演进独立 / 备份/清理粒度独立
+- **`cli.py` 集成 hook** (`run_task` 末尾, 紧贴 `return result` 之前):
+  - try/except 包裹: 记忆失败 (磁盘满/权限) 不阻塞主路径返回, 仅 print warning
+  - 从 `start_url` 提取 domain (无 url 任务 domain="")
+  - `is_success(result)` 自动判定 success/fail
+- **新 CLI** `web-agent-memory <domain> [--limit N] [--db ...]`:
+  - dump 该 domain 最近 N 条记忆 (newest first)
+  - 输出格式 `[ISO_ts] OK|FAIL  goal[:60]  ->  result[:80]`
+  - 空 domain 友好提示 `(no memories for domain=...)`
+- **env**:
+  - `WEB_AGENT_MEMORY_DISABLE=true` 完全关 (CI / 不想留痕迹)
+  - `WEB_AGENT_MEMORY_DB=data/memory.db` 自定义路径
+- **测试** `tests/test_memory.py` 27 case (parametrize 展开后):
+  - extract_domain 7 (parametrize): 标准 / 端口 / lowercase 归一 / 空/None / about:blank / javascript:
+  - is_success 9 (parametrize): 正常结果 + 中文 + 空 + 6 类失败 marker
+  - FAILURE_MARKERS 与 loop.py 对齐回归保护 1
+  - init_memory_db 2: 表+索引 / parent dir mkdir
+  - record_task + recall_by_domain 5: 写读 / DESC 排序 / domain 过滤 / limit / db 不存在返 [] / result 截断 200
+  - main CLI 2: dump 多条 / 空 domain 友好提示
+- **`.gitignore`** 加 `data/memory.db`
+
+### Why
+- 蓝本认知层 (ReAct + 短期记忆 V0.5.0 + 自反思 V0.11.0 + step limit + 回退暗含 W5-A 4 策略) 已完成
+- 长期记忆是项目延伸 (蓝本未明确列出但实际有用): 跨 session 学到 "在 X 站之前这样做过 / 失败过", 为未来 W5-D.2 inject 到 planner 提供数据基础
+- subagent (Plan) 评估 7 决策点全采纳:
+  - failure 判定 substring (与 replay.py `_RESULT_HIGHLIGHT` 风格一致, 无正则复杂度)
+  - memory.db 与 trace.db 分开 (schema 解耦)
+  - extract_domain 空 url 返 "" 不抛 (友好降级 + 仍允许 record)
+  - V0.13.0 minor (新模块 + 新 CLI + 新行为轴 + 新 db 文件 + 新 env, 远超 patch)
+  - try/except 包裹集成 hook (记忆不阻塞主路径)
+  - 不动 planner Protocol / 不 inject observation (留 W5-D.2)
+  - AUTOINCREMENT vs trace 复合 PK 风格不一致 (两 db 解耦, 接受)
+
+### Limitations
+- **不 inject 到 planner**: 当前 MVP 仅持久化 + CLI dump; LLM 看不到历史记忆 → 无法基于过去经验调整策略。需 W5-D.2 改 planner Protocol 或在 trace.observation inject 历史 (类似 W5-A reflect hint)
+- **start_url=None 任务 domain 全为 ""**: 大多 demo 有 start_url, 但 CLI 直接传 goal 无 url 时 domain 全空 → recall("") 列表会膨胀; MVP 接受, 未来加 "首屏 URL 探测" 改进
+- **failure marker 硬编码字符串**: loop.py 改文案 (e.g. `(max_steps reached)` 替代 `(max_steps 耗尽未完成)`) → memory.py 的 marker 需同步; 已通过 `test_failure_markers_align_with_loop_signals` 单测兜回归
+- **AUTOINCREMENT vs trace 复合 PK 风格不一致**: 两 db 解耦下可接受
+- **SQLite 默认锁**: 当前 run_task 串行无并发; 未来并发跑多 task 需考虑 WAL — 列入 W5-D.2 风险
+
+### Compatibility
+- 公共 API 增 (`memory.MemoryEntry / extract_domain / is_success / init_memory_db / record_task / recall_by_domain / main`)
+- `cli.py run_task` 末尾增加 hook (env-gated 可关), 现有 demo 行为零变化 (任务结果不受影响)
+- 旧 160 测试零修改全过; 新 27 case (parametrize 7+9+1+2+6+2), 总 187 tests 全绿
+- 新增 CLI script `web-agent-memory` 不影响 `web-agent` / `web-agent-replay`
+
 ## [0.12.8] - 2026-05-03
 
 ### Tests (audit gap fill: loop.py 主体 abort 路径 3 case)
