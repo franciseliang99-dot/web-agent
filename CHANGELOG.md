@@ -2,6 +2,26 @@
 
 All notable changes to web-agent. 版本号遵循 SemVer 简化形式（V<major>.<minor>.<patch>）。
 
+## [0.15.1] - 2026-05-03
+
+### Tests (audit gap 100% 收尾: browser + anthropic 最后两模块)
+- **新建** `tests/test_browser.py` 8 case: connect 三元组返回 / 空 contexts RuntimeError / 无 pages 调 new_page / apply_stealth 5 路径 (apply_stealth_async / apply_async / API 未匹配 skip / ImportError 吞 / 一般 Exception 吞)
+- **新建** `tests/test_llm_anthropic.py` 7 case: __init__ env api_key / 显式 override env / base_url env 透传 / 显式 base_url 优先 / 缺 api_key RuntimeError / 显式 model / _tools 非空 (≥4 actions)
+- **不改** browser.py / anthropic.py 任何一行 (test-only)
+- 实现要点:
+  - browser.py: AsyncMock + SimpleNamespace + monkeypatch.setitem(sys.modules, ...) 模拟 playwright_stealth 多版本 API
+  - anthropic.py: patch web_agent.llm.anthropic.AsyncAnthropic, 验证传入 SDK 的 kwargs 含 max_retries=4/timeout=120/base_url 等
+
+### Why
+- 完整 audit gap 收尾: 本会话累计填补 perceiver V0.12.0 / trace V0.12.4 / cli V0.12.6 / loop 主体 V0.12.8 / **browser V0.15.1 / anthropic V0.15.1** = **6/6 全部模块覆盖**
+- 之前 README 标的 "browser/anthropic 真实 API 测试 难度 ROI 低" 简化为 init 路径 + fallback 分支测 (不真调 API), 收益/风险比合理
+- 本会话所有 audit gap 100% 收尾, "11/11 模块全单测覆盖" 状态达成
+
+### Compatibility
+- 零代码改动 (browser.py / anthropic.py 全不动)
+- 旧 204 测试零修改全过; 新 15 case (8 browser + 7 anthropic), 总 219 tests 全绿
+- 公共 API 零变化, 行为零变化
+
 ## [0.15.0] - 2026-05-03
 
 ### Added (W5-C: 分层规划 prompt augmentation 路线)
