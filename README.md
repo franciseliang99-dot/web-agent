@@ -6,7 +6,7 @@ MultiOn 风格的「高度模仿人操作网页」AI web agent。
 
 ## 当前状态
 
-V0.15.3 (2026-05-03) — 28+ commits, 219 tests passing + 1 smoke skip (LLM cassette 待用户首次录)
+V0.15.4 (2026-05-03) — 29+ commits, 219 tests passing + 2 smoke skips (Anthropic + Kimi cassette 待用户首次录)
 
 **W milestone 进度**:
 - W1 ✅ Wikipedia 搜词条 + 提取首段 (骨架 + 多 LLM 支持)
@@ -99,12 +99,18 @@ uv run web-agent-memory wikipedia.org --db data/memory.db
 - patchright-python 决断 (仍用 `playwright-stealth` 2.0.3, 未实测 Cloudflare 突破率)
 - 住宅代理 + curl_cffi TLS 指纹接入
 - Gmail 真账号端到端验收 (CI 不发邮件; W3-C demo 需用户 `WEB_AGENT_TEST_RECIPIENT` 真投)
-- **真实 LLM smoke + cassette** (V0.15.3 骨架已落): `tests/test_smoke_anthropic_real.py` + `tests/conftest.py` vcr_config 工具齐, 接手仅需:
+- **真实 LLM smoke + cassette** (V0.15.3 + V0.15.4 双骨架已落, Anthropic + OpenAI(Kimi) 两路径):
   ```bash
+  # Anthropic 路径 (V0.15.3)
   ANTHROPIC_API_KEY=sk-ant-xxx uv run pytest tests/test_smoke_anthropic_real.py --record-mode=once
+
+  # OpenAI/Kimi 路径 (V0.15.4, 用 Moonshot 国际版 sk-xxx)
+  OPENAI_API_KEY=sk-xxx uv run pytest tests/test_smoke_openai_kimi_real.py --record-mode=once
+
   git add tests/cassettes/  # cassette header 已 filter, 无 key 泄漏
   ```
-  之后任何人/CI 无 key 也能跑 (走 cassette replay)。单录成本 ≈ $0.006。OpenAI/Kimi 同模式骨架留 V0.15.4
+  之后任何人/CI 无 key 也能跑 (走 cassette replay)。单录成本: Anthropic ≈ $0.006 / Kimi ≈ $0.004。
+  纯 GPT (api.openai.com) / OpenRouter 路径骨架待 V0.15.5+, 同模板可补
 - **SYSTEM_PROMPT snapshot test** (撤): subagent 审核反对 — 7 条规则文案微调本就常见, snapshot 锁会每次改文案都更新 cassette → false positive 噪音 > 真回归捕获价值。`test_llm_schema.py` 已锁工具数+name 集+required 字段, 够用; 改 SYSTEM_PROMPT 走 review 而非自动测
 
 ## BYO LLM API key
@@ -228,7 +234,7 @@ demos/
   gmail_compose.py       # W3-C (write, safety 拦 Send 默认 abort)
 scripts/
   start_chrome.sh  # 启动 9222 调试端口的独立 Chrome (auto/xvfb/headed/headless)
-tests/             # 219 passed + 1 skip = 220 collected, 19 文件 (含 audit gap 6/6 + W5-D test_memory + W5-C test_planner_hierarchy + W5-E test_smoke_anthropic_real 骨架)
+tests/             # 219 passed + 2 skip = 221 collected, 20 文件 (含 audit gap 6/6 + W5-D test_memory + W5-C test_planner_hierarchy + W5-E test_smoke_anthropic_real + test_smoke_openai_kimi_real 双骨架)
   conftest.py      # vcr_config 锁 cassette filter (V0.15.3)
   cassettes/       # vcrpy yaml (V0.15.3, .bak gitignored, 主 yaml 进 commit)
 docs/

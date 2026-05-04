@@ -2,6 +2,37 @@
 
 All notable changes to web-agent. 版本号遵循 SemVer 简化形式（V<major>.<minor>.<patch>）。
 
+## [0.15.4] - 2026-05-03
+
+### Tests (W5-E real LLM smoke 骨架补 OpenAI/Kimi 路径)
+- **新建** `tests/test_smoke_openai_kimi_real.py` (~85 行, 同 V0.15.3 Anthropic smoke 模板):
+  - 1 case `test_kimi_plan_smoke_pipeline_alive`: 真调一次 `OpenAIClient(base_url="https://api.moonshot.ai/v1", model="kimi-k2.6").plan(...)`
+  - 复用 V0.15.3 `tests/conftest.py` 的 `vcr_config` fixture (无修改, filter_headers `authorization` 已覆盖 Kimi Bearer auth)
+  - 复用 16×16 灰 PNG base64 常量 (节约 cassette body 体积)
+  - **关键差异**: Kimi 走 `tool_choice="auto"` (Moonshot 不支持 "required"), 16×16 灰图 + 空 marks 大概率不吐 tool_call → 加一个 dummy `Mark(id=1, tag="button", text="搜索")` + 明确 prompt "请点击 mark_id=1", 让 Kimi 在 thinking-disabled + tool_choice=auto 下高概率 emit click tool_call
+  - **hardcode** `base_url=https://api.moonshot.ai/v1` + `model=kimi-k2.6`: cassette vcr 默认 match `[method, scheme, host, port, path]`, 跨端点 (.ai vs .cn) 不能 replay; 本 smoke 只录国际版
+  - skip 守卫: `not _HAS_CASSETTE and not OPENAI_API_KEY` (注意 env var 是 OPENAI_API_KEY 不是 KIMI_API_KEY, Kimi 走 OpenAI SDK)
+
+### Why
+- V0.15.3 Anthropic smoke 骨架已 ship, 但 OpenAIClient + Kimi/GPT 路径无端到端 smoke
+- 用户说"用 Kimi key", 直接补 Kimi 版骨架让用户/任何 Moonshot 用户也能录 cassette 进 CI
+- subagent (Plan) 审核反馈采纳:
+  - **文件名 `test_smoke_openai_kimi_real.py` 而非 `test_smoke_kimi_real.py`**: provider+endpoint 组合命名, 未来纯 GPT 版叫 `test_smoke_openai_gpt_real.py`, OpenRouter 叫 `test_smoke_openai_openrouter_real.py`
+  - **必须 hardcode base_url + model**: cassette 跨用户 replay 的前提
+  - **dummy Mark 必加**: 16×16 灰图 + 空 marks + tool_choice=auto 是 "Kimi 几乎必抛 RuntimeError" 配方, dummy mark 让 LLM 有明确点击目标; Anthropic smoke 用 `tool_choice={"type":"any"}` 强制 tool, 无此问题
+  - **国际/国内 cassette 互斥**: vcr URL match 锁 host, 录哪端点 replay 哪端点 — 选国际版 .ai 因 docs 也用此
+
+### Limitations
+- **仅国际版 .ai cassette**: 国内版 .cn 用户不能直接复用; 想覆盖再加 `test_smoke_openai_kimi_cn_real.py`
+- **cassette 录制方需 Moonshot 账号**: cassette 进 commit 后任何人可 replay, 但首次录要 sk-xxx + 余额
+- **smoke 仍是 mock-level 验证**: pipeline alive ≠ 行为正确; W5-F+ 加 golden trace 多 case 才覆盖行为
+- **GPT/OpenRouter 路径未骨架化**: 同模板可加, V0.15.5 / V0.16.0 视用户场景决定
+
+### Compatibility
+- 公共 API 零变化
+- 旧 219 tests + V0.15.3 anthropic skip = 1 = 220, 现 + Kimi skip = 1 = 总 221 collected (219 passed + 2 skipped)
+- runtime deps 零变化, V0.15.3 加的 pytest-recording 复用
+
 ## [0.15.3] - 2026-05-03
 
 ### Tests (W5-E real LLM smoke 骨架, 待用户首次 record-mode=once)
