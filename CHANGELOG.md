@@ -2,6 +2,48 @@
 
 All notable changes to web-agent. 版本号遵循 SemVer 简化形式（V<major>.<minor>.<patch>）。
 
+## [0.11.0] - 2026-05-03
+
+### Added (W5-A: 自反思 — page-stuck soft hint)
+- **`loop.py` 加 `_page_fingerprint(url, marks) -> str`** 纯函数: hash url + len(marks) + 前 8 marks `(id, tag, text[:40])` JSON 序列化
+  - 与 V0.5.0 `_action_signature` 同档 helper, 风格一致
+  - 取前 8 + text 截 40 字: 抗尾部动态 timestamp/计数 mark 抖动
+  - 留 url 区分 SPA 路由切换 (纯前端跳转, marks 可能巧合相同)
+- **`recent_pages: deque[str]` maxlen=3** 主循环跟踪 fingerprint
+- **反思触发**: perceive 之后 plan 之前, 若 deque 满 + 全相同 + trace 非空 + 上一步 obs 还未注过
+  → 把 `[reflect] 页面 3 步无变化 (url+marks 同). 建议: ① scroll ② 后退/换 selector ③ SoM 漏标 ④ 换思路.` 追加到 `trace.steps[-1].observation`
+  - **mutate in-memory Trace**, 不写 sqlite (避脏数据 + 反思是 augment 不是 event)
+  - LLM 下一次 `plan()` 通过 `Trace.for_llm()` 自然看到提示
+  - 幂等检查 `"[reflect]" not in obs` 防同一 step 被 hint 双重 append (理论上 perceive 每步只跑一次, 安全网)
+- **测试** `tests/test_loop_reflect.py` 7 case:
+  - `_page_fingerprint` 纯函数: same / 不同 url / 不同 mark text / 不同 mark count
+  - 集成 stuck: `RecordingLLMClient` 记录每次 plan 看到的 trace 快照, 验证第 4 次 plan 看到的 trace 含 `[reflect]`
+  - 集成 not-stuck: marks 每步变化 → 永不注入
+  - 集成幂等: 5 步全 stuck, 任一 obs 最多一个 `[reflect]` 标记
+
+### Why
+- 蓝本 `docs/高度模仿人操作网页的agent技术路径图.txt` 明确点了「自反思」, 至今未落地
+- V0.5.0 anti-loop 仅检测「同一 action 3 次」硬中止, **环境维度反馈缺失**: LLM 反复换 action 但每个都是 click 不存在的 mark / scroll 已到底, 页面永不变 — anti-loop 不触发, max_steps 耗尽才返回, token 浪费 + 用户体验差
+- 反思机制提供**软信号**: 不强制 abort, 让 LLM 自己换策略 (蓝本 ReAct + 自反思的核心理念)
+- 与 anti-loop 双层防御互补: 软提示 (3 步无变化) + 硬 abort (3 次同 action) 信号正交不冗余
+- subagent (Plan) 评估 4 决策点全采纳:
+  - fingerprint 仅 marks/url 不含 body (ROI 低; marks 不变 99% body 不变)
+  - mutate `trace.steps[-1].observation` > 新建 reflection step type (replay/trace 简洁)
+  - 不重构 anti-loop (两 deque 语义正交; recent_actions = LLM 自选, recent_pages = 环境反馈)
+  - V0.11.0 minor (W5 起步独立大项, 与 W3-A V0.6.0 / W4-1 V0.8.0 / W4-2 V0.9.0 / W4-3 V0.10.0 一致)
+
+### Limitations
+- **Mark text 含 timestamp 抖动** (e.g. "Updated 2s ago" / 计数器): fingerprint 永不重合 → false negative (该提示不提示); 可接受 (静默错过 < 误报); 真成痛点再加文本数字 mask
+- **持续注入**: LLM 看到 hint 没换策略 → fingerprint 仍同 → 持续注入 hint (4 步 5 步...) — **by design**, 持续催 LLM 直到 V0.5.0 anti-loop 在第 3 次同 action 时硬 abort 兜底
+- **fingerprint 不写 sqlite**: trace.db 与 in-memory 行为不一致 (sqlite 看不到 [reflect]); replay UI 看不到反思事件; 真有需求未来加 reflection step type
+- **hint 字符串 hardcoded 中文**: 多 LLM (英文/Kimi 中文) 都能理解, 但纯英文 LLM 看到中文 prompt 偶有分心; 非紧迫
+
+### Compatibility
+- 公共 API 零变化 (`run_react_loop / run_task / make_client / _action_signature` 全保留)
+- 行为变化: stuck 场景 trace.steps[-1].observation 多出 `[reflect]` 段 → LLM 输出可能改变 (这正是 W5-A 目标)
+- 现有 demo (Wikipedia / GitHub / Gmail RO/Compose) 都是路径前进型任务, 一般不触发 stuck → 行为零感知; 仅在异常路径 (selector 漏标 / 页面卡住) 才介入
+- 旧 111 测试零修改全过; 新增 7 case, 总 118 tests 全绿
+
 ## [0.10.1] - 2026-05-03
 
 ### Refactor (/simplify W4-3 notify)

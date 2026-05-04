@@ -31,6 +31,18 @@ def _action_signature(action: Action) -> str:
     return f"{action.type}:{json.dumps(action.args, sort_keys=True, ensure_ascii=False)}"
 
 
+def _page_fingerprint(url: str, marks: list[Mark]) -> str:
+    """归一化页面状态用于「无变化检测」(W5-A 反思). 与 _action_signature 风格一致, 纯函数。
+
+    取前 8 mark + text[:40] 抗尾部动态计数/timestamp mark 抖动; 留 url 区分 SPA 路由切换。
+    """
+    sig_marks = [(m.id, m.tag, m.text[:40]) for m in marks[:8]]
+    return json.dumps(
+        {"url": url, "n": len(marks), "marks": sig_marks},
+        sort_keys=True, ensure_ascii=False,
+    )
+
+
 def _captcha_enabled() -> bool:
     return os.environ.get("WEB_AGENT_CAPTCHA_DISABLE", "").lower() not in ("true", "1", "yes")
 
@@ -98,6 +110,7 @@ async def run_react_loop(
 
     trace = Trace(task_id=task_id, goal=goal)
     recent_actions: deque[str] = deque(maxlen=3)
+    recent_pages: deque[str] = deque(maxlen=3)  # W5-A 反思: 页面 fingerprint 跟踪
     last_clicked_mark: Mark | None = None  # type action 的 safety check 需要上次 click 的元素
     result = "(no result)"
     t_start = time.time()
@@ -121,6 +134,26 @@ async def run_react_loop(
                 return captcha_abort
 
             marks, screenshot_b64 = await perceive(page)
+
+            # W5-A 自反思: 检测页面 3 步无变化 → 把 hint 追加到上一步 observation,
+            # LLM 下一次 plan() 通过 Trace.for_llm() 自然看到, 软提示而非硬 abort
+            # (与 V0.5.0 anti-loop 同 action 3 次硬 abort 互补, 双层防御)。
+            fp = _page_fingerprint(getattr(page, "url", "") or "", marks)
+            recent_pages.append(fp)
+            if (
+                len(recent_pages) == 3
+                and all(p == fp for p in recent_pages)
+                and trace.steps
+                and "[reflect]" not in trace.steps[-1].observation
+            ):
+                hint = (
+                    "[reflect] 页面 3 步无变化 (url+marks 同). 建议: "
+                    "① scroll 看视口外内容 ② 后退/换 selector "
+                    "③ 检查 SoM 是否漏标目标元素 ④ 当前 strategy 大概率撞墙, 换思路."
+                )
+                trace.steps[-1].observation = (
+                    trace.steps[-1].observation + "\n" + hint
+                ).strip()
 
             shot_path = screenshots_dir / f"{task_id}-{step_i:02d}.png"
             shot_path.write_bytes(base64.b64decode(screenshot_b64))
