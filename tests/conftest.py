@@ -1,12 +1,21 @@
-"""共享 pytest fixture / vcr 配置 (V0.15.3 W5-E real LLM smoke 骨架)。
+"""共享 pytest fixture / vcr 配置 (V0.15.3 W5-E real LLM smoke 骨架, V0.15.7 加 .env autoload)。
 
 vcr_config 锁默认 cassette filter, 避免每个 vcr 标注 case 重复参数。
 重点是过滤一切可能含 secret 或机器画像的 header。
+
+V0.15.7: 加 dotenv autoload 让 smoke skip 守卫 (`os.environ.get("OPENAI_API_KEY")` /
+ANTHROPIC_API_KEY) 在 pytest collection 时能读到 .env 里的 key. override=False 让
+shell 已 export 的优先 (CI scenario), 不被 .env 覆盖.
 """
 
 from __future__ import annotations
 
+from pathlib import Path
+
 import pytest
+from dotenv import load_dotenv
+
+load_dotenv(Path(__file__).parent.parent / ".env", override=False)
 
 
 @pytest.fixture(scope="module")

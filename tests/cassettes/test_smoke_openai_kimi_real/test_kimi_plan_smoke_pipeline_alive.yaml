@@ -1,0 +1,99 @@
+interactions:
+- request:
+    body: "{\"messages\":[{\"role\":\"system\",\"content\":\"\u4F60\u662F\u4E00\u4E2A\u9AD8\u5EA6\u62DF\u4EBA\u7684\u6D4F\u89C8\u5668\u81EA\u52A8\u5316
+      agent\u3002\u6BCF\u6B65\u7ED9\u4F60\u5F53\u524D\u9875\u9762\u7684\u6807\u6CE8\u622A\u56FE\uFF08\u6BCF\u4E2A\u53EF\u4EA4\u4E92\u5143\u7D20\u90FD\u6709\u5F69\u8272\u8FB9\u6846
+      + \u6570\u5B57 ID\uFF09\u548C\u5143\u7D20\u6E05\u5355\uFF0C\u8BF7\u6309\u4EE5\u4E0B\u89C4\u5219\u8F93\u51FA\u4E0B\u4E00\u6B65\u64CD\u4F5C\uFF1A\\n\\n1.
+      \u5FC5\u987B\u901A\u8FC7 tool \u8C03\u7528\u8FD4\u56DE\u884C\u52A8\uFF0C\u4E0D\u8981\u56DE\u7EAF\u6587\u672C\u3002\\n2.
+      \u64CD\u4F5C\u524D\u5148\u7528 thought \u5B57\u6BB5\u8BF4\u660E\u4F60\u7684\u5224\u65AD\uFF08\u57FA\u4E8E\u622A\u56FE\u5B9E\u9645\u770B\u5230\u7684\u5185\u5BB9\uFF0C\u4E0D\u8981\u81C6\u6D4B\uFF09\u3002\\n3.
+      \u4F18\u5148\u9009\u62E9\u6700\u76F4\u63A5\u8FBE\u6210 goal \u7684\u64CD\u4F5C\uFF1B\u9047\u5230
+      cookie \u540C\u610F\u6846 / \u5E7F\u544A\u5F39\u7A97 / \u6CE8\u518C\u5F15\u5BFC\u5148\u5173\u6389\u3002\\n4.
+      \u4EFB\u52A1\u5B8C\u6210\u540E\u8C03\u7528 `done` \u5DE5\u5177\u5E76\u628A\u6700\u7EC8\u7B54\u6848\u5199\u5728
+      `result` \u5B57\u6BB5\u3002\\n5. \u8FDE\u7EED 2 \u6B65\u9875\u9762\u65E0\u53D8\u5316\uFF08thought
+      \u4E2D\u8BC6\u522B\u5230\uFF09\u2192 \u5C1D\u8BD5\u4E0D\u540C\u7B56\u7565\uFF1A\u6EDA\u52A8
+      / \u540E\u9000 / \u9009\u53E6\u4E00\u4E2A\u5019\u9009\u5143\u7D20\u3002\\n6.
+      \u4E25\u7981\u731C\u6D4B mark_id \u2014 \u53EA\u80FD\u7528\u622A\u56FE\u91CC\u5B9E\u9645\u5B58\u5728\u7684\u7F16\u53F7\uFF1B\u7F16\u53F7\u7F3A\u5931\u5C31\u5148
+      scroll \u8BA9\u9875\u9762\u91CD\u65B0\u6807\u6CE8\u3002\\n7. \u8F93\u5165\u6846\u5148
+      click \u518D type\u3002type \u7684 submit=true \u4F1A\u6309\u56DE\u8F66\u3002\\n\"},{\"role\":\"user\",\"content\":[{\"type\":\"image_url\",\"image_url\":{\"url\":\"data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAABAAAAAQCAIAAACQkWg2AAAAGUlEQVR4nGNsaGhgIAUwkaR6VMOohiGlAQDJTAGgLgFHggAAAABJRU5ErkJggg==\",\"detail\":\"high\"}},{\"type\":\"text\",\"text\":\"#
+      \u4EFB\u52A1\u76EE\u6807\\n\u8BF7\u70B9\u51FB mark_id=1 \u7684\u641C\u7D22\u6309\u94AE\\n\\n#
+      \u5386\u53F2 Action Trace\\n(\u7A7A)\\n\\n# \u5F53\u524D\u53EF\u4EA4\u4E92\u5143\u7D20\u6E05\u5355\uFF08\u7F16\u53F7\u5BF9\u5E94\u622A\u56FE\u8FB9\u6846\uFF09\\n[1]
+      <button role=button> '\u641C\u7D22'\\n\\n\u8BF7\u901A\u8FC7 tool \u8FD4\u56DE\u4E0B\u4E00\u6B65\u64CD\u4F5C\u3002\"}]}],\"model\":\"kimi-k2.6\",\"max_tokens\":4096,\"tool_choice\":\"auto\",\"tools\":[{\"type\":\"function\",\"function\":{\"name\":\"click\",\"description\":\"\u70B9\u51FB\u622A\u56FE\u4E2D\u7F16\u53F7\u4E3A
+      mark_id \u7684\u5143\u7D20\u3002\",\"parameters\":{\"type\":\"object\",\"properties\":{\"thought\":{\"type\":\"string\",\"description\":\"\u4E3A\u4EC0\u4E48\u70B9\u8FD9\u4E2A\u5143\u7D20\"},\"mark_id\":{\"type\":\"integer\",\"description\":\"\u5143\u7D20\u7684
+      SoM \u7F16\u53F7\"}},\"required\":[\"thought\",\"mark_id\"],\"additionalProperties\":false},\"strict\":true}},{\"type\":\"function\",\"function\":{\"name\":\"type\",\"description\":\"\u5728\u5F53\u524D\u7126\u70B9\u7684\u8F93\u5165\u6846\u4E2D\u9010\u5B57\u952E\u5165\u6587\u672C\u3002\u5148\u7528
+      click \u628A\u7126\u70B9\u653E\u5230\u8F93\u5165\u6846\u4E0A\u3002\",\"parameters\":{\"type\":\"object\",\"properties\":{\"thought\":{\"type\":\"string\"},\"text\":{\"type\":\"string\",\"description\":\"\u8981\u952E\u5165\u7684\u6587\u672C\"},\"submit\":{\"type\":\"boolean\",\"description\":\"\u952E\u5165\u540E\u662F\u5426\u6309\u56DE\u8F66\u63D0\u4EA4\"}},\"required\":[\"thought\",\"text\",\"submit\"],\"additionalProperties\":false},\"strict\":true}},{\"type\":\"function\",\"function\":{\"name\":\"scroll\",\"description\":\"\u6EDA\u52A8\u9875\u9762\uFF08\u6B63\u6570\u4E0B\u6EDA\uFF0C\u8D1F\u6570\u4E0A\u6EDA\uFF0C\u5355\u4F4D\u50CF\u7D20\uFF09\u3002\",\"parameters\":{\"type\":\"object\",\"properties\":{\"thought\":{\"type\":\"string\"},\"dy\":{\"type\":\"integer\",\"description\":\"\u6B63\u6570\u4E0B\u6EDA\uFF0C\u8D1F\u6570\u4E0A\u6EDA\"}},\"required\":[\"thought\",\"dy\"],\"additionalProperties\":false},\"strict\":true}},{\"type\":\"function\",\"function\":{\"name\":\"extract\",\"description\":\"\u4ECE\u5F53\u524D\u9875\u9762\u8BFB\u53D6\u4FE1\u606F\uFF08\u4E0D\u64CD\u4F5C\u9875\u9762\uFF0C\u628A\u8BFB\u5230\u7684\u5185\u5BB9\u5199\u5230
+      answer\uFF09\u3002\",\"parameters\":{\"type\":\"object\",\"properties\":{\"thought\":{\"type\":\"string\"},\"query\":{\"type\":\"string\",\"description\":\"\u8981\u63D0\u53D6\u7684\u5185\u5BB9\u63CF\u8FF0\"},\"answer\":{\"type\":\"string\",\"description\":\"\u4F60\u4ECE\u622A\u56FE\u4E2D\u8BFB\u5230\u7684\u7B54\u6848\"}},\"required\":[\"thought\",\"query\",\"answer\"],\"additionalProperties\":false},\"strict\":true}},{\"type\":\"function\",\"function\":{\"name\":\"done\",\"description\":\"\u4EFB\u52A1\u5B8C\u6210\uFF0C\u628A\u6700\u7EC8\u7ED3\u679C\u5199\u5230
+      result \u8FD4\u56DE\u7ED9\u7528\u6237\u3002\",\"parameters\":{\"type\":\"object\",\"properties\":{\"thought\":{\"type\":\"string\"},\"result\":{\"type\":\"string\",\"description\":\"\u6700\u7EC8\u7ED3\u679C\"}},\"required\":[\"thought\",\"result\"],\"additionalProperties\":false},\"strict\":true}}],\"thinking\":{\"type\":\"disabled\"}}"
+    headers:
+      Accept:
+      - application/json
+      Accept-Encoding:
+      - gzip, deflate
+      Connection:
+      - keep-alive
+      Content-Length:
+      - '3464'
+      Content-Type:
+      - application/json
+      Host:
+      - api.moonshot.cn
+      X-Stainless-Async:
+      - async:asyncio
+      authorization:
+      - REDACTED
+      user-agent:
+      - REDACTED
+      x-stainless-arch:
+      - REDACTED
+      x-stainless-lang:
+      - REDACTED
+      x-stainless-os:
+      - REDACTED
+      x-stainless-package-version:
+      - REDACTED
+      x-stainless-read-timeout:
+      - '120.0'
+      x-stainless-retry-count:
+      - '0'
+      x-stainless-runtime:
+      - REDACTED
+      x-stainless-runtime-version:
+      - REDACTED
+    method: POST
+    uri: https://api.moonshot.cn/v1/chat/completions
+  response:
+    body:
+      string: "{\"id\":\"chatcmpl-69f8e98e086ff9808369ff50\",\"object\":\"chat.completion\",\"created\":1777920399,\"model\":\"kimi-k2.6\",\"choices\":[{\"index\":0,\"message\":{\"role\":\"assistant\",\"content\":\"\",\"tool_calls\":[{\"index\":0,\"id\":\"click:0\",\"type\":\"function\",\"function\":{\"name\":\"click\",\"arguments\":\"{\\\"thought\\\":
+        \\\"\u7528\u6237\u8981\u6C42\u70B9\u51FB mark_id=1 \u7684\u641C\u7D22\u6309\u94AE\u3002\u6839\u636E\u53EF\u4EA4\u4E92\u5143\u7D20\u6E05\u5355\uFF0Cmark_id=1
+        \u5BF9\u5E94\u7684\u662F\u4E00\u4E2A role=button \u7684\u641C\u7D22\u6309\u94AE\u3002\u6211\u9700\u8981\u76F4\u63A5\u70B9\u51FB\u8FD9\u4E2A\u5143\u7D20\u3002\\\",
+        \\\"mark_id\\\": 1}\"}}]},\"finish_reason\":\"tool_calls\"}],\"usage\":{\"prompt_tokens\":608,\"completion_tokens\":61,\"total_tokens\":669}}"
+    headers:
+      Connection:
+      - keep-alive
+      Content-Length:
+      - '589'
+      Content-Type:
+      - application/json; charset=utf-8
+      Date:
+      - Mon, 04 May 2026 18:46:44 GMT
+      Msh-Gid:
+      - enterprise-tier-1
+      Msh-Org-Id:
+      - org-5171f53e7b9d4df58850b16a5992a559
+      Msh-Project-Id:
+      - proj-9b790dc1f4ab4283901ed15f840bfe95
+      Msh-Request-Id:
+      - 959e13b5-47e9-11f1-9a1a-6e8f8baadfdc
+      Msh-Trace-Mode:
+      - 'on'
+      Msh-Uid:
+      - d734059toomenmetd5pg
+      Set-Cookie:
+      - aliyungf_tc=2d2a32b4b4437670fa133ff635a3d9c207d017b5fc41eba913a282f28cb11831;
+        Path=/; HttpOnly
+      Strict-Transport-Security:
+      - max-age=31536000; includeSubDomains
+      Vary:
+      - Origin
+    status:
+      code: 200
+      message: OK
+version: 1

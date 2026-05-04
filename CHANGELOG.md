@@ -2,6 +2,47 @@
 
 All notable changes to web-agent. 版本号遵循 SemVer 简化形式（V<major>.<minor>.<patch>）。
 
+## [0.15.7] - 2026-05-04
+
+### Tests (W5-E Kimi cassette 真录通 + conftest .env autoload)
+- **`tests/conftest.py`** 顶部加 dotenv autoload (4 行):
+  ```python
+  from pathlib import Path
+  from dotenv import load_dotenv
+  load_dotenv(Path(__file__).parent.parent / ".env", override=False)
+  ```
+  - 让 V0.15.4/V0.15.5 smoke skip 守卫 `os.environ.get("OPENAI_API_KEY")` 在 pytest collection 阶段能见到 .env 里的 key (此前 conftest 没 dotenv, 即使 .env 有 key 也整文件 skip)
+  - `override=False`: shell 已 export 的优先 (CI 用 secrets export 路径), 不被 .env 覆盖
+  - dotenv 实测能正确解析 .env line 15 的 3 空格缩进 key (subagent 误判 "load_dotenv 忽略缩进" 已 verify 错)
+- **`tests/cassettes/test_smoke_openai_kimi_real/test_kimi_plan_smoke_pipeline_alive.yaml`** (7817 bytes):
+  - 真 Moonshot 国内版 kimi-k2.6 调用录制完成, response status 200
+  - 安全验证: REDACTED 计数 = 8 (filter_headers 11 个里命中 8: authorization / x-api-key / user-agent / x-stainless-{arch,os,runtime,lang,package-version})
+  - 真 key 前 10 位反查 = 0 命中 (无残留)
+  - `Bearer sk-` 子串反查 = 0 命中 (Authorization header 完全 REDACTED)
+- **smoke pass**: 之前 V0.15.4/V0.15.5 是 skip, 现在 PASSED (7.26s) — pipeline alive 验证: Action(type="click", args={"mark_id":1}, thought="...") 真返
+
+### Why
+- V0.15.4 用 sk-xxx 占位 key 录到 401 cassette → V0.15.5 删 + 改国内版 .cn → V0.15.6 写诊断脚本分清"换行污染"vs"账号侧拒绝" → V0.15.7 终于真录通
+- 多轮根因聚合:
+  1. 用户 shell 临时 export 含换行 → curl `CURLE_URL_MALFORMAT`
+  2. .env 里 key 干净但是国际版 platform.kimi.ai 创建的 (sk-Ysc...) 错配国内版 .cn 端点 → 401
+  3. 用户在国内版 platform.kimi.com 新建 key (sk-31c...) 但 subagent hallucinate 警示后用户主动轮换为 sk-2oU... 第三个 key
+  4. 第三个 key 仍 401 因 conftest 无 dotenv → fix dotenv → PASS
+- subagent 审核反馈采纳:
+  - **commit 用 "autoload" 而非 "fix"** (语义: V0.15.7 是新增 autoload 行为, 不是修旧 bug)
+  - **真 key 前 10 位反查 cassette** (硬编码 sk-31 不稳, 用 grep + cut 动态取)
+  - **load_dotenv override=False 显式传** (CI shell export 优先于 .env, 关键场景)
+
+### Limitations
+- **仅 Kimi 国内版 cassette 真录通**, Anthropic / Kimi 国际版 cassette 仍待用户接手
+- **smoke 仍是 pipeline alive 验证, 非行为正确**: action.type ∈ 5 合法 + dict args + str thought, 不验是否选对 mark_id
+- **录制方需 Moonshot 国内版账号 + 余额**: 单录 ¥0.03, cassette 进 commit 后任何人无 key 也能 replay
+
+### Compatibility
+- 公共 API 零变化, src/ 业务代码 0 行改动
+- 旧 219 tests + Anthropic skip = 220 collected; 现 + Kimi PASSED = **220 passed + 1 skipped** (Anthropic 仍 skip 待录)
+- runtime deps 零变化 (dotenv 早就是硬依赖)
+
 ## [0.15.6] - 2026-05-04
 
 ### Tools (Moonshot key 401 诊断脚本)
