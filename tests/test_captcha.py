@@ -166,20 +166,21 @@ async def test_loop_pause_then_resume_after_captcha_cleared(
 ):
     """场景: 第 1 步 captcha 命中 + wait 返回 True (用户解了) → 继续执行 LLM done step。"""
     monkeypatch.delenv("WEB_AGENT_CAPTCHA_DISABLE", raising=False)
+    # V0.16.4: loop 内联 poll, 短 timeout 让测试快速
+    monkeypatch.setenv("WEB_AGENT_CAPTCHA_TIMEOUT_S", "1.0")
+    monkeypatch.setenv("WEB_AGENT_CAPTCHA_POLL_S", "0.05")
 
     detect_calls = {"n": 0}
 
     async def fake_detect(page):
+        # 第 1 次: _handle_captcha 头部 detect 命中
+        # 第 2 次: 内联 poll 第 1 轮 detect (cleared, return None) → loop 继续
         detect_calls["n"] += 1
         if detect_calls["n"] == 1:
             return CaptchaInfo("cloudflare-turnstile", "https://x.test/")
         return None
 
-    async def fake_wait(page, timeout_s, poll_s):
-        return True
-
     monkeypatch.setattr("web_agent.loop.captcha_detect", fake_detect)
-    monkeypatch.setattr("web_agent.loop.captcha_wait", fake_wait)
 
     client = FakeLLMClient([Action(type="done", args={"result": "ok"}, thought="完成")])
     db = tmp_path / "trace.db"
@@ -201,15 +202,15 @@ async def test_loop_captcha_timeout_writes_step_and_aborts(
 ):
     """场景: detect 始终命中 + wait 返回 False (用户没解) → SAFETY 风格 graceful abort。"""
     monkeypatch.delenv("WEB_AGENT_CAPTCHA_DISABLE", raising=False)
+    # V0.16.4: 内联 poll 实测, 短 timeout 让测试 ~0.3s 完成 (不真等 300s default)
+    monkeypatch.setenv("WEB_AGENT_CAPTCHA_TIMEOUT_S", "0.3")
+    monkeypatch.setenv("WEB_AGENT_CAPTCHA_POLL_S", "0.05")
 
     async def fake_detect(page):
+        # detect 始终返 info → poll 永远不退出, 走 deadline timeout 路径
         return CaptchaInfo("recaptcha", "https://y.test/")
 
-    async def fake_wait(page, timeout_s, poll_s):
-        return False
-
     monkeypatch.setattr("web_agent.loop.captcha_detect", fake_detect)
-    monkeypatch.setattr("web_agent.loop.captcha_wait", fake_wait)
 
     client = FakeLLMClient([Action(type="done", args={"result": "won't reach"}, thought="x")])
     db = tmp_path / "trace.db"
@@ -237,6 +238,8 @@ async def test_loop_captcha_hit_calls_notify(
 ):
     """场景: captcha 命中 → loop._handle_captcha 调一次 notify, title 含 captcha + message 含 vendor。"""
     monkeypatch.delenv("WEB_AGENT_CAPTCHA_DISABLE", raising=False)
+    monkeypatch.setenv("WEB_AGENT_CAPTCHA_TIMEOUT_S", "1.0")
+    monkeypatch.setenv("WEB_AGENT_CAPTCHA_POLL_S", "0.05")
 
     notify_calls: list[tuple[str, str]] = []
 
@@ -251,11 +254,7 @@ async def test_loop_captcha_hit_calls_notify(
             return CaptchaInfo("hcaptcha", "https://z.test/")
         return None
 
-    async def fake_wait(page, timeout_s, poll_s):
-        return True
-
     monkeypatch.setattr("web_agent.loop.captcha_detect", fake_detect)
-    monkeypatch.setattr("web_agent.loop.captcha_wait", fake_wait)
     monkeypatch.setattr("web_agent.loop.notify", fake_notify)
 
     client = FakeLLMClient([Action(type="done", args={"result": "ok"}, thought="x")])

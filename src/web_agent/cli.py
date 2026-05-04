@@ -40,6 +40,7 @@ async def run_task(
     cdp_url: str | None = None,
     provider: str | None = None,
     model: str | None = None,
+    progress_cb=None,  # V0.16.4: ProgressCallback | None, 透传到 loop 主循环 + captcha 心跳
 ) -> str:
     load_dotenv()
     cdp_url = cdp_url or os.environ.get("WEB_AGENT_CDP_URL", "http://127.0.0.1:9222")
@@ -94,6 +95,7 @@ async def run_task(
             db_path=Path("data/trace.db"),
             screenshots_dir=Path("data/screenshots"),
             memories=memories_str,
+            progress_cb=progress_cb,
         )
 
         # W5-D 长期记忆: 跨 session 持久化 task outcome by domain.

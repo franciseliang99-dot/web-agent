@@ -217,6 +217,38 @@ async def test_query_memory_returns_serialized_entries(monkeypatch, reset_run_lo
         assert parsed[1]["success"] is False
 
 
+# ---------- Case 11 (V0.16.4): progress notification 真接通 ----------
+
+async def test_web_agent_run_progress_callback_invoked(monkeypatch, reset_run_lock, fake_chrome_alive):
+    """V0.16.4: web_agent_run 透 ctx.report_progress 给 cli.run_task → progress 事件经
+    MCP 协议层路由到 client.call_tool(progress_callback=fn) 注入的 fn."""
+    received: list[tuple[float, float | None, str | None]] = []
+
+    async def collect_progress(progress, total, message):
+        received.append((progress, total, message))
+
+    async def fake_run_task(goal, start_url=None, max_steps=20, progress_cb=None, **kw):
+        # 模拟 loop 主循环每步调 progress_cb
+        if progress_cb is not None:
+            await progress_cb(0, max_steps, f"step 1/{max_steps}")
+            await progress_cb(1, max_steps, f"step 2/{max_steps}")
+        return f"OK: {goal}"
+
+    monkeypatch.setattr("web_agent.mcp_server.cli_run_task", fake_run_task)
+
+    async with create_connected_server_and_client_session(mcp) as session:
+        await session.call_tool(
+            "web_agent_run",
+            {"goal": "x", "max_steps": 5},
+            progress_callback=collect_progress,
+        )
+
+    assert len(received) == 2, f"应收到 2 个 progress 通知, 实收 {len(received)}: {received}"
+    assert received[0][0] == 0 and received[0][1] == 5
+    assert received[1][0] == 1
+    assert "step 2/5" in received[1][2]
+
+
 # ---------- Case 10: main() basicConfig stderr smoke ----------
 
 def test_main_configures_logging_stderr(monkeypatch):

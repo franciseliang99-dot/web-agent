@@ -2,6 +2,47 @@
 
 All notable changes to web-agent. 版本号遵循 SemVer 简化形式（V<major>.<minor>.<patch>）。
 
+## [0.16.4] - 2026-05-04
+
+### Added (progress_cb 真 wire 完整链路: mcp ctx → cli → loop 主循环 + captcha 心跳)
+- **`cli.run_task` 加 `progress_cb=None` kwarg + 透传** `run_react_loop(progress_cb=progress_cb)`. 默认 None 兼容旧 demos / CLI 调用 100%
+- **`mcp_server.web_agent_run` 删 `_ = ctx` 占位 + 改** `progress_cb = ctx.report_progress if ctx is not None else None` (subagent 反馈: bound method 自身是 awaitable callable, 不需 wrapper, 类型 1:1 对齐 `Callable[[int, int, str|None], Awaitable[None]]`)
+- **`loop._handle_captcha`** 加 `max_steps`/`progress_cb` 参数 + **内联 poll 替换 `captcha.wait_for_resolution`**:
+  ```python
+  while time.time() < deadline:
+      if progress_cb is not None:
+          elapsed = timeout_s - (deadline - time.time())
+          await progress_cb(step_i, max_steps, f"awaiting {info.vendor} ({elapsed:.0f}/{timeout_s:.0f}s)")
+      if await captcha_detect(page) is None:
+          return None  # cleared
+      await asyncio.sleep(poll_s)
+  ```
+  - **解决 R2 风险** (Claude Desktop 60s no-traffic timeout): captcha poll 默认 3s 间隔, 远低于 60s 阈值, 长 wait 安全
+  - **不改 captcha module API** (subagent B 路径推荐): captcha.py 保持纯 detect/wait 单职, 心跳是 loop 关心的事 (它持有 progress_cb)
+- **删 `from web_agent.captcha import wait_for_resolution as captcha_wait`**: 内联 poll 后不再用; captcha.wait_for_resolution 仍存在供其他 caller (W4-2 已有 11 测保留)
+- **`tests/test_mcp_server.py` 加 case 11**: `client.call_tool("web_agent_run", progress_callback=fn)` 注入 fn, 验 `cli_run_task` fake 内调 progress_cb 后 fn 收到 2 个 ProgressNotification (progress=0/1, total=5, message="step N/5")
+- **`tests/test_captcha.py` 3 case 改造**: 删 `monkeypatch.setattr("web_agent.loop.captcha_wait", ...)` (新 inline poll 不调那个 attribute); setenv `WEB_AGENT_CAPTCHA_TIMEOUT_S=0.3-1.0` + `POLL_S=0.05` 让 timeout case 快速退出; cleared case 靠 fake_detect 第 2 次返 None
+
+### Why
+- V0.16.1 留下 `_ = ctx` 占位 V0.16.2 wire, V0.16.2 simplify 改 V0.16.3 wire — 拖了 3 个版本; V0.16.4 真闭环 mcp progress notification ↔ web-agent loop 主循环
+- Claude Desktop / Cursor 默认 no-traffic 60s 超时, 单步 perceive+LLM 平均 8-15s 安全, 但 captcha 默认 300s wait 必死 → 必须 inline poll 心跳
+- subagent (Plan) 审核反馈采纳:
+  - **B 路径 (loop 内联 poll) 而非 A (captcha module 加 on_poll callback)**: 改动面 < 50%, captcha.py 公共 API 不污染, test_captcha 改 3 case 核心逻辑不变
+  - **直接 `progress_cb=ctx.report_progress` 不加 wrapper**: bound method awaitable callable, 类型对齐
+  - **删 `_ = ctx` 占位 + V0.16.2/V0.16.3 死注释**: 防下个 subagent 被误导
+
+### Compatibility
+- 公共 API 加: `cli.run_task(progress_cb=...)` 可选 kwarg + `loop._handle_captcha(max_steps=, progress_cb=)` 可选 kwargs
+- 旧 demos / CLI / 单测调用全兼容 (默认 None)
+- 231 passed + 2 skipped (V0.16.3 230 + 1 mcp progress 新 case; captcha 3 case inline poll 改造数量不变)
+- 行为变化: 启用 progress_cb 时 captcha 长 wait 期间每 poll_s (默认 3s) 触发心跳; 不启用时行为 100% 同 V0.16.3
+
+### V0.16.5+ next steps
+- Resources (`resources://web_agent/replay/<id>` + `memory/<domain>` 只读视图)
+- Elicitation 替代 `WEB_AGENT_AUTO_APPROVE` (Claude Desktop 2026-Q1 后正式支持)
+- HTTP transport (streamable HTTP)
+- 真接 Cursor/Continue 跑 wikipedia 任务 + screenshot 验通
+
 ## [0.16.3] - 2026-05-04
 
 ### Tools (MCP server stdio 协议层端到端验证脚本)

@@ -84,13 +84,15 @@ async def web_agent_run(
     cdp_url = os.environ.get("WEB_AGENT_CDP_URL", "http://127.0.0.1:9222")
     await asyncio.to_thread(_check_chrome_alive, cdp_url)
 
-    # ctx.report_progress wiring 留 V0.16.2: 需 cli.run_task → loop 加 progress_cb 透传.
-    _ = ctx  # 占位防 unused-arg lint, V0.16.2 wire 时启用
+    # V0.16.4: ctx.report_progress(progress, total, message) 三参 1:1 对齐 loop.ProgressCallback
+    # bound method 自身是 awaitable callable, 直接传不需 wrapper
+    progress_cb = ctx.report_progress if ctx is not None else None
     async with _RUN_LOCK:
         return await cli_run_task(
             goal=goal,
             start_url=url or None,
             max_steps=max_steps,
+            progress_cb=progress_cb,
         )
 
 

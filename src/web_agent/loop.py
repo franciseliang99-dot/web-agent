@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import base64
 import json
 import logging
@@ -22,7 +23,6 @@ logger = logging.getLogger(__name__)
 
 from web_agent.actuator import human_like_click, human_like_type, scroll, think
 from web_agent.captcha import detect as captcha_detect
-from web_agent.captcha import wait_for_resolution as captcha_wait
 from web_agent.llm import Action, LLMClient
 from web_agent.notify import notify
 from web_agent.perceiver import Mark, perceive
@@ -81,11 +81,21 @@ def _captcha_enabled() -> bool:
     return os.environ.get("WEB_AGENT_CAPTCHA_DISABLE", "").lower() not in ("true", "1", "yes")
 
 
-async def _handle_captcha(page: Page, step_i: int, trace: Trace, conn, task_id: str) -> str | None:
+async def _handle_captcha(
+    page: Page,
+    step_i: int,
+    trace: Trace,
+    conn,
+    task_id: str,
+    max_steps: int = 0,
+    progress_cb: ProgressCallback | None = None,
+) -> str | None:
     """检测 captcha; 命中 → wait → 解决返回 None (loop 继续) / 超时返回 result 字符串 (loop abort)。
 
     在 perceive() 之前调: 避 SoM 注入污染 captcha 页 + 省 perceive 开销。
     超时路径写 trace captcha_timeout step + end_task, 镜像 V0.6.0 safety_block。
+    V0.16.4: 内联 poll 替换 captcha.wait_for_resolution, 每 poll 调 progress_cb 心跳
+    防 Claude Desktop 60s no-traffic timeout (R2 风险).
     """
     if not _captcha_enabled():
         return None
@@ -99,9 +109,22 @@ async def _handle_captcha(page: Page, step_i: int, trace: Trace, conn, task_id: 
         info.vendor, info.url[:80], poll_s, timeout_s,
     )
     notify("web-agent captcha", f"{info.vendor} 命中, 请在浏览器手解 ({info.url[:60]})")
-    if await captcha_wait(page, timeout_s=timeout_s, poll_s=poll_s):
-        logger.info("%s 已清除, loop 继续", info.vendor)
-        return None
+
+    # V0.16.4 内联 poll + progress 心跳 (取代 captcha.wait_for_resolution 单调用)
+    deadline = time.time() + timeout_s
+    while time.time() < deadline:
+        if progress_cb is not None:
+            elapsed = timeout_s - (deadline - time.time())
+            await progress_cb(
+                step_i,
+                max_steps,
+                f"awaiting {info.vendor} ({elapsed:.0f}/{timeout_s:.0f}s)",
+            )
+        if await captcha_detect(page) is None:
+            logger.info("%s 已清除, loop 继续", info.vendor)
+            return None
+        await asyncio.sleep(poll_s)
+
     result = (
         f"CAPTCHA_TIMEOUT at step {step_i}: {info.vendor} 未在 "
         f"{timeout_s}s 内解决 (url={info.url})"
@@ -178,7 +201,10 @@ async def run_react_loop(
 
             await think()
 
-            captcha_abort = await _handle_captcha(page, step_i, trace, conn, task_id)
+            captcha_abort = await _handle_captcha(
+                page, step_i, trace, conn, task_id,
+                max_steps=max_steps, progress_cb=progress_cb,
+            )
             if captcha_abort is not None:
                 return captcha_abort
 
