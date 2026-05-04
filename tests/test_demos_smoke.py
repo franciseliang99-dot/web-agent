@@ -25,6 +25,7 @@ DEMOS_DIR = Path(__file__).parent.parent / "demos"
         "wikipedia_search.py",
         "github_search.py",
         "gmail_summary.py",
+        "gmail_compose.py",
     ],
 )
 def test_demo_imports_and_has_main_coroutine(demo_file: str) -> None:

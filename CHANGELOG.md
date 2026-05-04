@@ -2,6 +2,41 @@
 
 All notable changes to web-agent. 版本号遵循 SemVer 简化形式（V<major>.<minor>.<patch>）。
 
+## [0.7.0] - 2026-05-03
+
+### Added (W3-C: 写操作 demo + safety×loop×trace 集成验证)
+- **`demos/gmail_compose.py`** — 让 LLM 走 Compose → 填 To/Subject/Body → 试点 Send 路径
+  - 默认行为: safety.py 拦 "Send" → run_task 返回 `SAFETY_BLOCK at step ... rule=send-or-pay` (验证拦截路径)
+  - `WEB_AGENT_AUTO_APPROVE=send-or-pay` 显式授权后真发邮件 (验证放行路径)
+  - `WEB_AGENT_TEST_RECIPIENT` env 必填 (空则 fail-fast 退出 2; 强烈建议自己发给自己)
+  - 复用 V0.6.2 `_check_logged_in` 模式 (inline 复制, N=2 仍按 YAGNI 不抽 helper)
+  - max_steps=12 (Compose 路径估 6-8 步 + buffer)
+  - 不动 stack: 完全靠现有 V0.6.1 (safety + actuator + loop + perceiver) 跑通
+- **`tests/test_safety_loop_integration.py`** — 端到端集成测试
+  - FakePage + FakeLLMClient + monkeypatch (perceive/think/click/type/scroll → no-op),
+    跑真 `run_react_loop` 验证三件套联动
+  - 场景 1: 默认无 AUTO_APPROVE, click "Send" mark → SAFETY_BLOCK 字符串 + sqlite 落 `action_type=safety_block, rule=send-or-pay`
+  - 场景 2: `AUTO_APPROVE=send-or-pay`, click 放行 → 第二步 done → return "sent"
+  - 场景 3: `AUTO_APPROVE=*` 通配符也放行
+  - 比 V0.6.0 `test_safety.py` 高一档: 覆盖 safety + loop + trace 真实联动 (test_safety.py 仅纯函数)
+- **`tests/test_demos_smoke.py`** — parametrize 加 `gmail_compose.py`
+
+### Why
+- W3-A safety + W3-B read-only demo 缺一条「真触发 abort + auto_approve 放行」端到端验证链
+- 集成测试比纯函数测高一档 (anti-loop V0.5.0 也只测 signature 纯函数, 联动行为长期裸奔)
+- subagent (Plan) 评估架构: monkeypatch loop.* 引用 + 最小 FakePage > 真起 Playwright (慢 + 不稳)
+- 不真跑 Gmail (CI 不发邮件; 用户登录态各异; demo 文件交付即可, 运行验证是用户的事)
+
+### Limitations
+- 集成测试用 FakePage, 对 Playwright 真行为零保证 (与 V0.5.0 anti-loop 同档, ROI/复杂度权衡可接受)
+- gmail_compose.py 依赖用户先按 V0.6.2 完成 Gmail 登录态持久化; 本 demo 不引导首次登录
+- safety 仅在 actuator 层拦, 不防 LLM 通过 type Enter (`submit=True`) 间接触发表单提交; 该路径目前未有真实 demo 触发, 待发现实例再加 form action 检测
+
+### Compatibility
+- 公共签名零变化 (safety / loop / actuator / perceiver / cli 不动)
+- 旧 76 个测试零修改全过; 新增 4 case (3 integration + 1 smoke), 总 80 tests 全绿
+- W1/W2/W3-A/W3-B 现有 demo 不受影响
+
 ## [0.6.2] - 2026-05-01
 
 ### Added (W3-B Gmail demo + smoke test)
