@@ -6,7 +6,7 @@ MultiOn 风格的「高度模仿人操作网页」AI web agent。
 
 ## 当前状态
 
-V0.15.4 (2026-05-03) — 29+ commits, 219 tests passing + 2 smoke skips (Anthropic + Kimi cassette 待用户首次录)
+V0.15.5 (2026-05-04) — 30+ commits, 219 tests passing + 2 smoke skips (Anthropic + Kimi 国内版 .cn cassette 待用户首次录)
 
 **W milestone 进度**:
 - W1 ✅ Wikipedia 搜词条 + 提取首段 (骨架 + 多 LLM 支持)
@@ -99,18 +99,21 @@ uv run web-agent-memory wikipedia.org --db data/memory.db
 - patchright-python 决断 (仍用 `playwright-stealth` 2.0.3, 未实测 Cloudflare 突破率)
 - 住宅代理 + curl_cffi TLS 指纹接入
 - Gmail 真账号端到端验收 (CI 不发邮件; W3-C demo 需用户 `WEB_AGENT_TEST_RECIPIENT` 真投)
-- **真实 LLM smoke + cassette** (V0.15.3 + V0.15.4 双骨架已落, Anthropic + OpenAI(Kimi) 两路径):
+- **真实 LLM smoke + cassette** (V0.15.3 + V0.15.5 双骨架已落, Anthropic + OpenAI(Kimi 国内版 .cn) 两路径):
   ```bash
+  cd /home/myclaw/web-agent  # 必须在项目根, 不然 pytest-recording plugin 不注册
+
   # Anthropic 路径 (V0.15.3)
   ANTHROPIC_API_KEY=sk-ant-xxx uv run pytest tests/test_smoke_anthropic_real.py --record-mode=once
 
-  # OpenAI/Kimi 路径 (V0.15.4, 用 Moonshot 国际版 sk-xxx)
-  OPENAI_API_KEY=sk-xxx uv run pytest tests/test_smoke_openai_kimi_real.py --record-mode=once
+  # OpenAI/Kimi 国内版路径 (V0.15.5, platform.moonshot.cn 真 key, 不要用 sk-xxx 占位会录到 401)
+  OPENAI_API_KEY=sk-真key uv run pytest tests/test_smoke_openai_kimi_real.py --record-mode=once
 
   git add tests/cassettes/  # cassette header 已 filter, 无 key 泄漏
   ```
-  之后任何人/CI 无 key 也能跑 (走 cassette replay)。单录成本: Anthropic ≈ $0.006 / Kimi ≈ $0.004。
-  纯 GPT (api.openai.com) / OpenRouter 路径骨架待 V0.15.5+, 同模板可补
+  之后任何人/CI 无 key 也能跑 (走 cassette replay)。单录成本: Anthropic ≈ $0.006 / Kimi ≈ ¥0.03 (~$0.004)。
+  Kimi 国际版 .ai 端点骨架待 V0.15.6+ (改 `_KIMI_BASE_URL` 重录或加双骨架)。
+  纯 GPT (api.openai.com) / OpenRouter 路径骨架待 V0.16.0+, 同模板可补
 - **SYSTEM_PROMPT snapshot test** (撤): subagent 审核反对 — 7 条规则文案微调本就常见, snapshot 锁会每次改文案都更新 cassette → false positive 噪音 > 真回归捕获价值。`test_llm_schema.py` 已锁工具数+name 集+required 字段, 够用; 改 SYSTEM_PROMPT 走 review 而非自动测
 
 ## BYO LLM API key

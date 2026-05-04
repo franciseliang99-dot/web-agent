@@ -1,4 +1,4 @@
-"""V0.15.4 W5-E real LLM smoke (OpenAI SDK + Moonshot/Kimi 端点) — 真 OpenAI SDK 调用 + cassette 回放。
+"""V0.15.5 W5-E real LLM smoke (OpenAI SDK + Moonshot/Kimi 国内版 .cn 端点) — 真 OpenAI SDK 调用 + cassette 回放。
 
 设计意图同 `test_smoke_anthropic_real.py`: 验证 plan() pipeline 走通, 不验行为正确。
 
@@ -9,16 +9,20 @@
   让 Kimi 在 thinking-disabled + tool_choice=auto 下大概率会 emit tool_call
 
 **hardcode base_url + model 的原因**: cassette vcr 默认 match `[method,scheme,host,port,path]`,
-跨端点 (api.moonshot.ai vs api.moonshot.cn) 不能 replay; 本 smoke 只录国际版。
+跨端点 (api.moonshot.ai vs api.moonshot.cn) 不能 replay; 本 smoke 只录国内版 .cn。
 demo 走 env 是 demo 的事, smoke 不复用 env, 保 cassette 跨用户可 replay。
 
+V0.15.4 → V0.15.5: 用户实际持有的是 Moonshot 国内版 (platform.moonshot.cn) key,
+端点 hardcode 由国际版 .ai 切到国内版 .cn (.ai 端点的 401 cassette 已删, 重录由用户接手)。
+国际版用户想接 .ai 需自行改本文件 _KIMI_BASE_URL 重录, 或后续 V0.15.6+ 加 intl 双骨架。
+
 运行模式 3 选 1:
-1. **首次录制 (用户接手, 1 次)**: 提供 Moonshot 国际版 OPENAI_API_KEY (sk-xxx) 跑
+1. **首次录制 (用户接手, 1 次)**: 提供 Moonshot 国内版 OPENAI_API_KEY (sk-xxx) 跑
    `pytest tests/test_smoke_openai_kimi_real.py --record-mode=once`
 2. **后续 replay (CI/任何人, 无 key)**: 默认 `pytest` 直接读 cassette
 3. **当前骨架状态 (无 cassette 无 key)**: 整文件 skip, 不阻塞主 219 tests
 
-成本估算 (录一次): kimi-k2.6, ~3k input + 200 output, cache miss ≈ $0.004。
+成本估算 (录一次): kimi-k2.6, ~3k input + 200 output, cache miss ≈ ¥0.03 (~$0.004)。
 """
 
 from __future__ import annotations
@@ -29,8 +33,8 @@ from pathlib import Path
 
 import pytest
 
-# Kimi 国际版 (cassette host 锁; 国内版 .cn 录的不能跨端点 replay)
-_KIMI_BASE_URL = "https://api.moonshot.ai/v1"
+# Kimi 国内版 (cassette host 锁; 国际版 .ai 录的不能跨端点 replay)
+_KIMI_BASE_URL = "https://api.moonshot.cn/v1"
 _KIMI_MODEL = "kimi-k2.6"
 
 # ---- skip 守卫 ----
@@ -41,7 +45,7 @@ _SHOULD_SKIP = not _HAS_CASSETTE and not _HAS_KEY
 
 pytestmark = pytest.mark.skipif(
     _SHOULD_SKIP,
-    reason="real Kimi smoke skeleton: 既无 cassette 也无 OPENAI_API_KEY (Moonshot 国际版 sk-xxx) — "
+    reason="real Kimi smoke skeleton: 既无 cassette 也无 OPENAI_API_KEY (Moonshot 国内版 .cn sk-xxx) — "
     "首次录制请 export OPENAI_API_KEY 后跑 --record-mode=once",
 )
 

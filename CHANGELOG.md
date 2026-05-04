@@ -2,6 +2,34 @@
 
 All notable changes to web-agent. 版本号遵循 SemVer 简化形式（V<major>.<minor>.<patch>）。
 
+## [0.15.5] - 2026-05-04
+
+### Tests (W5-E Kimi smoke 端点切换 国际版 .ai → 国内版 .cn)
+- **`tests/test_smoke_openai_kimi_real.py`** 单行端点改:
+  - `_KIMI_BASE_URL = "https://api.moonshot.ai/v1"` → `"https://api.moonshot.cn/v1"`
+  - 顶部 docstring + skip reason 文案"国际版" → "国内版" 同步
+  - 注明 V0.15.4 → V0.15.5 切换原因 + 国际版用户自改路径
+- **删 V0.15.4 跑 sk-xxx 占位 key 录到的 401 cassette** (untracked, 无 git rm 风险): `tests/cassettes/test_smoke_openai_kimi_real/test_kimi_plan_smoke_pipeline_alive.yaml` 删除. 该 cassette host=api.moonshot.ai + status=401 Unauthorized, 任何 replay 都会让 smoke 红, 必须重录
+- **CHANGELOG**: V0.15.4 节遗留措辞"国际版 .ai" → 解读为"V0.15.4 为国际版骨架, V0.15.5 为国内版"; V0.15.4 节内容不动 (历史不改写, 创建新 commit 优先)
+
+### Why
+- 用户实际持有 Moonshot 国内版 (platform.moonshot.cn) key, V0.15.4 hardcode 国际版 .ai 让用户没法直接 record
+- vcr cassette `match_on=[scheme,host,port,path]` 默认锁 host, 跨端点 replay 必 fail (`CannotOverwriteExistingCassetteException`); 一份 cassette 只服务一个端点
+- subagent (general-purpose) 审核反馈采纳:
+  - **方案 A (彻底替换 .ai → .cn)** 而非方案 B (双 cassette intl + cn) 或 C (env-driven): 用户 scope 锁定国内, B 需双 key 过早抽象, C 让 cassette host 与 env 解耦反成不一致风险源
+  - **必须删 V0.15.4 跑出来的 401 cassette**: 即便 untracked 也得删 (用户后续 record-mode=once 不会 overwrite 已有 cassette, vcr 默认 once 模式遇旧 cassette 直接 replay)
+  - **V0.15.5 patch bump 合理**, 不要 amend V0.15.4 (V0.15.4 commit 9ea89e3 已 push 习惯路径不可改写, 创建新 commit 路径优先 — CLAUDE.md 提交纪律)
+
+### Limitations
+- **国际版 .ai 用户不再受支持**: 需自行改 `_KIMI_BASE_URL` 重录, 或后续 V0.15.6+ 加 `test_smoke_openai_kimi_intl_real.py` 双骨架
+- **国内端点 cassette 仍需用户接手录**: 我无 Moonshot 国内 key, 沙箱里也不能调 platform.moonshot.cn (curl/dns 受限), 只能改源码到 .cn 不能录
+- **smoke 仍 mock-level pipeline alive 验证, 非行为正确**: 同 V0.15.3 / V0.15.4 设计
+
+### Compatibility
+- 公共 API 零变化
+- 219 tests + 2 smoke skip = 221 collected (skip 守卫不变, 端点改不影响 skip 行为)
+- runtime deps 零变化
+
 ## [0.15.4] - 2026-05-03
 
 ### Tests (W5-E real LLM smoke 骨架补 OpenAI/Kimi 路径)
