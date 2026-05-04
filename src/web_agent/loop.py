@@ -94,8 +94,7 @@ async def _handle_captcha(
 
     在 perceive() 之前调: 避 SoM 注入污染 captcha 页 + 省 perceive 开销。
     超时路径写 trace captcha_timeout step + end_task, 镜像 V0.6.0 safety_block。
-    V0.16.4: 内联 poll 替换 captcha.wait_for_resolution, 每 poll 调 progress_cb 心跳
-    防 Claude Desktop 60s no-traffic timeout (R2 风险).
+    progress_cb 每 poll_s (默认 3s) 触发心跳, 防 Claude Desktop 60s no-traffic timeout.
     """
     if not _captcha_enabled():
         return None
@@ -110,11 +109,12 @@ async def _handle_captcha(
     )
     notify("web-agent captcha", f"{info.vendor} 命中, 请在浏览器手解 ({info.url[:60]})")
 
-    # V0.16.4 内联 poll + progress 心跳 (取代 captcha.wait_for_resolution 单调用)
-    deadline = time.time() + timeout_s
-    while time.time() < deadline:
+    # 内联 poll: 不复用 captcha.wait_for_resolution, 因为这里需要 progress_cb 心跳
+    # (captcha module 保持单职, 心跳是 loop 关心的事 — 它持有 progress_cb).
+    t_start = time.monotonic()
+    while time.monotonic() - t_start < timeout_s:
         if progress_cb is not None:
-            elapsed = timeout_s - (deadline - time.time())
+            elapsed = time.monotonic() - t_start
             await progress_cb(
                 step_i,
                 max_steps,

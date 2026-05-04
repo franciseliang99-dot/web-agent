@@ -16,7 +16,7 @@ logger = logging.getLogger(__name__)
 
 from web_agent.browser import apply_stealth, connect
 from web_agent.llm import make_client
-from web_agent.loop import run_react_loop
+from web_agent.loop import ProgressCallback, run_react_loop
 from web_agent.memory import (
     DEFAULT_DB as _MEM_DB,
     extract_domain,
@@ -40,7 +40,7 @@ async def run_task(
     cdp_url: str | None = None,
     provider: str | None = None,
     model: str | None = None,
-    progress_cb=None,  # V0.16.4: ProgressCallback | None, 透传到 loop 主循环 + captcha 心跳
+    progress_cb: ProgressCallback | None = None,
 ) -> str:
     load_dotenv()
     cdp_url = cdp_url or os.environ.get("WEB_AGENT_CDP_URL", "http://127.0.0.1:9222")

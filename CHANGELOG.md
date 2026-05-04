@@ -2,6 +2,27 @@
 
 All notable changes to web-agent. 版本号遵循 SemVer 简化形式（V<major>.<minor>.<patch>）。
 
+## [0.16.5] - 2026-05-04
+
+### Refactor (V0.16.4 progress wire /simplify pass)
+- **`loop.py`** `time.time()` → `time.monotonic()` (4 处) — 对齐 captcha.wait_for_resolution 既有约定 + 防系统时钟回拨干扰 deadline 计算
+- **`cli.py`** `progress_cb=None` 加类型注解 `ProgressCallback | None` (顶部 import) — 显式类型让调用方 IDE 提示生效
+- **删 V0.16.4 版本戳 narration 注释** (CLAUDE.md "default to writing no comments" + 不写 caller history):
+  - `src/web_agent/mcp_server.py` line 87 注释合并 1 行
+  - `src/web_agent/loop.py` 删 "(R2 风险)" 内部任务编号 → 改纯 WHY (60s no-traffic 心跳约束)
+  - `tests/test_captcha.py` 2 处 V0.16.4 narration 留 WHY (短 timeout 防真等 300s)
+
+### Why
+- /simplify subagent 自动检出 4 项: 时钟函数对齐 / 类型注解补全 / 注释精简 / docstring "WHY 不 narrate change"
+- subagent 跳过 (false positive / 已 documented):
+  - `_handle_captcha` 加 max_steps + progress_cb 2 参数 — 总是配对, < 3 参不抽 dataclass
+  - 复用 captcha.wait_for_resolution — V0.16.4 commit 已显式选 B 路径, subagent 不推翻
+  - 测试 setenv 抽 fixture — N=3 重复 2 行, 沿用 test_captcha.py:101 既有 YAGNI 注释惯例
+
+### Compatibility
+- 公共 API 零变化 (类型注解仅 IDE-time, 运行时透明)
+- 231 passed + 2 skipped 与 V0.16.4 一致, 行为 100% 等价
+
 ## [0.16.4] - 2026-05-04
 
 ### Added (progress_cb 真 wire 完整链路: mcp ctx → cli → loop 主循环 + captcha 心跳)

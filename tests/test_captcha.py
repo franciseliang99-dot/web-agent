@@ -166,7 +166,7 @@ async def test_loop_pause_then_resume_after_captcha_cleared(
 ):
     """场景: 第 1 步 captcha 命中 + wait 返回 True (用户解了) → 继续执行 LLM done step。"""
     monkeypatch.delenv("WEB_AGENT_CAPTCHA_DISABLE", raising=False)
-    # V0.16.4: loop 内联 poll, 短 timeout 让测试快速
+    # 短 timeout 让测试快速; 内联 poll 重检 detect, 不需 monkeypatch wait_for_resolution
     monkeypatch.setenv("WEB_AGENT_CAPTCHA_TIMEOUT_S", "1.0")
     monkeypatch.setenv("WEB_AGENT_CAPTCHA_POLL_S", "0.05")
 
@@ -202,7 +202,7 @@ async def test_loop_captcha_timeout_writes_step_and_aborts(
 ):
     """场景: detect 始终命中 + wait 返回 False (用户没解) → SAFETY 风格 graceful abort。"""
     monkeypatch.delenv("WEB_AGENT_CAPTCHA_DISABLE", raising=False)
-    # V0.16.4: 内联 poll 实测, 短 timeout 让测试 ~0.3s 完成 (不真等 300s default)
+    # 短 timeout 让测试 ~0.3s 完成 (不真等 300s default), 内联 poll 走 deadline 路径
     monkeypatch.setenv("WEB_AGENT_CAPTCHA_TIMEOUT_S", "0.3")
     monkeypatch.setenv("WEB_AGENT_CAPTCHA_POLL_S", "0.05")
 
