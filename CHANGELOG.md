@@ -2,6 +2,23 @@
 
 All notable changes to web-agent. 版本号遵循 SemVer 简化形式（V<major>.<minor>.<patch>）。
 
+## [0.12.5] - 2026-05-03
+
+### Docs
+- **README.md 全面 refresh** (V0.2.0 → V0.12.4 catch-up, 落后 10 个版本一次性补齐):
+  - **当前状态**: V0.2.0 骨架 1 行 → V0.12.4 + W milestone 完整进度 (W1/2/3/4 ✅, W4-1.1 ✅, W5-A/B ✅, W5-C/D 未启动)
+  - **栈**: 加 Shadow DOM 穿透 / 弹窗自动关 / 安全反思双层防御 一句话描述
+  - **路线图重写**: W1-W4 全 ✅ / W5 部分 ✅ + 已知缺口 (patchright 决断 / 住宅代理 / Gmail 真跑)
+  - **新加「行为开关 (env 变量)」段** 5 类分组: Safety / Captcha / Perception / Notify / Reliability + Demo 专用 — 7 个新 env 变量首次进 README
+  - **CLI 段加 `web-agent-replay`** 文档 (含 `--all` 索引页模式)
+  - **目录段更新**: src/web_agent/ 加 safety.py / captcha.py / notify.py / replay.py / llm/ 子包; demos/ 加 github_search / gmail_summary / gmail_compose; tests/ 标 13 文件 148 case; data/ 加 replays/
+- **不动**: 反检测段 / 法律边界 / 安装段 / Chrome 启动表 / BYO LLM 段 (这些没过期)
+
+### Compatibility
+- 零代码改动 (本 commit 仅 README + CHANGELOG + version bump)
+- 148 tests 零变化全绿
+- 公共 API 零变化, 行为零变化
+
 ## [0.12.4] - 2026-05-03
 
 ### Tests (audit gap fill: trace.py 13 case)
