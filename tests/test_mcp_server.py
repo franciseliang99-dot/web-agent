@@ -217,6 +217,68 @@ async def test_query_memory_returns_serialized_entries(monkeypatch, reset_run_lo
         assert parsed[1]["success"] is False
 
 
+# ---------- V0.16.6 Resources (4 case) ----------
+
+async def test_list_resources_includes_two_templates(reset_run_lock):
+    """V0.16.6: list_resource_templates 返 webagent://replay/{task_id} + memory/{domain}."""
+    async with create_connected_server_and_client_session(mcp) as session:
+        templates = await session.list_resource_templates()
+        uris = {str(t.uriTemplate) for t in templates.resourceTemplates}
+        assert any("webagent://replay/" in u for u in uris), uris
+        assert any("webagent://memory/" in u for u in uris), uris
+
+
+async def test_read_replay_resource_returns_html(monkeypatch, reset_run_lock, tmp_path):
+    """V0.16.6: read webagent://replay/{task_id} 返 HTML 文本 (mime text/html)."""
+    fake_html = tmp_path / "task-x.html"
+    fake_html.write_text("<html><body>fake replay</body></html>", encoding="utf-8")
+
+    def fake_render(task_id, out_dir=None, db_path=None):
+        return {"task_id": "task-x", "html_path": str(fake_html.resolve()), "step_count": 1, "result": "OK"}
+
+    monkeypatch.setattr("web_agent.mcp_server.replay_render_to_file", fake_render)
+
+    async with create_connected_server_and_client_session(mcp) as session:
+        result = await session.read_resource("webagent://replay/task-x")
+        assert len(result.contents) == 1
+        content = result.contents[0]
+        assert "fake replay" in content.text
+        assert content.mimeType == "text/html"
+
+
+async def test_read_memory_resource_returns_json_list(monkeypatch, reset_run_lock):
+    """V0.16.6: read webagent://memory/{domain} 返 JSON list (mime application/json)."""
+    from web_agent.memory import MemoryEntry
+
+    fake_entries = [
+        MemoryEntry(ts=1714850400.0, domain="example.com", goal="g", result="r", success=True),
+    ]
+    monkeypatch.setattr("web_agent.mcp_server.recall_by_domain", lambda db, d, limit=5: fake_entries)
+
+    async with create_connected_server_and_client_session(mcp) as session:
+        result = await session.read_resource("webagent://memory/example.com")
+        assert len(result.contents) == 1
+        content = result.contents[0]
+        parsed = json.loads(content.text)
+        assert len(parsed) == 1
+        assert parsed[0]["goal"] == "g"
+        assert parsed[0]["success"] is True
+
+
+async def test_read_replay_resource_non_existent_errors(monkeypatch, reset_run_lock):
+    """V0.16.6: 不存在 task_id → resource read RuntimeError (SystemExit 转译)."""
+    def boom(task_id, out_dir=None, db_path=None):
+        raise SystemExit("replay: db 不存在")
+
+    monkeypatch.setattr("web_agent.mcp_server.replay_render_to_file", boom)
+
+    async with create_connected_server_and_client_session(mcp) as session:
+        # FastMCP wraps resource exceptions; pytest.raises catches the propagated McpError
+        from mcp.shared.exceptions import McpError
+        with pytest.raises(McpError):
+            await session.read_resource("webagent://replay/nonexistent")
+
+
 # ---------- Case 11 (V0.16.4): progress notification 真接通 ----------
 
 async def test_web_agent_run_progress_callback_invoked(monkeypatch, reset_run_lock, fake_chrome_alive):

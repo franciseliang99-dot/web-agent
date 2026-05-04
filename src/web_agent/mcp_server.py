@@ -1,20 +1,24 @@
-"""V0.16.1 MCP server: 暴露 web-agent 为 MCP server (Claude Desktop / 任意 MCP client 调).
+"""V0.16.1+ MCP server: 暴露 web-agent 为 MCP server (Claude Desktop / 任意 MCP client 调).
 
-3 tools:
+3 tools (有副作用 / 主动调用):
 - `web_agent_run(goal, url, max_steps)`: 跑一个 task, 返 result string
 - `web_agent_get_replay(task_id)`: 渲染 replay HTML, 返 {task_id, html_path, step_count, result}
 - `web_agent_query_memory(domain, limit)`: 长期记忆 by domain, 返 list[dict]
 
-设计 (subagent V0.16.1 审核反馈采纳):
+2 resources (V0.16.6 加, 只读视图 / 客户端订阅):
+- `webagent://replay/{task_id}`: 渲染好的 replay HTML 文本 (text/html mime)
+- `webagent://memory/{domain}`: 长期记忆 entries JSON (application/json mime)
+
+设计:
 - FastMCP decorator 风格 (官方推荐)
 - Module-level `_RUN_LOCK` 串行化并发 task (Chrome CDP 单 tab 抢, 测试 monkeypatch 可重置)
-- per-tool-call Chrome 9222 健康检查 (urllib stdlib, 不引 aiohttp), 仅 web_agent_run 需; query_memory/get_replay 无需
-- progress notification 通过 ctx.report_progress(step_i, max_steps, message) — DI 到 loop 不破坏 loop/mcp 解耦
-- exception → 返 structured tool error (FastMCP 自动序列化)
+- per-tool-call Chrome 9222 健康检查 (urllib stdlib, 仅 web_agent_run 需)
+- progress notification 通过 ctx.report_progress(progress, total, message) DI 到 loop 不破坏解耦
+- exception → 返 structured tool error / resource error (FastMCP 自动序列化)
+- Resources vs tools: replay/memory 本质 read-only 订阅, resource 语义比 tool 更准
 
 CLI:
   uv run web-agent-mcp                 # stdio mode (Claude Desktop 默认)
-  uv run web-agent-mcp --http <port>   # HTTP mode 留 V0.16.3
 """
 
 from __future__ import annotations
@@ -113,6 +117,49 @@ async def web_agent_get_replay(task_id: str) -> dict:
         # replay.load_task 用 sys.exit() 报错 (CLI 行为); FastMCP 不 catch BaseException,
         # 必须转为 Exception 让 SDK 序列化为 tool error 而不让 server 进程退出.
         raise RuntimeError(f"replay 失败: {e}") from e
+
+
+@mcp.resource(
+    "webagent://replay/{task_id}",
+    name="web-agent replay HTML",
+    description="渲染好的 ReAct trace replay HTML (含截图 + 思考 + 行动时间线). 只读.",
+    mime_type="text/html",
+)
+async def replay_resource(task_id: str) -> str:
+    """V0.16.6 read-only resource: 客户端订阅指定 task_id 的 replay HTML 文本.
+
+    与 `web_agent_get_replay` tool 的差异: tool 返结构化 dict (含 path/step_count),
+    resource 直接返 HTML 文本 (client 可 inline render). 同源数据无副作用.
+    """
+    try:
+        info = replay_render_to_file(task_id or None)
+    except SystemExit as e:
+        raise RuntimeError(f"replay 失败: {e}") from e
+    return Path(info["html_path"]).read_text(encoding="utf-8")
+
+
+@mcp.resource(
+    "webagent://memory/{domain}",
+    name="web-agent 长期记忆",
+    description="按 domain 拉历史 task outcome (ts/goal/result/success), 默认 5 条.",
+    mime_type="application/json",
+)
+async def memory_resource(domain: str) -> list[dict]:
+    """V0.16.6 read-only resource: 客户端订阅指定 domain 的历史 task entries (JSON list).
+
+    与 `web_agent_query_memory` tool 的差异: tool 接 limit 参数 + 主动调用语义,
+    resource URI 模板更适合 LLM 当上下文订阅 (e.g. 调 web_agent_run 前自动拉同 domain 历史).
+    """
+    if not domain:
+        return []
+    if domain.startswith("http://") or domain.startswith("https://"):
+        domain = extract_domain(domain)
+    mem_db = Path(os.environ.get("WEB_AGENT_MEMORY_DB", str(_MEM_DB)))
+    entries = recall_by_domain(mem_db, domain, limit=5)
+    return [
+        {"ts": e.ts, "domain": e.domain, "goal": e.goal, "result": e.result, "success": e.success}
+        for e in entries
+    ]
 
 
 @mcp.tool()

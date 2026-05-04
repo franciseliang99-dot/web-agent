@@ -2,6 +2,37 @@
 
 All notable changes to web-agent. 版本号遵循 SemVer 简化形式（V<major>.<minor>.<patch>）。
 
+## [0.16.6] - 2026-05-04
+
+### Added (MCP Resources: replay HTML + memory entries 只读视图)
+- **`mcp_server.py` 加 2 个 `@mcp.resource()` template** (FastMCP URI template 风格):
+  - `webagent://replay/{task_id}` (mime `text/html`): 渲染好的 ReAct trace replay HTML 文本, 客户端可 inline render. 内部复用 `replay_render_to_file` + `Path(html_path).read_text()` 读回内容
+  - `webagent://memory/{domain}` (mime `application/json`): 长期记忆 entries JSON list (默认 5 条), URL form 自动 normalize via `extract_domain`
+- **新增 4 case** `tests/test_mcp_server.py`:
+  - `test_list_resources_includes_two_templates`: `list_resource_templates` 返 webagent:// 两个 URI 模板
+  - `test_read_replay_resource_returns_html`: `read_resource("webagent://replay/task-x")` 返 HTML text + mime text/html
+  - `test_read_memory_resource_returns_json_list`: `read_resource("webagent://memory/example.com")` 返 JSON list, parse 后字段对
+  - `test_read_replay_resource_non_existent_errors`: 不存在 task_id → `McpError` (SystemExit 转译路径同 web_agent_get_replay tool)
+
+### Why
+- `replay` / `memory` 本质是只读视图, MCP 协议层面 resource 比 tool 语义更准 (tool 暗示副作用 / 主动调用; resource 是订阅 / 客户端按需读)
+- subagent (Plan) 审核反馈采纳:
+  - **优先做 Resources** 而非 HTTP transport (用户未提远程需求, stdio 已通) 或 OpenRouter/Azure smoke (水平复制, ROI 低)
+  - **保留 `web_agent_get_replay` / `web_agent_query_memory` 两个 tool** 不删: tool 接 limit 参数 + 主动调用语义场景仍有用 (e.g. Claude Desktop UI 显式按钮调 tool); resource 是 LLM 上下文订阅场景 (e.g. 调 web_agent_run 前自动拉同 domain 历史)
+  - **Cursor / Continue 都已支持 resources** 不像 elicitation 那样卡客户端兼容
+- 实施代价 ~30 分钟 (50 行: 2 个 resource + 4 case test + CHANGELOG)
+
+### Compatibility
+- 公共 API 加: `mcp_server.replay_resource` + `mcp_server.memory_resource`
+- 旧 11 mcp tests + 220 主 tests + 2 smoke skip 全过, 总 235 passed + 2 skipped (V0.16.5 231 + 4 resource case)
+- runtime deps 零变化
+
+### V0.16.7+ next steps
+- HTTP transport (streamable HTTP, 远程接 MCP server)
+- Elicitation 替代 `WEB_AGENT_AUTO_APPROVE` (Claude Desktop 2026-Q1 后正式支持)
+- OpenRouter / Azure / Bedrock smoke 骨架 (复制 Kimi 模板)
+- 真接 Cursor/Continue 跑 wikipedia 任务 + screenshot 验通
+
 ## [0.16.5] - 2026-05-04
 
 ### Refactor (V0.16.4 progress wire /simplify pass)

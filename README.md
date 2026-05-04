@@ -6,7 +6,7 @@ MultiOn 风格的「高度模仿人操作网页」AI web agent。
 
 ## 当前状态
 
-V0.16.4 (2026-05-04) — 42+ commits, 231 tests passing + 2 smoke skips. **MCP server progress 真接通**: ctx.report_progress 三轨 (mcp → cli → loop 主循环 + captcha 心跳) 全 wire, 长 captcha wait 不再撞 Claude Desktop 60s timeout
+V0.16.6 (2026-05-04) — 45+ commits, 235 tests passing + 2 smoke skips. **MCP server 完整能力**: 3 tools + 2 resources (`webagent://replay/{task_id}` + `webagent://memory/{domain}` 只读视图) + progress 真接通 + asyncio.Lock 串行 + 9222 健康检查
 
 **W milestone 进度**:
 - W1 ✅ Wikipedia 搜词条 + 提取首段 (骨架 + 多 LLM 支持)
