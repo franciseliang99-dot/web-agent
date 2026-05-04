@@ -6,7 +6,7 @@
 
 设计:
 - 与 `trace.db` **分开** (`data/memory.db`): schema 演进独立, 备份/清理粒度独立
-- 失败判定 substring 匹配 5 类 marker (与 loop.py L147/L155/L172/L218 等错误前缀对齐)
+- 失败判定 substring 匹配 6 类 marker (与 loop.py L147/L155/L172/L218 等错误前缀对齐)
 - record/recall 失败 silently swallow: 记忆不该阻塞主路径
 - 当前 MVP 仅持久化 + CLI dump; 不动 planner Protocol, 不 inject 到 trace.observation
   (那是 W5-D.2 的事, 涉及大架构改动)
@@ -67,7 +67,7 @@ def extract_domain(url: str | None) -> str:
 
 
 def is_success(result: str) -> bool:
-    """5 类失败 marker 任一 substring 命中 → False; 空 result 视为 fail (防御默认)。"""
+    """6 类失败 marker 任一 substring 命中 → False; 空 result 视为 fail (防御默认)。"""
     if not result:
         return False
     return not any(m in result for m in FAILURE_MARKERS)

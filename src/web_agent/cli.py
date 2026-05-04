@@ -13,6 +13,12 @@ from playwright.async_api import async_playwright
 from web_agent.browser import apply_stealth, connect
 from web_agent.llm import make_client
 from web_agent.loop import run_react_loop
+from web_agent.memory import (
+    DEFAULT_DB as _MEM_DB,
+    extract_domain,
+    is_success,
+    record_task,
+)
 
 
 async def run_task(
@@ -58,16 +64,10 @@ async def run_task(
             screenshots_dir=Path("data/screenshots"),
         )
 
-        # W5-D 长期记忆: 跨 session 持久化 task outcome by domain
-        # try/except 包: 记忆失败 (磁盘满 / 权限) 不该阻塞主路径返回
+        # W5-D 长期记忆: 跨 session 持久化 task outcome by domain.
+        # try/except 包: 记忆失败 (磁盘满 / 权限) 不该阻塞主路径返回。
         if os.environ.get("WEB_AGENT_MEMORY_DISABLE", "").lower() not in ("true", "1", "yes"):
             try:
-                from web_agent.memory import (
-                    DEFAULT_DB as _MEM_DB,
-                    extract_domain,
-                    is_success,
-                    record_task,
-                )
                 mem_db = Path(os.environ.get("WEB_AGENT_MEMORY_DB", str(_MEM_DB)))
                 record_task(mem_db, extract_domain(start_url), goal, result, is_success(result))
             except Exception as e:

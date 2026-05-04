@@ -2,6 +2,14 @@
 
 All notable changes to web-agent. 版本号遵循 SemVer 简化形式（V<major>.<minor>.<patch>）。
 
+## [0.13.1] - 2026-05-03
+
+### Refactor (V0.13.0 simplify pass)
+- `cli.py`: `web_agent.memory` 4 个符号从函数内 import 提到模块顶层 (memory.py 是 stdlib only 不会 ImportError; cli 顶层已 import 重模块 loop/browser/llm, memory 增量微不足道; 提可读性 + 静态分析友好)
+- `memory.py`: docstring + `is_success` 注释 "5 类失败 marker" 修正为 "6 类" (FAILURE_MARKERS 实际 6 项: max_steps / WALLCLOCK / SAFETY / CAPTCHA / LOOP / LLM)
+- 行为零变更; 187/187 tests 全绿
+- 跳过项: `record_task` per-call 重开 conn (per-task 低频, schema 自愈 > 复用 conn) / `is_success` 空 result False 防御 (无害且 test 已覆盖) / env truthy 解析 helper 抽取 (跨 loop/cli/notify/perceiver 4 处 ad-hoc, 跳出本次 scope, 应另起 refactor)
+
 ## [0.13.0] - 2026-05-03
 
 ### Added (W5-D: 长期记忆 MVP)
