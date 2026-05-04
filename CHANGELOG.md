@@ -2,6 +2,25 @@
 
 All notable changes to web-agent. 版本号遵循 SemVer 简化形式（V<major>.<minor>.<patch>）。
 
+## [0.12.8] - 2026-05-03
+
+### Tests (audit gap fill: loop.py 主体 abort 路径 3 case)
+- **新建** `tests/test_loop_main.py`: 直测 V0.5.0 / V0.5.2 引入的 3 条 abort 出口
+  - `test_max_steps_exhausted_returns_signal_string`: LLM 永不 done + max_steps=2 (varied scroll dy 避 V0.5.0 anti-loop) → "(max_steps 耗尽未完成)" + trace 落 2 scroll step
+  - `test_wallclock_exceeded_aborts_without_step_row`: `max_wallclock_s=-1.0` 让 step 0 任何 (>=0) elapsed 立即命中 (免 monkeypatch time 跨模块陷阱) → "WALLCLOCK_EXCEEDED at step 0" + 无 step row + tasks.result 写 "WALLCLOCK_EXCEEDED"
+  - `test_llm_exception_captured_writes_error_step`: inline `RaisingLLMClient` 抛 RuntimeError("503 upstream") → "LLM_FAILED at step 0: RuntimeError: 503 upstream" + trace 落 1 step (action_type="error", action_args["error"] 含异常文本)
+- 复用 V0.7.0 / V0.9.0 / V0.11.0 inline `FakePage` / `FakeLLMClient` / `patch_loop_internals` fixture / `_read_trace_steps` 模式 (4 处 inline 复制不抽 conftest, 与现状一致)
+
+### Why
+- audit findings 列入测试覆盖盲区, V0.12.0 / V0.12.4 / V0.12.6 已补 perceiver / trace / cli 三模块, loop.py 主体是剩余高 ROI 项
+- V0.5.0 anti-loop / V0.5.2 wallclock 与 LLM exception capture 当时仅测 signature 纯函数, abort 端到端路径裸奔近 7 个版本号
+- safety / captcha / reflect 集成测覆盖 done / safety_block / captcha_timeout / reflect 路径; **此 commit 收尾剩 3 条**: max_steps / wallclock / LLM exception
+
+### Compatibility
+- 零代码改动 (loop.py / safety.py / captcha.py / notify.py / replay.py / trace.py 全不动)
+- 旧 157 测试零修改全过; 新增 3 case, 总 160 tests 全绿
+- 公共 API 零变化, 行为零变化
+
 ## [0.12.7] - 2026-05-03
 
 ### Docs (.env.example sync)
