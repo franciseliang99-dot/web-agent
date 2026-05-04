@@ -6,7 +6,7 @@ MultiOn 风格的「高度模仿人操作网页」AI web agent。
 
 ## 当前状态
 
-V0.15.7 (2026-05-04) — 32+ commits, 220 tests passing + 1 smoke skip (Kimi 国内版 .cn cassette 已真录通; Anthropic cassette 待用户接手)
+V0.15.8 (2026-05-04) — 33+ commits, 220 tests passing + 2 smoke skips (Kimi 国内 .cn cassette 已真录通; Anthropic + GPT 骨架 cassette 待用户接手)
 
 **W milestone 进度**:
 - W1 ✅ Wikipedia 搜词条 + 提取首段 (骨架 + 多 LLM 支持)
@@ -113,7 +113,13 @@ uv run web-agent-memory wikipedia.org --db data/memory.db
   ```
   之后任何人/CI 无 key 也能跑 (走 cassette replay)。单录成本: Anthropic ≈ $0.006 / Kimi ≈ ¥0.03 (~$0.004)。
   Kimi 国际版 .ai 端点骨架待 V0.15.6+ (改 `_KIMI_BASE_URL` 重录或加双骨架)。
-  纯 GPT (api.openai.com) / OpenRouter 路径骨架待 V0.16.0+, 同模板可补
+  GPT 骨架 V0.15.8 已落, 录命令:
+  ```bash
+  # 注意必须显式 OPENAI_BASE_URL 防 .env 里 moonshot.cn 劫持
+  OPENAI_BASE_URL=https://api.openai.com/v1 OPENAI_API_KEY=sk-真OpenAI \
+    uv run pytest tests/test_smoke_openai_gpt_real.py --record-mode=once
+  ```
+  OpenRouter / Azure / Bedrock 路径骨架待 V0.16.0+, 同 helper 模板可补
 - **SYSTEM_PROMPT snapshot test** (撤): subagent 审核反对 — 7 条规则文案微调本就常见, snapshot 锁会每次改文案都更新 cassette → false positive 噪音 > 真回归捕获价值。`test_llm_schema.py` 已锁工具数+name 集+required 字段, 够用; 改 SYSTEM_PROMPT 走 review 而非自动测
 
 ## BYO LLM API key

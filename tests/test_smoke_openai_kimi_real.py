@@ -1,84 +1,47 @@
-"""V0.15.5 W5-E real LLM smoke (OpenAI SDK + Moonshot/Kimi 国内版 .cn 端点) — 真 OpenAI SDK 调用 + cassette 回放。
+"""V0.15.5 W5-E real Kimi smoke (V0.15.8 接 _smoke_helpers 去重).
 
-设计意图同 `test_smoke_anthropic_real.py`: 验证 plan() pipeline 走通, 不验行为正确。
+OpenAI SDK + Moonshot 国内版 .cn 端点. Kimi tool_choice="auto" + 空 marks 大概率
+不吐 tool_call → 加 dummy Mark 让 LLM 有明确目标. 详细说明见 _smoke_helpers.py.
 
-**与 Anthropic smoke 的关键差异 (subagent 审核反馈)**:
-- Kimi 走 `tool_choice="auto"` (Moonshot 不支持 "required"), 16×16 灰图 + 空 marks 时
-  Kimi 大概率不吐 tool_call → `OpenAIClient.plan` 第 99-102 行抛 RuntimeError, smoke 永远红
-- 解决: 给一个 dummy Mark(id=1, role="button", text="搜索") + 明确 prompt "click mark_id=1",
-  让 Kimi 在 thinking-disabled + tool_choice=auto 下大概率会 emit tool_call
-
-**hardcode base_url + model 的原因**: cassette vcr 默认 match `[method,scheme,host,port,path]`,
-跨端点 (api.moonshot.ai vs api.moonshot.cn) 不能 replay; 本 smoke 只录国内版 .cn。
-demo 走 env 是 demo 的事, smoke 不复用 env, 保 cassette 跨用户可 replay。
-
-V0.15.4 → V0.15.5: 用户实际持有的是 Moonshot 国内版 (platform.moonshot.cn) key,
-端点 hardcode 由国际版 .ai 切到国内版 .cn (.ai 端点的 401 cassette 已删, 重录由用户接手)。
-国际版用户想接 .ai 需自行改本文件 _KIMI_BASE_URL 重录, 或后续 V0.15.6+ 加 intl 双骨架。
-
-运行模式 3 选 1:
-1. **首次录制 (用户接手, 1 次)**: 提供 Moonshot 国内版 OPENAI_API_KEY (sk-xxx) 跑
-   `pytest tests/test_smoke_openai_kimi_real.py --record-mode=once`
-2. **后续 replay (CI/任何人, 无 key)**: 默认 `pytest` 直接读 cassette
-3. **当前骨架状态 (无 cassette 无 key)**: 整文件 skip, 不阻塞主 219 tests
-
-成本估算 (录一次): kimi-k2.6, ~3k input + 200 output, cache miss ≈ ¥0.03 (~$0.004)。
+V0.15.7 cassette 真录通 (HTTP 200, REDACTED=8, key 反查 0). 单录: ¥0.03 (~$0.004).
+hardcode .cn: cassette vcr URL match 锁 host, 跨端点 (.ai vs .cn) 不能 replay.
 """
 
 from __future__ import annotations
 
-import os
 from collections import deque
-from pathlib import Path
 
 import pytest
 
-# Kimi 国内版 (cassette host 锁; 国际版 .ai 录的不能跨端点 replay)
+from tests._smoke_helpers import (
+    TINY_GRAY_PNG_B64,
+    assert_smoke_action,
+    ensure_dummy_key,
+    smoke_skip_marker,
+)
+
 _KIMI_BASE_URL = "https://api.moonshot.cn/v1"
 _KIMI_MODEL = "kimi-k2.6"
 
-# ---- skip 守卫 ----
-_CASSETTE_DIR = Path(__file__).parent / "cassettes" / "test_smoke_openai_kimi_real"
-_HAS_CASSETTE = _CASSETTE_DIR.exists() and any(_CASSETTE_DIR.glob("*.yaml"))
-_HAS_KEY = bool(os.environ.get("OPENAI_API_KEY"))
-_SHOULD_SKIP = not _HAS_CASSETTE and not _HAS_KEY
-
-pytestmark = pytest.mark.skipif(
-    _SHOULD_SKIP,
-    reason="real Kimi smoke skeleton: 既无 cassette 也无 OPENAI_API_KEY (Moonshot 国内版 .cn sk-xxx) — "
-    "首次录制请 export OPENAI_API_KEY 后跑 --record-mode=once",
-)
-
-
-# 16×16 灰 PNG (复用 Anthropic smoke 同常量, 节约 cassette body 体积)
-_GRAY_16X16_PNG_B64 = (
-    "iVBORw0KGgoAAAANSUhEUgAAABAAAAAQCAIAAACQkWg2AAAAGUlEQVR4nGNsaGhgIAUwkaR6VMOoh"
-    "iGlAQDJTAGgLgFHggAAAABJRU5ErkJggg=="
+pytestmark = smoke_skip_marker(
+    env_var="OPENAI_API_KEY",
+    cassette_subdir="test_smoke_openai_kimi_real",
+    label="Kimi 国内版 .cn",
 )
 
 
 @pytest.mark.vcr
 @pytest.mark.asyncio
 async def test_kimi_plan_smoke_pipeline_alive():
-    """smoke = pipeline alive, NOT behavior correctness.
-
-    Kimi 比 Anthropic smoke 多一个 dummy Mark + 明确 prompt, 防 thinking-disabled +
-    tool_choice=auto 模式下 Kimi 不吐 tool_call (会让 OpenAIClient 抛 RuntimeError).
-    """
     from web_agent.llm.base import Action
     from web_agent.llm.openai import OpenAIClient
     from web_agent.perceiver import Mark
     from web_agent.trace import Trace
 
-    # 无 key 但有 cassette: 注入 dummy 让 OpenAIClient.__init__ 通过 (vcr 拦下出站请求, 不真用)
-    if not _HAS_KEY:
-        os.environ["OPENAI_API_KEY"] = "sk-kimi-cassette-replay-not-real"
+    ensure_dummy_key("OPENAI_API_KEY", "sk-kimi-cassette-replay-not-real")
 
-    client = OpenAIClient(
-        base_url=_KIMI_BASE_URL,
-        model=_KIMI_MODEL,
-    )
-    # dummy Mark: 让 Kimi 有明确点击目标; SoM 编号 1, role=button, 防空 marks 下 Kimi 没机会 emit tool_call
+    client = OpenAIClient(base_url=_KIMI_BASE_URL, model=_KIMI_MODEL)
+    # dummy Mark: tool_choice="auto" + 空 marks 易不吐 tool_call, 给明确点击目标
     dummy_mark = Mark(
         id=1,
         tag="button",
@@ -88,14 +51,9 @@ async def test_kimi_plan_smoke_pipeline_alive():
     )
     trace = Trace(task_id="smoke-kimi-real", goal="点击搜索按钮", steps=deque())
     action = await client.plan(
-        goal="请点击 mark_id=1 的搜索按钮",  # 明确指向 dummy_mark, 高概率回 click
-        screenshot_b64=_GRAY_16X16_PNG_B64,
+        goal="请点击 mark_id=1 的搜索按钮",
+        screenshot_b64=TINY_GRAY_PNG_B64,
         marks=[dummy_mark],
         trace=trace,
     )
-
-    assert isinstance(action, Action), f"plan() 应返 Action dataclass, got {type(action)!r}"
-    assert action.type in {"click", "type", "scroll", "extract", "done"}, \
-        f"action.type 必须是 5 合法值之一, got {action.type!r}"
-    assert isinstance(action.args, dict)
-    assert isinstance(action.thought, str)
+    assert_smoke_action(action, Action)

@@ -2,6 +2,38 @@
 
 All notable changes to web-agent. 版本号遵循 SemVer 简化形式（V<major>.<minor>.<patch>）。
 
+## [0.15.8] - 2026-05-04
+
+### Tests (W5-E smoke helpers 抽象 + GPT smoke 骨架 + blocker_env 防错路由)
+- **新建** `tests/_smoke_helpers.py` (~75 行, anthropic + kimi + gpt 三 smoke 共享):
+  - `TINY_GRAY_PNG_B64` 16×16 灰 PNG base64 常量 (Claude vision <8×8 拒, 安全下限)
+  - `smoke_skip_marker(env_var, cassette_subdir, label, *, blocker_env=None)` 工厂: 既无 cassette 也无 key 时 skip 整文件; **新增 blocker_env 参数**: 当用户某 env var (e.g. OPENAI_BASE_URL) 设置但端点错配, 视为 "没 key for 本端点" 触发 skip 防错路由 record
+  - `ensure_dummy_key(env_var, dummy_value)`: replay 阶段无 key 注入 dummy 让 *Client.__init__ 通过
+  - `assert_smoke_action(action, Action_cls)`: smoke = pipeline alive 共用断言 (返 Action / type ∈ 5 / args dict / thought str)
+- **重构** `tests/test_smoke_anthropic_real.py` + `tests/test_smoke_openai_kimi_real.py` 接 helper, 各砍 ~25 行去重 (skip 守卫 + PNG 常量 + 断言三段)
+- **新建** `tests/test_smoke_openai_gpt_real.py` (~60 行) 用 helper:
+  - hardcode `base_url="https://api.openai.com/v1"` 显式传防 OPENAI_BASE_URL env 劫持
+  - hardcode `model="gpt-5.5"`, `tool_choice="required"` (OpenAIClient 默认), 空 marks 也能 PASS
+  - skip 守卫加 `blocker_env=("OPENAI_BASE_URL", "openai.com")`: 当用户 .env 配 `OPENAI_BASE_URL=moonshot.cn` (主体跑 Kimi) 时 GPT smoke 整文件 skip, 防 GPT 真发请求被错路由到 Moonshot
+
+### Why
+- V0.15.4-7 累积 2 个 smoke (anthropic + kimi), 露出 16×16 PNG / skip 守卫 / Action 断言三段重复 ~25 行/文件; subagent V0.15.4 留 "第 3 个 smoke 时再抽" — V0.15.8 临界点到了
+- subagent (Plan) 审核反馈采纳:
+  - **helper 放 `tests/_smoke_helpers.py` 而非 conftest.py**: conftest 全局加载会让 219 非 smoke test collection 阶段也 import, 浪费; module 化按需 import 更干净
+  - **抽 3 段** (常量 / skip 工厂 / 断言), 不抽 vcr_config: vcr_config 已是 conftest fixture, 11 个 filter_headers 全 provider 通用
+  - 实施后第 3 个 smoke (GPT) 文件 ~60 行, 第 4 个起更短
+- **GPT smoke 录制错路由 bug 现场修**: 第一版 GPT smoke base_url=None, 加 conftest dotenv autoload 后 SDK 读 `OPENAI_BASE_URL=moonshot.cn` 把请求路由到 Moonshot 端点 → 404 model not found → 录到错 cassette. 立即删 cassette + 显式 hardcode base_url + helper 加 blocker_env 守卫双重防御
+
+### Limitations
+- **GPT cassette 待用户接手录**: 单录 ~$0.005-$0.01, 用户需 `OPENAI_BASE_URL=https://api.openai.com/v1 OPENAI_API_KEY=sk-真OpenAI uv run pytest tests/test_smoke_openai_gpt_real.py --record-mode=once`
+- **OpenRouter / Azure / Bedrock 路径仍待**: 同 helper 模板可加, V0.16.0+ 视用户场景决定
+- **smoke 断言宽**: pipeline alive (Action 形状对) 不验行为 (LLM 选对 mark_id), W5-F+ golden trace 多 case 才覆盖
+
+### Compatibility
+- 公共 API 零变化, src/ 业务代码 0 行改动
+- 旧 tests 全过, 总 222 collected = 220 passed + 2 skipped (Anthropic + GPT skip 待录, Kimi cassette V0.15.7 已有保持 pass)
+- helper API 公开 (`tests/_smoke_helpers.py`), 后续 smoke 直接 import
+
 ## [0.15.7] - 2026-05-04
 
 ### Tests (W5-E Kimi cassette 真录通 + conftest .env autoload)
