@@ -2,6 +2,25 @@
 
 All notable changes to web-agent. 版本号遵循 SemVer 简化形式（V<major>.<minor>.<patch>）。
 
+## [0.16.7] - 2026-05-04
+
+### Refactor (V0.16.6 MCP Resources /simplify pass)
+- **`mcp_server.py`** 抽 2 个 module-private helper 消 tool/resource 间重复:
+  - `_render_replay(task_id)` — `replay_render_to_file(task_id or None)` + `SystemExit → RuntimeError` 转译, `web_agent_get_replay` tool 与 `replay_resource` 都走它. 之前两处复制粘贴同一 try/except 块
+  - `_query_memory(domain, limit)` — empty-domain guard + URL→domain normalize + env-driven `mem_db` + `recall_by_domain` + dict 序列化, `web_agent_query_memory` tool 与 `memory_resource` 都走它. 之前两处除 `limit` 来源 (param vs hardcode 5) 外字段全同
+  - tool/resource 函数体降到 1-2 行, 各保留 docstring 表语义差异
+- **`tests/test_mcp_server.py`** 加 `_patch_replay_render(monkeypatch, *, returns=, raises=)` helper 替代 4 处内联 `def fake_render` / `def boom` (case 5 + case 6 + V0.16.6-2 + V0.16.6-4) — 4 个 stub 工厂统一签名
+
+### Why
+- subagent (`/simplify`) 审核反馈采纳: V0.16.6 commit 8291ce0 `replay_resource` vs `web_agent_get_replay` tool ~70% 代码重复 (同一 `replay_render_to_file` + `SystemExit` 转译块); `memory_resource` vs `web_agent_query_memory` tool 几乎完全一样除 `limit` 来源
+- 抽 helper 后未来改 SystemExit 转译策略 / mem_db env var 名只需 1 处, 而非 2 处易漏改
+- 测试 fixture `fake_render` 在 V0.16.6 commit 后已出现 2 次内联定义, 同 V0.16.5 抽 `fake_chrome_alive` 思路一致
+
+### Compatibility
+- 公共 API 不变: `web_agent_get_replay` / `web_agent_query_memory` tool + `replay_resource` / `memory_resource` resource 签名 + 返回类型零变化
+- 全 235 passed + 2 skipped 不变 (V0.16.6 baseline 完全持平, 纯内部解耦 refactor)
+- runtime deps 零变化
+
 ## [0.16.6] - 2026-05-04
 
 ### Added (MCP Resources: replay HTML + memory entries 只读视图)

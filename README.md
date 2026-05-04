@@ -6,7 +6,7 @@ MultiOn 风格的「高度模仿人操作网页」AI web agent。
 
 ## 当前状态
 
-V0.16.6 (2026-05-04) — 45+ commits, 235 tests passing + 2 smoke skips. **MCP server 完整能力**: 3 tools + 2 resources (`webagent://replay/{task_id}` + `webagent://memory/{domain}` 只读视图) + progress 真接通 + asyncio.Lock 串行 + 9222 健康检查
+V0.16.7 (2026-05-04) — 45+ commits, 235 tests passing + 2 smoke skips. **MCP server 完整能力**: 3 tools + 2 resources (`webagent://replay/{task_id}` + `webagent://memory/{domain}` 只读视图, V0.16.7 抽 `_render_replay` / `_query_memory` 共享 helper) + progress 真接通 + asyncio.Lock 串行 + 9222 健康检查
 
 **W milestone 进度**:
 - W1 ✅ Wikipedia 搜词条 + 提取首段 (骨架 + 多 LLM 支持)

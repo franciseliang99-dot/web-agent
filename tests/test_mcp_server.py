@@ -57,6 +57,16 @@ def fake_chrome_dead(monkeypatch):
     monkeypatch.setattr("web_agent.mcp_server._check_chrome_alive", _boom)
 
 
+def _patch_replay_render(monkeypatch, *, returns: dict | None = None, raises: BaseException | None = None):
+    """共享 replay_render_to_file monkeypatch helper: 返 dict 或抛指定异常."""
+    def _stub(task_id, out_dir=None, db_path=None):
+        if raises is not None:
+            raise raises
+        return returns
+
+    monkeypatch.setattr("web_agent.mcp_server.replay_render_to_file", _stub)
+
+
 # ---------- Case 1: list_tools ----------
 
 async def test_list_tools_returns_three(reset_run_lock):
@@ -130,15 +140,12 @@ async def test_get_replay_returns_dict(monkeypatch, reset_run_lock, tmp_path):
     fake_html = tmp_path / "fake-task.html"
     fake_html.write_text("<html>fake</html>")
 
-    def fake_render(task_id, out_dir=None, db_path=None):
-        return {
-            "task_id": "fake-task",
-            "html_path": str(fake_html.resolve()),
-            "step_count": 3,
-            "result": "OK",
-        }
-
-    monkeypatch.setattr("web_agent.mcp_server.replay_render_to_file", fake_render)
+    _patch_replay_render(monkeypatch, returns={
+        "task_id": "fake-task",
+        "html_path": str(fake_html.resolve()),
+        "step_count": 3,
+        "result": "OK",
+    })
 
     async with create_connected_server_and_client_session(mcp) as session:
         result = await session.call_tool("web_agent_get_replay", {"task_id": "fake-task"})
@@ -154,10 +161,7 @@ async def test_get_replay_returns_dict(monkeypatch, reset_run_lock, tmp_path):
 # ---------- Case 6: get_replay non-existent → error ----------
 
 async def test_get_replay_non_existent_errors(monkeypatch, reset_run_lock):
-    def boom(task_id, out_dir=None, db_path=None):
-        raise SystemExit("replay: db 不存在: data/trace.db")
-
-    monkeypatch.setattr("web_agent.mcp_server.replay_render_to_file", boom)
+    _patch_replay_render(monkeypatch, raises=SystemExit("replay: db 不存在: data/trace.db"))
 
     async with create_connected_server_and_client_session(mcp) as session:
         result = await session.call_tool("web_agent_get_replay", {"task_id": "nonexistent"})
@@ -233,10 +237,9 @@ async def test_read_replay_resource_returns_html(monkeypatch, reset_run_lock, tm
     fake_html = tmp_path / "task-x.html"
     fake_html.write_text("<html><body>fake replay</body></html>", encoding="utf-8")
 
-    def fake_render(task_id, out_dir=None, db_path=None):
-        return {"task_id": "task-x", "html_path": str(fake_html.resolve()), "step_count": 1, "result": "OK"}
-
-    monkeypatch.setattr("web_agent.mcp_server.replay_render_to_file", fake_render)
+    _patch_replay_render(monkeypatch, returns={
+        "task_id": "task-x", "html_path": str(fake_html.resolve()), "step_count": 1, "result": "OK",
+    })
 
     async with create_connected_server_and_client_session(mcp) as session:
         result = await session.read_resource("webagent://replay/task-x")
@@ -267,10 +270,7 @@ async def test_read_memory_resource_returns_json_list(monkeypatch, reset_run_loc
 
 async def test_read_replay_resource_non_existent_errors(monkeypatch, reset_run_lock):
     """V0.16.6: 不存在 task_id → resource read RuntimeError (SystemExit 转译)."""
-    def boom(task_id, out_dir=None, db_path=None):
-        raise SystemExit("replay: db 不存在")
-
-    monkeypatch.setattr("web_agent.mcp_server.replay_render_to_file", boom)
+    _patch_replay_render(monkeypatch, raises=SystemExit("replay: db 不存在"))
 
     async with create_connected_server_and_client_session(mcp) as session:
         # FastMCP wraps resource exceptions; pytest.raises catches the propagated McpError

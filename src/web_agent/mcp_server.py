@@ -99,6 +99,32 @@ async def web_agent_run(
         )
 
 
+def _render_replay(task_id: str) -> dict:
+    """渲染 replay 共享实现: tool/resource 都走它. SystemExit 转 RuntimeError 防 server 退出.
+
+    replay.load_task 用 sys.exit() 报错 (CLI 行为); FastMCP 不 catch BaseException,
+    必须转为 Exception 让 SDK 序列化为 tool/resource error 而不让 server 进程退出.
+    """
+    try:
+        return replay_render_to_file(task_id or None)
+    except SystemExit as e:
+        raise RuntimeError(f"replay 失败: {e}") from e
+
+
+def _query_memory(domain: str, limit: int) -> list[dict]:
+    """查询长期记忆共享实现: tool/resource 都走它. 空 domain → []; URL 形式自动 normalize."""
+    if not domain:
+        return []
+    if domain.startswith("http://") or domain.startswith("https://"):
+        domain = extract_domain(domain)
+    mem_db = Path(os.environ.get("WEB_AGENT_MEMORY_DB", str(_MEM_DB)))
+    entries = recall_by_domain(mem_db, domain, limit=limit)
+    return [
+        {"ts": e.ts, "domain": e.domain, "goal": e.goal, "result": e.result, "success": e.success}
+        for e in entries
+    ]
+
+
 @mcp.tool()
 async def web_agent_get_replay(task_id: str) -> dict:
     """渲染指定 task 的 replay HTML, 返结构化路径.
@@ -111,12 +137,7 @@ async def web_agent_get_replay(task_id: str) -> dict:
     Raises:
         RuntimeError: db 不存在 / task_id 不存在 (replay.load_task SystemExit 转译).
     """
-    try:
-        return replay_render_to_file(task_id or None)
-    except SystemExit as e:
-        # replay.load_task 用 sys.exit() 报错 (CLI 行为); FastMCP 不 catch BaseException,
-        # 必须转为 Exception 让 SDK 序列化为 tool error 而不让 server 进程退出.
-        raise RuntimeError(f"replay 失败: {e}") from e
+    return _render_replay(task_id)
 
 
 @mcp.resource(
@@ -131,10 +152,7 @@ async def replay_resource(task_id: str) -> str:
     与 `web_agent_get_replay` tool 的差异: tool 返结构化 dict (含 path/step_count),
     resource 直接返 HTML 文本 (client 可 inline render). 同源数据无副作用.
     """
-    try:
-        info = replay_render_to_file(task_id or None)
-    except SystemExit as e:
-        raise RuntimeError(f"replay 失败: {e}") from e
+    info = _render_replay(task_id)
     return Path(info["html_path"]).read_text(encoding="utf-8")
 
 
@@ -150,16 +168,7 @@ async def memory_resource(domain: str) -> list[dict]:
     与 `web_agent_query_memory` tool 的差异: tool 接 limit 参数 + 主动调用语义,
     resource URI 模板更适合 LLM 当上下文订阅 (e.g. 调 web_agent_run 前自动拉同 domain 历史).
     """
-    if not domain:
-        return []
-    if domain.startswith("http://") or domain.startswith("https://"):
-        domain = extract_domain(domain)
-    mem_db = Path(os.environ.get("WEB_AGENT_MEMORY_DB", str(_MEM_DB)))
-    entries = recall_by_domain(mem_db, domain, limit=5)
-    return [
-        {"ts": e.ts, "domain": e.domain, "goal": e.goal, "result": e.result, "success": e.success}
-        for e in entries
-    ]
+    return _query_memory(domain, limit=5)
 
 
 @mcp.tool()
@@ -172,22 +181,7 @@ async def web_agent_query_memory(domain: str, limit: int = 5) -> list[dict]:
 
     Returns: list[dict] 每条 {ts, domain, goal, result, success}, 按 ts DESC 排序.
     """
-    if not domain:
-        return []
-    if domain.startswith("http://") or domain.startswith("https://"):
-        domain = extract_domain(domain)
-    mem_db = Path(os.environ.get("WEB_AGENT_MEMORY_DB", str(_MEM_DB)))
-    entries = recall_by_domain(mem_db, domain, limit=limit)
-    return [
-        {
-            "ts": e.ts,
-            "domain": e.domain,
-            "goal": e.goal,
-            "result": e.result,
-            "success": e.success,
-        }
-        for e in entries
-    ]
+    return _query_memory(domain, limit=limit)
 
 
 def main() -> None:
