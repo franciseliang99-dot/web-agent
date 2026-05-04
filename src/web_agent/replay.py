@@ -214,19 +214,15 @@ def render_index_html(metas: list[dict]) -> str:
     """W4-1.1: 渲染所有 task 的索引页, 每行链接到 <task_id>.html 详情页。"""
     rows_html = []
     for m in metas:
-        result_short = m["result"][:80]
+        result_short = html.escape(m["result"][:80])
         rcls = _result_class(m["result"])
-        td_result = (
-            f'<td class="{rcls}">{html.escape(result_short)}</td>' if rcls
-            else f'<td>{html.escape(result_short)}</td>'
-        )
         rows_html.append(
             f'<tr class="task-row">'
             f'<td><a href="{html.escape(m["task_id"])}.html">{html.escape(m["task_id"])}</a></td>'
             f'<td>{_fmt_ts(m["started_at"])}</td>'
             f'<td>{_fmt_ts(m["ended_at"])}</td>'
             f'<td>{m["step_count"]}</td>'
-            f'{td_result}'
+            f'<td class="{rcls}">{result_short}</td>'
             f'</tr>\n'
         )
     return (

@@ -58,6 +58,17 @@ def _seed_db(db_path: Path, task_id: str = "abc12345", *, started_at: float | No
     conn.close()
 
 
+def _create_empty_schema(db_path: Path) -> None:
+    """建表但不写任何 task — empty-db SystemExit 用例共用。"""
+    conn = sqlite3.connect(db_path)
+    conn.executescript(
+        "CREATE TABLE tasks (task_id TEXT PRIMARY KEY, goal TEXT, started_at REAL, ended_at REAL, result TEXT);"
+        "CREATE TABLE steps (task_id TEXT, step INTEGER, ts REAL, thought TEXT, action_type TEXT, action_args TEXT, screenshot_path TEXT, observation TEXT, PRIMARY KEY (task_id, step));"
+    )
+    conn.commit()
+    conn.close()
+
+
 def test_load_task_explicit_id(tmp_path):
     db = tmp_path / "trace.db"
     _seed_db(db, task_id="t1")
@@ -93,13 +104,7 @@ def test_load_task_db_missing_exits(tmp_path):
 
 def test_load_task_empty_tasks_exits(tmp_path):
     db = tmp_path / "trace.db"
-    conn = sqlite3.connect(db)
-    conn.executescript(
-        "CREATE TABLE tasks (task_id TEXT PRIMARY KEY, goal TEXT, started_at REAL, ended_at REAL, result TEXT);"
-        "CREATE TABLE steps (task_id TEXT, step INTEGER, ts REAL, thought TEXT, action_type TEXT, action_args TEXT, screenshot_path TEXT, observation TEXT, PRIMARY KEY (task_id, step));"
-    )
-    conn.commit()
-    conn.close()
+    _create_empty_schema(db)
     with pytest.raises(SystemExit) as exc:
         load_task(None, db_path=db)
     assert "tasks 表为空" in str(exc.value)
@@ -185,14 +190,7 @@ def test_load_all_tasks_meta_orders_by_started_desc(tmp_path):
 
 def test_load_all_tasks_meta_empty_db_exits(tmp_path):
     db = tmp_path / "trace.db"
-    import sqlite3 as _sqlite3
-    conn = _sqlite3.connect(db)
-    conn.executescript(
-        "CREATE TABLE tasks (task_id TEXT PRIMARY KEY, goal TEXT, started_at REAL, ended_at REAL, result TEXT);"
-        "CREATE TABLE steps (task_id TEXT, step INTEGER, ts REAL, thought TEXT, action_type TEXT, action_args TEXT, screenshot_path TEXT, observation TEXT, PRIMARY KEY (task_id, step));"
-    )
-    conn.commit()
-    conn.close()
+    _create_empty_schema(db)
     with pytest.raises(SystemExit):
         load_all_tasks_meta(db_path=db)
 
@@ -200,9 +198,8 @@ def test_load_all_tasks_meta_empty_db_exits(tmp_path):
 def test_render_index_html_links_each_task_with_result_class(tmp_path):
     db = tmp_path / "trace.db"
     _seed_db(db, task_id="t_safety", started_at=200.0)
-    # 改 t_safety 的 result 让其含 SAFETY_BLOCK 关键词
-    import sqlite3 as _sqlite3
-    conn = _sqlite3.connect(db)
+    # 覆盖 _seed_db 默认 result, 注入 SAFETY_BLOCK 关键词命中颜色类
+    conn = sqlite3.connect(db)
     conn.execute("UPDATE tasks SET result=? WHERE task_id=?",
                  ("SAFETY_BLOCK at step 0: send-or-pay", "t_safety"))
     conn.commit()

@@ -2,6 +2,18 @@
 
 All notable changes to web-agent. 版本号遵循 SemVer 简化形式（V<major>.<minor>.<patch>）。
 
+## [0.12.3] - 2026-05-03
+
+### Refactor (/simplify W4-1.1 索引页)
+- **`replay.py render_index_html` 折掉 td_result 三元分支**: 空 `class=""` 浏览器不在意; 删 4 行条件包装, `result_short = html.escape(...)` 提到循环顶部省一次重复 escape 调用
+- **`tests/test_replay.py` 抽 `_create_empty_schema(db_path)` 测试 helper**: V0.8.0 `test_load_task_empty_tasks_exits` + W4-1.1 `test_load_all_tasks_meta_empty_db_exits` 各内联 7 行 raw `CREATE TABLE` SQL, dedup 后两者各只调一行 helper
+- 删 W4-1.1 测试里的 `import sqlite3 as _sqlite3` 局部别名 (模块顶部已 `import sqlite3`)
+- subagent (/simplify) 跳过项 (N=2):
+  - `_result_class` substring 循环 (与 `_STEP_CLASS` 精确匹配语义不同, 不可合并)
+  - `--all` 路径 N+1 query 模式 (1 + 2N = 21 query @ 10 task; CLI 一次性, sqlite 本地 sub-ms; 优化复杂度不值)
+  - `_connect` `db_path.exists()` TOCTOU (CLI 无并发, 错误信息更友好)
+- 135/135 tests 全绿, 公共 API + W4-1.1 行为零变化
+
 ## [0.12.2] - 2026-05-03
 
 ### Added (W4-1.1: replay 索引页)
