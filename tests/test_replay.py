@@ -9,7 +9,13 @@ from pathlib import Path
 
 import pytest
 
-from web_agent.replay import load_task, main, render_html
+from web_agent.replay import (
+    load_all_tasks_meta,
+    load_task,
+    main,
+    render_html,
+    render_index_html,
+)
 
 
 def _seed_db(db_path: Path, task_id: str = "abc12345", *, started_at: float | None = None) -> None:
@@ -162,3 +168,75 @@ def test_main_latest_when_no_arg(tmp_path):
     assert rc == 0
     assert (out / "newer.html").exists()
     assert not (out / "older.html").exists()
+
+
+# ---------- W4-1.1 索引页 ----------
+
+def test_load_all_tasks_meta_orders_by_started_desc(tmp_path):
+    db = tmp_path / "trace.db"
+    _seed_db(db, task_id="t1", started_at=100.0)
+    _seed_db(db, task_id="t3", started_at=300.0)
+    _seed_db(db, task_id="t2", started_at=200.0)
+    metas = load_all_tasks_meta(db_path=db)
+    assert [m["task_id"] for m in metas] == ["t3", "t2", "t1"]
+    # 每 task seed 4 step
+    assert all(m["step_count"] == 4 for m in metas)
+
+
+def test_load_all_tasks_meta_empty_db_exits(tmp_path):
+    db = tmp_path / "trace.db"
+    import sqlite3 as _sqlite3
+    conn = _sqlite3.connect(db)
+    conn.executescript(
+        "CREATE TABLE tasks (task_id TEXT PRIMARY KEY, goal TEXT, started_at REAL, ended_at REAL, result TEXT);"
+        "CREATE TABLE steps (task_id TEXT, step INTEGER, ts REAL, thought TEXT, action_type TEXT, action_args TEXT, screenshot_path TEXT, observation TEXT, PRIMARY KEY (task_id, step));"
+    )
+    conn.commit()
+    conn.close()
+    with pytest.raises(SystemExit):
+        load_all_tasks_meta(db_path=db)
+
+
+def test_render_index_html_links_each_task_with_result_class(tmp_path):
+    db = tmp_path / "trace.db"
+    _seed_db(db, task_id="t_safety", started_at=200.0)
+    # 改 t_safety 的 result 让其含 SAFETY_BLOCK 关键词
+    import sqlite3 as _sqlite3
+    conn = _sqlite3.connect(db)
+    conn.execute("UPDATE tasks SET result=? WHERE task_id=?",
+                 ("SAFETY_BLOCK at step 0: send-or-pay", "t_safety"))
+    conn.commit()
+    conn.close()
+    _seed_db(db, task_id="t_done", started_at=100.0)
+
+    metas = load_all_tasks_meta(db_path=db)
+    out = render_index_html(metas)
+
+    assert '<a href="t_safety.html">' in out
+    assert '<a href="t_done.html">' in out
+    assert "result--safety" in out  # SAFETY_BLOCK 命中颜色类
+    assert "<table class=\"task-list\">" in out
+    # 排序 newest first → t_safety (200) 应在 t_done (100) 前
+    assert out.index("t_safety") < out.index("t_done")
+
+
+def test_main_all_flag_writes_each_task_html_plus_index(tmp_path, capsys):
+    db = tmp_path / "trace.db"
+    out = tmp_path / "replays"
+    _seed_db(db, task_id="t1", started_at=100.0)
+    _seed_db(db, task_id="t2", started_at=200.0)
+    rc = main(["--all", "--db", str(db), "--out", str(out)])
+    assert rc == 0
+    assert (out / "t1.html").exists()
+    assert (out / "t2.html").exists()
+    assert (out / "index.html").exists()
+    captured = capsys.readouterr()
+    assert "2 task pages" in captured.out
+
+
+def test_main_all_and_task_id_mutex_errors(tmp_path):
+    db = tmp_path / "trace.db"
+    out = tmp_path / "replays"
+    _seed_db(db, task_id="t1")
+    with pytest.raises(SystemExit):
+        main(["t1", "--all", "--db", str(db), "--out", str(out)])

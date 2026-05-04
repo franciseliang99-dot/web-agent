@@ -2,6 +2,34 @@
 
 All notable changes to web-agent. 版本号遵循 SemVer 简化形式（V<major>.<minor>.<patch>）。
 
+## [0.12.2] - 2026-05-03
+
+### Added (W4-1.1: replay 索引页)
+- **`replay.py` 新增 `load_all_tasks_meta(db_path)`**: 仅取 tasks + 子查询 step_count, 不加载 steps 详情省 RAM; 按 started_at DESC 返回
+- **`replay.py` 新增 `render_index_html(metas)`**: 表格列出所有 task (task_id 链接 → 详情页 / started / ended / steps 数 / result 80 字截断), 4 类 result 文本颜色高亮 (SAFETY_BLOCK 红 / CAPTCHA_TIMEOUT 橙 / LOOP_DETECTED 橙 / WALLCLOCK_EXCEEDED+LLM_FAILED 黄)
+- **CLI** `web-agent-replay --all`: 渲染 DB 全部 task 各自 HTML + 写 `data/replays/index.html` 索引页
+  - argparse `mutually_exclusive_group` 让 task_id 与 --all 冲突时干净报错
+- **测试** `tests/test_replay.py` +5 case (V0.8.0 已有 11 → 16):
+  - load_all_tasks_meta 排序 + step_count
+  - load_all_tasks_meta 空 db 退出
+  - render_index_html 链接 + result colorclass + DESC 顺序
+  - main --all 写所有 task .html + index.html
+  - main task_id 与 --all 互斥报错
+
+### Why
+- V0.8.0 W4-1 CHANGELOG Limitations 自承「无搜索 / 过滤 / 多 task 并列对比 — MVP 单 task 视图; 真要多 task 列表后续 W4-1.1 加索引页」, 留位填坑
+- subagent (Plan) 评估架构 5 决策点全采纳:
+  - mutually_exclusive_group 互斥 task_id 和 --all (干净报错免手写 if)
+  - step_count 子查询 (避 N task 全 steps 加载到内存)
+  - result 文本颜色 td 着色不染整行 (索引表视觉不炸)
+  - 复用 V0.8.0 step--xxx hex (#d32f2f / #ef6c00 / #f9a825) 跨视图视觉一致
+  - 空 tasks 表 sys.exit 与 load_task 单出口语义对齐
+
+### Compatibility
+- 公共 API 加 (`load_all_tasks_meta` / `render_index_html`), 旧 `load_task / render_html / main` 不带 --all 行为零变化
+- 旧 130 测试零修改全过; 新 5 case, 总 135 tests 全绿
+- 零新依赖 (仍是 stdlib sqlite3 + html + json + argparse + datetime)
+
 ## [0.12.1] - 2026-05-03
 
 ### Refactor (/simplify W5-B perceiver)

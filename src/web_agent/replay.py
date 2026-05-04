@@ -1,4 +1,4 @@
-"""Replay 日志面板 (W4-1): 把 trace.db 的 task+steps 渲染成单文件 HTML 时间线。
+"""Replay 日志面板 (W4-1 + W4-1.1): 把 trace.db 的 task+steps 渲染成单文件 HTML 时间线 + 索引页。
 
 零新依赖 — stdlib (sqlite3 + html + json + argparse + datetime + pathlib)。
 HTML 引用截图走相对路径 ../screenshots/<task_id>-<NN>.png (从 data/replays/ 视角)。
@@ -6,6 +6,7 @@ HTML 引用截图走相对路径 ../screenshots/<task_id>-<NN>.png (从 data/rep
 CLI:
   uv run web-agent-replay              # 渲染最新一次 task
   uv run web-agent-replay <task_id>    # 渲染指定 task
+  uv run web-agent-replay --all        # W4-1.1: 渲染 DB 全部 task + index.html 索引页
   uv run web-agent-replay --db data/trace.db --out data/replays
 """
 
@@ -91,6 +92,38 @@ def load_task(task_id: str | None, db_path: Path = DEFAULT_DB) -> dict:
     }
 
 
+def load_all_tasks_meta(db_path: Path = DEFAULT_DB) -> list[dict]:
+    """W4-1.1: 索引页用; 仅取 tasks + 子查询 step_count, 不加载 steps 详情省 RAM。
+
+    返回 list[dict], 按 started_at DESC (最新优先, 与 latest task 选择一致)。
+
+    Raises:
+        SystemExit: db 不存在 / 无 task。
+    """
+    conn = _connect(db_path)
+    try:
+        rows = conn.execute(
+            "SELECT t.task_id, t.goal, t.started_at, t.ended_at, t.result, "
+            "  (SELECT COUNT(*) FROM steps WHERE task_id = t.task_id) AS step_count "
+            "FROM tasks t ORDER BY t.started_at DESC"
+        ).fetchall()
+    finally:
+        conn.close()
+    if not rows:
+        sys.exit("replay: tasks 表为空")
+    return [
+        {
+            "task_id": r["task_id"],
+            "goal": r["goal"] or "",
+            "started_at": r["started_at"],
+            "ended_at": r["ended_at"],
+            "result": r["result"] or "",
+            "step_count": r["step_count"],
+        }
+        for r in rows
+    ]
+
+
 def _fmt_ts(ts: float | None) -> str:
     if ts is None:
         return "—"
@@ -99,6 +132,23 @@ def _fmt_ts(ts: float | None) -> str:
 
 def _shot_src(task_id: str, step: int) -> str:
     return f"{SCREENSHOT_DIR_REL}/{task_id}-{step:02d}.png"
+
+
+# W4-1.1: result 文本 substring 命中即套对应 css 类 (复用 V0.8.0 step--xxx 同款 hex)
+_RESULT_HIGHLIGHT: tuple[tuple[str, str], ...] = (
+    ("SAFETY_BLOCK", "result--safety"),
+    ("CAPTCHA_TIMEOUT", "result--captcha"),
+    ("LOOP_DETECTED", "result--loop"),
+    ("WALLCLOCK_EXCEEDED", "result--error"),
+    ("LLM_FAILED", "result--error"),
+)
+
+
+def _result_class(result: str) -> str:
+    for keyword, cls in _RESULT_HIGHLIGHT:
+        if keyword in result:
+            return cls
+    return ""
 
 
 _CSS = """
@@ -128,6 +178,17 @@ _CSS = """
   details.shot summary { cursor: pointer; color: #1976d2; font-size: 0.9em; }
   details.shot img { display: block; max-width: 100%; margin-top: 0.5em;
                      border: 1px solid #ddd; border-radius: 2px; }
+  table.task-list { border-collapse: collapse; width: 100%; font-size: 0.9em; margin-top: 1em; }
+  table.task-list th, table.task-list td { padding: 0.5em 0.8em; border-bottom: 1px solid #eee;
+                                            text-align: left; vertical-align: top; }
+  table.task-list th { background: #f5f5f5; font-weight: 600; }
+  table.task-list tr.task-row:hover { background: #fafafa; }
+  table.task-list a { color: #1976d2; text-decoration: none; font-family: monospace; }
+  table.task-list a:hover { text-decoration: underline; }
+  td.result--safety  { color: #d32f2f; font-weight: 600; }
+  td.result--captcha { color: #ef6c00; font-weight: 600; }
+  td.result--loop    { color: #ef6c00; font-weight: 600; }
+  td.result--error   { color: #f9a825; font-weight: 600; }
 """
 
 
@@ -146,6 +207,44 @@ def _render_step(task_id: str, step: dict) -> str:
         f'alt="step {step["step"]:02d}" loading="lazy"></details>\n'
         f'  <div class="observation">{html.escape(step["observation"])}</div>\n'
         f'</section>\n'
+    )
+
+
+def render_index_html(metas: list[dict]) -> str:
+    """W4-1.1: 渲染所有 task 的索引页, 每行链接到 <task_id>.html 详情页。"""
+    rows_html = []
+    for m in metas:
+        result_short = m["result"][:80]
+        rcls = _result_class(m["result"])
+        td_result = (
+            f'<td class="{rcls}">{html.escape(result_short)}</td>' if rcls
+            else f'<td>{html.escape(result_short)}</td>'
+        )
+        rows_html.append(
+            f'<tr class="task-row">'
+            f'<td><a href="{html.escape(m["task_id"])}.html">{html.escape(m["task_id"])}</a></td>'
+            f'<td>{_fmt_ts(m["started_at"])}</td>'
+            f'<td>{_fmt_ts(m["ended_at"])}</td>'
+            f'<td>{m["step_count"]}</td>'
+            f'{td_result}'
+            f'</tr>\n'
+        )
+    return (
+        f'<!DOCTYPE html>\n'
+        f'<html lang="zh-CN"><head><meta charset="utf-8">\n'
+        f'<title>web-agent replays — {len(metas)} tasks</title>\n'
+        f'<style>{_CSS}</style></head>\n'
+        f'<body>\n'
+        f'<h1>web-agent replays</h1>\n'
+        f'<div class="task-meta">{len(metas)} tasks · '
+        f'generated {datetime.now().isoformat(timespec="seconds")}</div>\n'
+        f'<table class="task-list">\n'
+        f'  <thead><tr><th>task_id</th><th>started</th><th>ended</th><th>steps</th><th>result</th></tr></thead>\n'
+        f'  <tbody>\n'
+        f'    {"".join(rows_html)}'
+        f'  </tbody>\n'
+        f'</table>\n'
+        f'</body></html>\n'
     )
 
 
@@ -172,16 +271,33 @@ def render_html(task: dict) -> str:
 
 def main(argv: list[str] | None = None) -> int:
     p = argparse.ArgumentParser(prog="web-agent-replay",
-                                description="渲染 trace.db 单次 task 为 HTML 时间线")
-    p.add_argument("task_id", nargs="?", help="task_id (省略 = 最新一次)")
+                                description="渲染 trace.db 单次 task / 全部 task + 索引页")
+    grp = p.add_mutually_exclusive_group()
+    grp.add_argument("task_id", nargs="?", help="task_id (省略 = 最新一次)")
+    grp.add_argument("--all", action="store_true", dest="all_tasks",
+                     help="W4-1.1: 渲染 DB 全部 task + index.html 索引页")
     p.add_argument("--db", default=str(DEFAULT_DB), help="trace.db 路径 (默认 data/trace.db)")
     p.add_argument("--out", default=str(DEFAULT_OUT),
                    help="输出目录 (默认 data/replays/, 文件名 <task_id>.html)")
     args = p.parse_args(argv)
 
-    task = load_task(args.task_id, db_path=Path(args.db))
+    db_path = Path(args.db)
     out_dir = Path(args.out)
     out_dir.mkdir(parents=True, exist_ok=True)
+
+    if args.all_tasks:
+        metas = load_all_tasks_meta(db_path=db_path)
+        for m in metas:
+            task = load_task(m["task_id"], db_path=db_path)
+            (out_dir / f"{task['task_id']}.html").write_text(
+                render_html(task), encoding="utf-8"
+            )
+        index_path = out_dir / "index.html"
+        index_path.write_text(render_index_html(metas), encoding="utf-8")
+        print(f"wrote {len(metas)} task pages + {index_path}")
+        return 0
+
+    task = load_task(args.task_id, db_path=db_path)
     out_path = out_dir / f"{task['task_id']}.html"
     out_path.write_text(render_html(task), encoding="utf-8")
     print(f"wrote {out_path} ({len(task['steps'])} steps)")
