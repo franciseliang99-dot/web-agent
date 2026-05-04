@@ -33,6 +33,9 @@ node_modules/
 playwright-report/
 test-results/
 
+# vcrpy / pytest-recording (V0.15.3): 主 cassette yaml 进 commit, 仅排除 .bak 临时文件
+tests/cassettes/**/*.yaml.bak
+
 # OS
 .DS_Store
 Thumbs.db

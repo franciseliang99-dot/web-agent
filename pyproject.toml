@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "web-agent"
-version = "0.15.2"
+version = "0.15.3"
 description = "MultiOn-style 高度拟人 AI web agent (Python + Playwright + VLM/SoM + stealth, multi-LLM)"
 readme = "README.md"
 requires-python = ">=3.12"
@@ -32,6 +32,7 @@ packages = ["src/web_agent"]
 dev = [
     "pytest>=8.0",
     "pytest-asyncio>=0.24",
+    "pytest-recording>=0.13.4",
     "ruff>=0.7",
 ]
 

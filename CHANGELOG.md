@@ -2,6 +2,43 @@
 
 All notable changes to web-agent. 版本号遵循 SemVer 简化形式（V<major>.<minor>.<patch>）。
 
+## [0.15.3] - 2026-05-03
+
+### Tests (W5-E real LLM smoke 骨架, 待用户首次 record-mode=once)
+- **新建** `tests/conftest.py`:
+  - `vcr_config` module-scope fixture: 锁默认 cassette filter, 元组形式 (name, "REDACTED") 保 header 但脱敏 (利于 cassette diff)
+  - 过滤 11 个敏感 header: authorization / x-api-key / anthropic-version / openai-organization / user-agent / x-stainless-{arch,os,runtime,runtime-version,lang,package-version} (Anthropic SDK 真发的机器画像)
+  - 过滤 query param `api_key`
+  - 默认 `record_mode=once` (有 cassette replay, 否则录制)
+- **新建** `tests/test_smoke_anthropic_real.py`:
+  - 1 case `test_anthropic_plan_smoke_pipeline_alive`: 真调一次 `AnthropicClient.plan(goal="搜苹果价格", screenshot_b64=16×16灰PNG, marks=[], trace=空)`
+  - 断言 (smoke = pipeline alive, NOT behavior correctness): 返 `Action` dataclass / `type ∈ 5 合法值` / args dict / thought str
+  - 16×16 灰 PNG base64 常量 (112 字节): Claude vision <8×8 拒, 16×16 是安全下限
+  - **skip 守卫** `pytestmark = pytest.mark.skipif(not _HAS_CASSETTE and not _HAS_KEY, reason=...)`: 骨架阶段无 cassette + 无 key → 整文件 skip, 219 主 tests + 1 skipped 全绿不阻塞
+  - replay 阶段 (有 cassette 无 key): 注入 dummy `sk-ant-cassette-replay-not-real` 让 `AnthropicClient.__init__` 通过, vcr 拦下出站请求不会真用此 key
+- **`pyproject.toml`** 加 dev dep `pytest-recording>=0.13.4` (传依 vcrpy 8.1.1 + pyyaml 6.0.3 + wrapt 2.1.2)
+- **`.gitignore`** 加 `tests/cassettes/**/*.yaml.bak` (vcrpy 原子写盘留 .bak 临时文件; 主 yaml 进 commit)
+
+### Why
+- V0.15.2 README "已知缺口" 列了 "真实 LLM smoke + cassette" 但留作用户接手. 实际可在沙箱阶段把"骨架 + 工具配置 + skip 守卫"全做好, 用户接手只需提供 key 跑一次 `--record-mode=once`, 大幅降低接手成本
+- subagent (Plan) 审核反馈采纳:
+  - **版本走 V0.15.3 而非 V0.16.0-rc1**: SemVer 简化形式无 pre-release 习惯, rc1 破坏 changelog 锚点连续性; 骨架本质是 docs+dev-dep+1 个 skip test, 不该占 minor (V0.16.0 留给 cassette 真录后)
+  - **16×16 灰 PNG 而非 1×1 透明**: Claude vision <8×8 实测拒 "image too small to process"
+  - **filter_headers 加 user-agent + x-stainless-***: SDK 发机器画像 header, 不滤泄漏 Python/uv 版本+OS+架构
+  - **assertion 用 isinstance(Action)**: 之前误以为返 tuple, 实际返 `Action(type, args, thought)` dataclass (`llm/base.py:20`)
+  - **smoke 设计意图明示**: "pipeline alive, NOT behavior correctness" — 真 LLM 在空 marks + 灰图下回什么不可断言, 只断"返合法 Action"
+
+### Limitations
+- **骨架只跑 skip**: cassette 未录前真测被 skip, 不阻塞主 219 tests; 用户接手前实际无 LLM 真验证
+- **仅 Anthropic**: OpenAI/Kimi smoke 留下次 (V0.15.4? 同模式照搬)
+- **assertion 极宽**: 5 合法 action_type ∈ 检查 + dict/str type 检查, 等于"SDK 没崩 + tool_use 路径走通"; 真要锁行为需多 case + golden trace, 那是 W5-F+ scope
+- **token 成本**: 用户首次 record 一次 ≈ $0.006 (claude-sonnet-4-6 vision, 1100 input + 150 output), 可忽略
+
+### Compatibility
+- 公共 API 零变化
+- 旧 219 tests 零修改全过; 新 1 case 默认 skip (无 cassette + 无 key) → 总 220 collected, 219 passed + 1 skipped
+- dev-only deps 加 (pytest-recording / vcrpy / pyyaml / wrapt), runtime deps 零变化
+
 ## [0.15.2] - 2026-05-03
 
 ### Docs (架构决策入账 + README known-gap 补全)
