@@ -2,6 +2,23 @@
 
 All notable changes to web-agent. 版本号遵循 SemVer 简化形式（V<major>.<minor>.<patch>）。
 
+## [0.13.2] - 2026-05-03
+
+### Docs (W5-D + audit gap 收尾 README sync)
+- **README V0.12.4 → V0.13.1 catch-up** (V0.12.5 上次 refresh 后又 ship 了 V0.12.6/V0.12.7/V0.12.8/V0.13.0/V0.13.1, 累计 stale):
+  - 当前状态: V0.12.4/148 tests → V0.13.1/187 tests; W milestone 加 W5-D ✅ V0.13.0
+  - 加 audit gap 收尾一句话: perceiver/trace/cli/loop 主体 abort 路径四大模块全单测覆盖
+  - 路线图: W5-D ✅ + 标 W5-D.2 planner inject 留位, W5-C 仍未启动
+  - CLI 段加 `web-agent-memory <domain> [--limit N] [--db ...]` 6 行说明 + 输出格式示例
+  - env 段加 Memory 类小段 (`WEB_AGENT_MEMORY_DISABLE` / `WEB_AGENT_MEMORY_DB`)
+  - 目录段 src/ 加 memory.py / cli entry 列 web-agent-memory; tests/ 13→16 文件 148→187 case; data/ 加 memory.db
+- **不动**: 反检测段 / 法律边界 / 安装段 / Chrome 启动表 / BYO LLM 段 (这些没过期)
+
+### Compatibility
+- 零代码改动 (本 commit 仅 README + CHANGELOG + version bump)
+- 187 tests 零变化全绿
+- 公共 API 零变化, 行为零变化
+
 ## [0.13.1] - 2026-05-03
 
 ### Refactor (V0.13.0 simplify pass)

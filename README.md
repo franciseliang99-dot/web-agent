@@ -6,14 +6,16 @@ MultiOn 风格的「高度模仿人操作网页」AI web agent。
 
 ## 当前状态
 
-V0.12.4 (2026-05-03) — 35+ commits, 148 tests passing
+V0.13.1 (2026-05-03) — 44+ commits, 187 tests passing
 
 **W milestone 进度**:
 - W1 ✅ Wikipedia 搜词条 + 提取首段 (骨架 + 多 LLM 支持)
 - W2 ✅ GitHub 搜 repo + 拟人 actuator (3 阶贝塞尔 + smootherstep + 正态键入 + typo+backspace)
 - W3 ✅ Gmail 登录态: read-only 总结 (W3-B) + compose 写操作 (W3-C) + `safety.py` 授权白名单 (W3-A)
 - W4 ✅ replay 日志面板 (W4-1) + index 索引页 (W4-1.1) + Cloudflare/reCAPTCHA 暂停接管 UX (W4-2) + 桌面通知 (W4-3)
-- W5 部分 ✅ — 自反思 page-stuck hint (W5-A) + Shadow DOM 穿透 (W5-B); W5-C 分层规划 / W5-D 长期记忆 未启动
+- W5 部分 ✅ — 自反思 page-stuck hint (W5-A, V0.11.0) + Shadow DOM 穿透 (W5-B, V0.12.0) + 长期记忆 cross-session episodic (W5-D, V0.13.0); W5-C 分层规划未启动
+
+**Audit gap 收尾**: perceiver (V0.12.0) / trace (V0.12.4) / cli (V0.12.6) / loop 主体 abort 路径 (V0.12.8) 四大模块单测填补完成 — 蓝本认知层全模块均落到单测保护下
 
 ## 栈
 
@@ -74,13 +76,21 @@ uv run web-agent-replay --all        # 渲染 DB 全部 task + index.html 索引
 xdg-open data/replays/index.html     # 浏览器打开
 ```
 
+```bash
+# memory dump (V0.13.0 W5-D 长期记忆) — 跨 session 同 domain 历史查询
+uv run web-agent-memory github.com              # 默认 5 条
+uv run web-agent-memory github.com --limit 10
+uv run web-agent-memory wikipedia.org --db data/memory.db
+# 输出: [2026-05-03T12:34:56] OK    搜 trending repo[:60]    ->    repo: x/y, stars: 1k[:80]
+```
+
 ## 路线图
 
 - W1 ✅ / W2 ✅ / W3 ✅ / W4 ✅ — 详见 [`CHANGELOG.md`](CHANGELOG.md)
 - W5-A 自反思 page-stuck soft hint ✅ (V0.11.0)
 - W5-B Shadow DOM 穿透 ✅ (V0.12.0)
+- W5-D 长期记忆 cross-session episodic ✅ (V0.13.0; MVP 仅持久化 + CLI dump, planner inject 留 W5-D.2)
 - W5-C 分层规划 (subgoal split + replan) — 未启动
-- W5-D 长期记忆 (cross-session episodic store) — 未启动
 
 **已知缺口** (不在 W5 路线但需追):
 - patchright-python 决断 (仍用 `playwright-stealth` 2.0.3, 未实测 Cloudflare 突破率)
@@ -159,6 +169,10 @@ WEB_AGENT_AUTO_DISMISS=true    # (见上)
 # === Notify (W4-3) ===
 WEB_AGENT_NOTIFY_DISABLE=      # 默认空 (开); true 关桌面通知 (CI/headless/不想被打扰)
 
+# === Memory (V0.13.0 W5-D) ===
+WEB_AGENT_MEMORY_DISABLE=      # 默认空 (开); true 关跨 session task outcome 持久化
+WEB_AGENT_MEMORY_DB=data/memory.db  # 自定义 memory db 路径 (默认 data/memory.db)
+
 # === Reliability ===
 WEB_AGENT_MAX_WALLCLOCK_S=300  # 单 task 硬超时 (避 SDK retry + perceive 累积超过 max_steps × 平均步耗)
 WEB_AGENT_CDP_URL=http://127.0.0.1:9222  # 接管的 Chrome 调试端口
@@ -194,7 +208,8 @@ src/web_agent/
   captcha.py       # W4-2 Cloudflare/reCAPTCHA/hCaptcha 检测 + 暂停 UX
   notify.py        # W4-3 桌面通知 (osascript / notify-send)
   replay.py        # W4-1/W4-1.1 replay HTML 面板 + 索引页
-  cli.py           # 组合根 + web-agent / web-agent-replay entry
+  memory.py        # W5-D 跨 session 长期记忆 (domain → past goals/results, SQLite)
+  cli.py           # 组合根 + web-agent / web-agent-replay / web-agent-memory entry
   llm/             # 跨 provider Protocol (anthropic / openai / Kimi 兼容)
 demos/
   wikipedia_search.py    # W1
@@ -203,11 +218,12 @@ demos/
   gmail_compose.py       # W3-C (write, safety 拦 Send 默认 abort)
 scripts/
   start_chrome.sh  # 启动 9222 调试端口的独立 Chrome (auto/xvfb/headed/headless)
-tests/             # 148 case, 13 文件 (含 audit gap 填补 trace/perceiver)
+tests/             # 187 case, 16 文件 (含 audit gap 填补: trace/perceiver/cli/loop_main + W5-D test_memory)
 docs/
   高度模仿人操作网页的agent技术路径图.txt  # 用户原始技术蓝本
 data/
-  trace.db                 # SQLite (gitignored)
+  trace.db                 # SQLite trace (gitignored)
+  memory.db                # W5-D cross-session 长期记忆 (gitignored)
   screenshots/             # 每步截图 (gitignored)
   replays/                 # web-agent-replay 输出 HTML (gitignored)
 ```
