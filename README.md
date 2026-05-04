@@ -184,7 +184,7 @@ W1 用 `playwright-stealth` 2.0.3。如果碰到 Cloudflare/Datadome/Akamai：
 
 ```
 src/web_agent/
-  __init__.py      # __version__ = "0.12.4"
+  __init__.py      # __version__
   browser.py       # CDP 接管本地 Chrome + stealth
   perceiver.py     # SoM JS 注入 + Shadow DOM 穿透 + 弹窗自动关
   actuator.py      # 拟人 click/type/scroll (3 阶贝塞尔 + 正态键入)

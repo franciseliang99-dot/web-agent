@@ -2,6 +2,26 @@
 
 All notable changes to web-agent. 版本号遵循 SemVer 简化形式（V<major>.<minor>.<patch>）。
 
+## [0.12.7] - 2026-05-03
+
+### Docs (.env.example sync)
+- **`.env.example` refresh** 同步 V0.12.5 README env 段, 新增 6 var 首次可见:
+  - `WEB_AGENT_CAPTCHA_DISABLE` / `CAPTCHA_TIMEOUT_S=300` / `CAPTCHA_POLL_S=3` (W4-2)
+  - `WEB_AGENT_SOM_SHADOW` (W5-B)
+  - `WEB_AGENT_NOTIFY_DISABLE` (W4-3)
+  - `WEB_AGENT_TEST_RECIPIENT` (W3-C demo)
+- 现有 `AUTO_APPROVE` / `AUTO_DISMISS` / `MAX_WALLCLOCK_S` 保持原位置不重组, 避免破坏已 `cp .env.example .env` 用户的现有配置布局
+- 注释示例严守"无真 secret"约束: `ANTHROPIC_API_KEY=` 空赋值 / Kimi 段保留 `sk-xxx` 占位符
+- 默认值与源码 `os.getenv(..., default)` 完全对齐 (`CAPTCHA_TIMEOUT_S=300` 等), 避免 cp 后锁死代码默认
+- 布尔类 `*_DISABLE` 默认注释掉而不写 `=false`, 避免 truthy 解析差异
+- 用户 `cp .env.example .env` 后**所有 9 个行为开关首次完整可见**
+- 顺手 README 第 187 行目录段 `__version__ = "0.12.4"` stale 串去掉具体版本号 (避免每次 bump 都要改 README)
+
+### Compatibility
+- 零代码改动 (.env.example + CHANGELOG + version bump + README 一字符 = 4 处)
+- 157 tests 零修改全绿 (测试不读 .env.example, 无回归风险)
+- 公共 API 零变化, 行为零变化
+
 ## [0.12.6] - 2026-05-03
 
 ### Tests (audit gap fill: cli.py 9 case)
