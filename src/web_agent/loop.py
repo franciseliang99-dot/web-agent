@@ -121,6 +121,7 @@ async def run_react_loop(
     max_wallclock_s: float = 300.0,
     db_path: Path = Path("data/trace.db"),
     screenshots_dir: Path = Path("data/screenshots"),
+    memories: str | None = None,
 ) -> str:
     """跑 ReAct 循环直到 done / max_steps / max_wallclock_s / 死循环 / LLM 失败。返回最终结果文本。
 
@@ -140,6 +141,18 @@ async def run_react_loop(
     last_clicked_mark: Mark | None = None  # type action 的 safety check 需要上次 click 的元素
     result = "(no result)"
     t_start = time.time()
+
+    # W5-D.2 长期记忆 inject: 主循环前 prepend 一个 synthetic step,
+    # LLM 通过 Trace.for_llm() 看到跨 session 历史. 不写 sqlite (与 W5-A reflect hint 同档:
+    # in-memory soft hint, 不污染 trace.db 的"实际执行"事件流).
+    if memories:
+        trace.append(Step(
+            step=-1, ts=time.time(),
+            thought="(W5-D.2 长期记忆召回)",
+            action_type="memory_recall",
+            action_args={},
+            observation=memories[:2000],
+        ))
 
     try:
         for step_i in range(max_steps):

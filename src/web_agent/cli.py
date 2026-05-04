@@ -16,7 +16,9 @@ from web_agent.loop import run_react_loop
 from web_agent.memory import (
     DEFAULT_DB as _MEM_DB,
     extract_domain,
+    format_memories_for_trace,
     is_success,
+    recall_by_domain,
     record_task,
 )
 
@@ -54,6 +56,20 @@ async def run_task(
 
         client = make_client(provider=provider, model=model)
         print(f"[cli] LLM provider={client.name} model={client.model}")
+
+        # W5-D.2 长期记忆 inject: 跑 ReAct 前召回该 domain 历史, 渲染成字符串注入 trace
+        memories_str: str | None = None
+        if os.environ.get("WEB_AGENT_MEMORY_DISABLE", "").lower() not in ("true", "1", "yes"):
+            try:
+                mem_db = Path(os.environ.get("WEB_AGENT_MEMORY_DB", str(_MEM_DB)))
+                domain = extract_domain(start_url)
+                entries = recall_by_domain(mem_db, domain, limit=5)
+                memories_str = format_memories_for_trace(entries) or None
+                if memories_str:
+                    print(f"[cli] recalled {len(entries)} memories for domain={domain!r}")
+            except Exception as e:
+                print(f"[cli] memory recall failed (non-fatal): {e!r}")
+
         result = await run_react_loop(
             page=page,
             client=client,
@@ -62,6 +78,7 @@ async def run_task(
             max_wallclock_s=max_wallclock_s,
             db_path=Path("data/trace.db"),
             screenshots_dir=Path("data/screenshots"),
+            memories=memories_str,
         )
 
         # W5-D 长期记忆: 跨 session 持久化 task outcome by domain.

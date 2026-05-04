@@ -2,6 +2,47 @@
 
 All notable changes to web-agent. 版本号遵循 SemVer 简化形式（V<major>.<minor>.<patch>）。
 
+## [0.14.0] - 2026-05-03
+
+### Added (W5-D.2: 长期记忆 inject 到 planner 上下文)
+- **`memory.py` 加 `format_memories_for_trace(entries, goal_trunc=60, result_trunc=80)`**: 渲染 list[MemoryEntry] 为 LLM 可读字符串
+  - 格式: `过去在该 domain 跑过 N 个任务 (newest first):\n[ts] OK|FAIL goal[:60] -> result[:80]\n...`
+  - 空 list 返 "" (caller if-truthy 跳过 inject)
+  - 5 条 × ~140 char ≈ 700 char total — token budget 友好
+- **`loop.run_react_loop` 加 `memories: str | None = None` kwarg**: 主循环前 trace.append synthetic `Step(step=-1, action_type="memory_recall", observation=memories[:2000])`
+  - **不写 sqlite** (与 W5-A reflect hint 同档: in-memory soft hint, 不污染 trace.db 实际执行事件流)
+  - LLM 第一次 plan() 通过 `Trace.for_llm()` 自然看到跨 session 历史
+  - step=-1 与正常 0..N-1 隔开, 语义"前置上下文非本轮行动"
+- **`cli.run_task` 在 `run_react_loop` 前 try/except 包 recall**: 拿 memory entries → format → 透传 `memories=` 到 loop
+  - 复用 V0.13.0 的 `WEB_AGENT_MEMORY_DISABLE` env (整体关 record + recall)
+  - 失败 (db 损坏 / 权限) → memories=None 跳过 inject, 不阻塞主路径
+- **测试** +3 case (旧 187 + 新 3 = 190):
+  - `test_memory.py::test_format_memories_empty_returns_empty_string`: 空 list 返 "" (caller skip inject)
+  - `test_memory.py::test_format_memories_for_trace_renders_ok_fail_and_truncates`: OK/FAIL 标记 + WALLCLOCK_EXCEEDED 透传 + goal 60 / result 80 截断验证
+  - `test_loop_main.py::test_memories_injected_as_synthetic_step_minus_one`: RecordingLLMClient 验证第一次 plan 看到 memory_recall step + sqlite 不含 step=-1 (不污染持久化)
+
+### Why
+- V0.13.0 W5-D MVP 仅持久化 + CLI dump, LLM 看不到 → "写了但没读" 悖论, memory 是死数据
+- subagent (Plan) 评估 5 决策点全采纳:
+  - 不改 LLMClient Protocol, 走 trace.observation 通道 (与 W5-A reflect hint 同档定位)
+  - synthetic step=-1 与真实 0..N-1 隔开
+  - memories 不写 sqlite (跨 session 注入 ≠ 本次 task 事件)
+  - 5 条 × goal 60 / result 80 截断 → token budget 友好
+  - cli 端 try/except graceful (db 失败不阻塞主路径)
+- 反检测影响零 (memory_recall step 不触发 actuator/keyboard/network, 全 in-memory, 不影响 stealth/timing)
+
+### Limitations
+- **deque maxlen=20 被 memory step 占 1 槽**: 长任务 19 步后 memory 被挤出 (FIFO popleft); 后期 memory 价值已被 trace 自身覆盖, 接受
+- **`Step.for_llm()` 自带 observation[:200] 二次截断**: format 端宽松 + for_llm 严守, 双保险
+- **memory_recall 不写 sqlite**: replay UI 不显示这一步; 用户想看历史 inject 走 `web-agent-memory <domain>` CLI 即可
+- **没新 eval 验证 LLM 真用了记忆**: MVP 假设 "LLM 看到就会用", 真实效果需用户跑同 domain 多次任务观察策略变化
+
+### Compatibility
+- 公共 API: `run_react_loop` 加 `memories=None` kwarg, backward-compat (默认 None 不 inject)
+- LLMClient Protocol 零变化 (W5-D.2 走 trace 通道, 不动 plan 签名)
+- 旧 187 测试零修改全过; 新 3 case, 总 190 tests 全绿
+- 行为变化: 跑 task 时 LLM trace 多出一条 step=-1 memory_recall (仅 cross-session 同 domain 有过历史时)
+
 ## [0.13.2] - 2026-05-03
 
 ### Docs (W5-D + audit gap 收尾 README sync)

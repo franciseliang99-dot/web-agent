@@ -147,6 +147,46 @@ async def test_wallclock_exceeded_aborts_without_step_row(
     assert _read_task_result(db).startswith("WALLCLOCK_EXCEEDED")
 
 
+async def test_memories_injected_as_synthetic_step_minus_one(
+    monkeypatch, tmp_path, patch_loop_internals
+):
+    """W5-D.2: memories 字符串 → run_react_loop 主循环前 prepend Step(step=-1,
+    action_type='memory_recall'); LLM 第一次 plan 应看到; 不写 sqlite (不污染持久化)。
+    """
+    monkeypatch.delenv("WEB_AGENT_AUTO_APPROVE", raising=False)
+
+    seen_traces: list[list[dict]] = []
+
+    class RecordingLLMClient:
+        name = "fake"
+        model = "fake"
+
+        async def plan(self, goal, screenshot_b64, marks, trace):
+            seen_traces.append(list(trace.for_llm()))
+            return Action(type="done", args={"result": "ok"}, thought="x")
+
+    db = tmp_path / "trace.db"
+    shots = tmp_path / "shots"
+    memories_str = "过去在该 domain 跑过 2 个任务 (newest first):\n[ts] OK foo -> bar"
+
+    result = await run_react_loop(
+        FakePage(), RecordingLLMClient(), goal="测 W5-D.2 inject",
+        max_steps=2, db_path=db, screenshots_dir=shots,
+        memories=memories_str,
+    )
+
+    assert result == "ok"
+    # plan() 第一次看到的 trace[0] 应是 memory_recall synthetic step
+    assert len(seen_traces) == 1
+    first_step_in_trace = seen_traces[0][0]
+    assert first_step_in_trace["action"]["type"] == "memory_recall"
+    assert "过去在该 domain 跑过" in first_step_in_trace["observation"]
+    # sqlite 不含 step=-1 (不污染 trace.db 实际执行事件流)
+    sqlite_steps = _read_trace_steps(db)
+    sqlite_step_indices = [s[0] for s in sqlite_steps]
+    assert -1 not in sqlite_step_indices
+
+
 async def test_llm_exception_captured_writes_error_step(
     monkeypatch, tmp_path, patch_loop_internals
 ):

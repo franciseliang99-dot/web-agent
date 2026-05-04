@@ -138,6 +138,33 @@ def recall_by_domain(
     ]
 
 
+def format_memories_for_trace(
+    entries: list[MemoryEntry],
+    goal_trunc: int = 60,
+    result_trunc: int = 80,
+) -> str:
+    """W5-D.2: 渲染 list[MemoryEntry] 为 LLM 可读字符串供 trace 注入。
+
+    格式 (与 main CLI 输出一致):
+        过去在该 domain 跑过 N 个任务 (newest first):
+        [2026-05-03T10:22:01] OK   订机票 BOS->JFK -> 已下单订单号 ABC123
+        [2026-05-02T18:00:00] FAIL 改签机票 -> SAFETY_BLOCK at step 4: ...
+
+    空 list 返 "" (caller 可 if-truthy 跳过 inject)。token-budget 友好:
+    5 条 × ~140 char ≈ 700 char total。
+    """
+    if not entries:
+        return ""
+    lines = [f"过去在该 domain 跑过 {len(entries)} 个任务 (newest first):"]
+    for e in entries:
+        ts = datetime.fromtimestamp(e.ts).isoformat(timespec="seconds")
+        flag = "OK  " if e.success else "FAIL"
+        lines.append(
+            f"[{ts}] {flag} {e.goal[:goal_trunc]} -> {e.result[:result_trunc]}"
+        )
+    return "\n".join(lines)
+
+
 def main(argv: list[str] | None = None) -> int:
     p = argparse.ArgumentParser(
         prog="web-agent-memory",

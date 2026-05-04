@@ -12,6 +12,7 @@ from web_agent.memory import (
     FAILURE_MARKERS,
     MemoryEntry,
     extract_domain,
+    format_memories_for_trace,
     init_memory_db,
     is_success,
     main,
@@ -173,3 +174,31 @@ def test_main_no_memories_for_domain(tmp_path, capsys):
     assert rc == 0
     out = capsys.readouterr().out
     assert "no memories" in out
+
+
+# ---------- W5-D.2 format_memories_for_trace ----------
+
+def test_format_memories_empty_returns_empty_string():
+    assert format_memories_for_trace([]) == ""
+
+
+def test_format_memories_renders_ok_fail_and_truncates():
+    entries = [
+        MemoryEntry(ts=1700000000.0, domain="x.com",
+                    goal="搜 web agent", result="repo: x/y, stars: 1k", success=True),
+        MemoryEntry(ts=1699900000.0, domain="x.com",
+                    goal="发邮件", result="WALLCLOCK_EXCEEDED at step 5: ...", success=False),
+        MemoryEntry(ts=1699800000.0, domain="x.com",
+                    goal="x" * 100,  # 长 goal 待截断
+                    result="y" * 200,  # 长 result 待截断
+                    success=True),
+    ]
+    out = format_memories_for_trace(entries)
+
+    assert "过去在该 domain 跑过 3 个任务" in out
+    assert out.count("OK") >= 2
+    assert out.count("FAIL") == 1
+    assert "WALLCLOCK_EXCEEDED" in out  # FAIL marker 透传给 LLM
+    # 长 goal 截到 60, 长 result 截到 80 (default trunc)
+    assert "x" * 60 in out and "x" * 61 not in out
+    assert "y" * 80 in out and "y" * 81 not in out
