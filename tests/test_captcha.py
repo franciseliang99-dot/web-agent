@@ -232,6 +232,48 @@ async def test_loop_captcha_timeout_writes_step_and_aborts(
     assert action_args["url"] == "https://y.test/"
 
 
+async def test_loop_captcha_hit_calls_notify(
+    monkeypatch, tmp_path, patch_loop_internals
+):
+    """场景: captcha 命中 → loop._handle_captcha 调一次 notify, title 含 captcha + message 含 vendor。"""
+    monkeypatch.delenv("WEB_AGENT_CAPTCHA_DISABLE", raising=False)
+
+    notify_calls: list[tuple[str, str]] = []
+
+    def fake_notify(title: str, message: str) -> None:
+        notify_calls.append((title, message))
+
+    detect_calls = {"n": 0}
+
+    async def fake_detect(page):
+        detect_calls["n"] += 1
+        if detect_calls["n"] == 1:
+            return CaptchaInfo("hcaptcha", "https://z.test/")
+        return None
+
+    async def fake_wait(page, timeout_s, poll_s):
+        return True
+
+    monkeypatch.setattr("web_agent.loop.captcha_detect", fake_detect)
+    monkeypatch.setattr("web_agent.loop.captcha_wait", fake_wait)
+    monkeypatch.setattr("web_agent.loop.notify", fake_notify)
+
+    client = FakeLLMClient([Action(type="done", args={"result": "ok"}, thought="x")])
+    db = tmp_path / "trace.db"
+    shots = tmp_path / "shots"
+
+    result = await run_react_loop(
+        FakePage(), client, goal="测试 captcha notify",
+        max_steps=2, db_path=db, screenshots_dir=shots,
+    )
+
+    assert result == "ok"
+    assert len(notify_calls) == 1, f"预期命中调一次 notify (不进 poll loop spam), 实际 {notify_calls}"
+    title, message = notify_calls[0]
+    assert "captcha" in title.lower()
+    assert "hcaptcha" in message
+
+
 async def test_loop_disable_env_skips_captcha_check(
     monkeypatch, tmp_path, patch_loop_internals
 ):

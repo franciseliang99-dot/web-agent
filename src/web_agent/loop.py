@@ -16,6 +16,7 @@ from web_agent.actuator import human_like_click, human_like_type, scroll, think
 from web_agent.captcha import detect as captcha_detect
 from web_agent.captcha import wait_for_resolution as captcha_wait
 from web_agent.llm import Action, LLMClient
+from web_agent.notify import notify
 from web_agent.perceiver import Mark, perceive
 from web_agent.safety import check as safety_check
 from web_agent.trace import Step, Trace, end_task, init_db, start_task, write_step
@@ -52,6 +53,7 @@ async def _handle_captcha(page: Page, step_i: int, trace: Trace, conn, task_id: 
         f"请在浏览器手动解决, agent 每 {poll_s}s 重检 (超时 {timeout_s}s)",
         flush=True,
     )
+    notify("web-agent captcha", f"{info.vendor} 命中, 请在浏览器手解 ({info.url[:60]})")
     if await captcha_wait(page, timeout_s=timeout_s, poll_s=poll_s):
         print(f"[captcha] {info.vendor} 已清除, loop 继续", flush=True)
         return None
@@ -60,6 +62,7 @@ async def _handle_captcha(page: Page, step_i: int, trace: Trace, conn, task_id: 
         f"{timeout_s}s 内解决 (url={info.url})"
     )
     print(f"\n[captcha] {result}")
+    notify("web-agent captcha 超时", f"{info.vendor} {timeout_s}s 未解, loop 已中止")
     step = Step(
         step=step_i, ts=time.time(), thought="(captcha 超时)",
         action_type="captcha_timeout",

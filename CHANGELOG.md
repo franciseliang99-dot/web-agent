@@ -2,6 +2,42 @@
 
 All notable changes to web-agent. 版本号遵循 SemVer 简化形式（V<major>.<minor>.<patch>）。
 
+## [0.10.0] - 2026-05-03
+
+### Added (W4-3: desktop notification)
+- **新模块** `src/web_agent/notify.py`: `notify(title, message)` fire-and-forget 桌面通知
+  - lazy 平台探测 + 模块级缓存 (`_BACKEND_CACHE`): 避 import 阶段 hit filesystem; 进程内只探一次
+  - macOS → `osascript -e 'display notification ... with title ...'`
+  - Linux → `notify-send <title> <message>`
+  - Windows / 不可达平台 → no-op (与 DISABLE 同效)
+  - subprocess `timeout=3 + check=False + DEVNULL`; `(OSError, SubprocessError)` silent swallow + `log.debug` 保留诊断
+  - `_reset_cache_for_tests()` test-only hook 让单测 monkeypatch sys.platform 后能重新探测
+- **`loop.py` 接入**: `_handle_captcha` 命中分支 + 超时分支各调一次 (不进 wait_for_resolution poll 循环, 避 spam)
+  - 命中: `notify("web-agent captcha", "<vendor> 命中, 请在浏览器手解 (<url>)")`
+  - 超时: `notify("web-agent captcha 超时", "<vendor> <timeout_s>s 未解, loop 已中止")`
+- **env**:
+  - `WEB_AGENT_NOTIFY_DISABLE` (true/1/yes 完全关; CI/headless/不想被打扰场景)
+- **测试** `tests/test_notify.py` 6 case: DISABLE env / darwin osascript argv / linux notify-send argv + kwargs / win32 noop / which 返 None noop / OSError swallow
+- **集成测** `tests/test_captcha.py` +1 case: captcha 命中调 notify 一次, title/message 含正确字段, **不进 poll 循环 spam**
+
+### Why
+- V0.9.0 W4-2 命中只 `print(..., flush=True)`, tmux/SSH/后台日志重定向场景用户离开终端就错过 — CHANGELOG Limitations 已写入留位
+- subagent (Plan) 评估架构 4 维:
+  - sync `subprocess.run + timeout=3` > `asyncio.create_subprocess_exec`: osascript/notify-send 几十 ms 完成, async 包装多余复杂度
+  - lazy + 模块缓存 > eager import 时探测: 避 import 阶段 hit filesystem (与 captcha 模块 fingerprint JS 缓存一致风格)
+  - `(OSError, SubprocessError)` > 裸 `Exception`: 不吞 KeyboardInterrupt / SystemExit, 保留诊断信号
+  - 仅命中 + 超时 2 处 > 进 poll 循环每次都通知: 避 100 次轮询 100 次桌面通知 spam
+
+### Limitations
+- **macOS osascript 安全提示**: 首次调用可能弹「允许 Terminal 发送通知?」系统对话, 用户没点同意会 silent fail; `WEB_AGENT_NOTIFY_DISABLE=true` 兜底
+- **WSL2 / SSH 无 X11**: `notify-send` 存在但缺 dbus → subprocess 退 != 0; `check=False` + swallow OK, 无负面影响
+- **CI headless**: 推荐设 `WEB_AGENT_NOTIFY_DISABLE=true` 加速 (避 subprocess 启动开销 + 避日志噪声)
+
+### Compatibility
+- 公共签名零变化 (`run_react_loop / run_task / make_client / safety / captcha` 全保留)
+- 行为变化: 默认 ON; 仅在 captcha 命中/超时触发, 现有 demo (Wikipedia / GitHub / Gmail RO) 不会触发
+- 旧 103 测试零修改全过; 新增 7 case (6 notify + 1 captcha 集成), 总 110 tests 全绿
+
 ## [0.9.1] - 2026-05-03
 
 ### Refactor (V0.9.0 W4-2 simplify)
