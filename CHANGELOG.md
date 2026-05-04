@@ -2,6 +2,16 @@
 
 All notable changes to web-agent. 版本号遵循 SemVer 简化形式（V<major>.<minor>.<patch>）。
 
+## [0.12.1] - 2026-05-03
+
+### Refactor (/simplify W5-B perceiver)
+- **`_SOM_INJECT_JS` 删死代码 `const all = collected; const els = all.filter(...)` 中间别名 `all`** —— 直接 `collected.filter(...)`, 1 行净减
+- subagent (/simplify) 审计本次只此一处确定性 ROI > 0; 其他保留:
+  - `(opts)` 参数 + `!opts || opts.shadow !== false` 防御默认 — 公共 JS 字符串可能被外部 reuse, N=2 跳过
+  - `!visited.has(e.shadowRoot)` push-时检查 — 避免 stack 膨胀微小性能, N=2 跳过
+  - perceive() 内 lazy 读 `WEB_AGENT_SOM_SHADOW` env — monkeypatch 友好, N=2 跳过
+- 130/130 tests 全绿, 无行为改动
+
 ## [0.12.0] - 2026-05-03
 
 ### Added (W5-B: Shadow DOM 穿透 + perceiver 单测填补)

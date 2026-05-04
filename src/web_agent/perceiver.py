@@ -42,8 +42,7 @@ _SOM_INJECT_JS = """
       }
     });
   }
-  const all = collected;
-  const els = all.filter(e => {
+  const els = collected.filter(e => {
     const r = e.getBoundingClientRect();
     if (r.width <= 1 || r.height <= 1) return false;
     if (r.bottom < 0 || r.top > window.innerHeight) return false;
