@@ -2,6 +2,43 @@
 
 All notable changes to web-agent. 版本号遵循 SemVer 简化形式（V<major>.<minor>.<patch>）。
 
+## [0.8.0] - 2026-05-03
+
+### Added (W4-1: replay 日志面板)
+- **新模块** `src/web_agent/replay.py`：从 `data/trace.db` 加载单次 task + 全部 steps,
+  渲染单文件 HTML 时间线写到 `data/replays/<task_id>.html`
+  - 顶部 task 元数据 (goal / started / ended / steps 数 / result)
+  - 每 step 一张卡片 (序号 + action_type + ts + thought + action_args 美化 JSON +
+    `<details><summary>screenshot</summary><img>` + observation)
+  - special action_type 颜色高亮: `safety_block` 红 / `error` 黄 / `done` 绿 / `loop_detected` 橙
+  - 截图走相对路径 `../screenshots/<task_id>-<NN>.png`,直接 file:// 打开就工作
+  - 零新依赖 — 纯 stdlib (sqlite3 + html + json + argparse + datetime)
+- **CLI script** `web-agent-replay [<task_id>]`：注册到 `pyproject.toml [project.scripts]`
+  - 省略 task_id = 最新一次 (`ORDER BY started_at DESC LIMIT 1`)
+  - `--db` / `--out` 自定义路径
+- **测试** `tests/test_replay.py` 11 case：
+  - load_task: explicit / latest / missing id / db missing / empty tasks
+  - render_html: goal escape / safety_block class+rule / 截图相对路径 / `<script>` XSS escape
+  - main: 写文件 + 退出码 0 / 无参数走 latest
+
+### Why
+- 蓝本「操作前观察 / 操作后确认」闭环里 verify 段一直只写库不可视化 — debug demo 失败靠 `sqlite3 .schema` + 翻 png 文件名拼凑, 极度低效
+- subagent (Plan) 评估架构 3 选 1: 静态 HTML 生成 > FastAPI server > 模板引擎
+  - 静态零依赖 + 单文件可分享 + file:// 直接看, 单用户 dev 工具最佳 fit
+  - 不引 jinja2 (拼接量 ~50 行 f-string, jinja2 是 overkill)
+- W4-1 完成后,以后跑 demo 失败可一句 `web-agent-replay` 看时间线 + 截图,排查效率上一档
+
+### Limitations
+- 静态生成: trace.db 写入时不更新; 长任务跑到一半看进度需重跑 replay 命令
+- HTML 引用截图相对路径,移动 `data/replays/` 目录会断链 (规约 = 始终从项目根 file:// 打开)
+- 无搜索 / 过滤 / 多 task 并列对比 — MVP 单 task 视图;真要多 task 列表后续 W4-1.1 加索引页
+- thought/observation 长文本不折叠 (>1000 字会让卡片很长);如成痛点再加 max-height + 展开按钮
+
+### Compatibility
+- 公共签名零变化 (trace.py / loop.py / cli.py 不动)
+- 新 CLI script 不影响现有 `web-agent` entry
+- 旧 80 个测试零修改全过; 新增 11 case, 总 91 tests 全绿
+
 ## [0.7.0] - 2026-05-03
 
 ### Added (W3-C: 写操作 demo + safety×loop×trace 集成验证)

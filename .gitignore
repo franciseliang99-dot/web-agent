@@ -21,6 +21,7 @@ build/
 
 # Project data
 data/screenshots/
+data/replays/
 data/trace.db
 data/*.db-journal
 data/*.db-wal
