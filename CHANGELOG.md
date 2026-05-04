@@ -2,6 +2,39 @@
 
 All notable changes to web-agent. 版本号遵循 SemVer 简化形式（V<major>.<minor>.<patch>）。
 
+## [0.16.3] - 2026-05-04
+
+### Tools (MCP server stdio 协议层端到端验证脚本)
+- **新建** `scripts/test_mcp_local.py` (~80 行) 单条命令验通 MCP server 协议层:
+  - 用 `mcp.client.stdio.stdio_client` + `ClientSession` 真起子进程 `uv run web-agent-mcp` 走 JSON-RPC over stdio
+  - 验证 4 件事:
+    1. `initialize` 握手返 `protocolVersion=2025-11-25`
+    2. `list_tools` 3 名匹配 (`web_agent_run` / `web_agent_get_replay` / `web_agent_query_memory`)
+    3. `web_agent_run` 无 Chrome 时返 `chrome_not_running` 结构化错误 (V0.16.1 `_check_chrome_alive` 兜底证据)
+    4. `web_agent_query_memory` empty domain → `structuredContent={'result': []}`
+  - 退出码 0 = 全 PASS, 非 0 = 有 FAIL (CI 友好)
+  - 与 `tests/test_mcp_server.py` 区别: 后者用 in-memory transport (单元测试 isolation), 本脚本用真 stdio 子进程 (集成测试 + entry script 验证)
+
+### Why
+- V0.16.2 单测 in-memory 全过, 但 stdio 子进程路径 (entry script `web-agent-mcp` + JSON-RPC over stdin/stdout) 没真跑过 — 可能 entry/stdio handler/logging 配置有 bug 单测看不到
+- subagent (general-purpose) 审核反馈采纳:
+  - **Python 脚本而非 npx mcp inspector**: 纯 Python (mcp 已是 dev-dep), 不引 nodejs 依赖判断, sandbox-friendly
+  - **Chrome 不通时验 `chrome_not_running` 兜底**: 把 "Claude Desktop 还没接" 和 "Chrome 没起" 两个 unknown 解耦, 本机协议层独立验通
+  - **`mcp dev` CLI 不必须**: 它内部仍跑 npx inspector, 同上
+- 实测跑 `uv run python scripts/test_mcp_local.py` → 4/4 ALL PASS
+
+### Linux 用户 MCP client 选项 (V0.16.3 文档新增)
+- **Anthropic Claude Desktop**: 仅 macOS/Windows, 无 Linux 版
+- **Cursor** (推荐): IDE 内置 MCP, Linux .deb 包. 配置 `~/.config/Cursor/User/settings.json`
+- **Continue.dev**: VSCode/JetBrains 扩展, 内置 MCP support
+- **Goose** (Anthropic 早期 agent CLI): Linux/macOS, 配置 `~/.config/goose/profiles.yaml`
+- **mcp inspector** (一次性可视化测): `npx @modelcontextprotocol/inspector uv run --directory /home/myclaw/web-agent web-agent-mcp`
+
+### Compatibility
+- src/ 业务代码零变化 (仅新增 scripts/ tooling)
+- 230 passed + 2 skipped 与 V0.16.2 一致
+- 脚本独立工具, 不被 mcp_server / cli / pytest 调用
+
 ## [0.16.2] - 2026-05-04
 
 ### Refactor (V0.16.1 mcp_server /simplify pass)
