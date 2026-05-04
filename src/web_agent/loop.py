@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import base64
 import json
+import logging
 import os
 import time
 import uuid
@@ -11,6 +12,8 @@ from collections import deque
 from pathlib import Path
 
 from playwright.async_api import Page
+
+logger = logging.getLogger(__name__)
 
 from web_agent.actuator import human_like_click, human_like_type, scroll, think
 from web_agent.captcha import detect as captcha_detect
@@ -86,20 +89,19 @@ async def _handle_captcha(page: Page, step_i: int, trace: Trace, conn, task_id: 
         return None
     timeout_s = float(os.environ.get("WEB_AGENT_CAPTCHA_TIMEOUT_S", "300"))
     poll_s = float(os.environ.get("WEB_AGENT_CAPTCHA_POLL_S", "3"))
-    print(
-        f"\n[captcha] {info.vendor} 命中 @ {info.url[:80]} — "
-        f"请在浏览器手动解决, agent 每 {poll_s}s 重检 (超时 {timeout_s}s)",
-        flush=True,
+    logger.info(
+        "%s 命中 @ %s — 请在浏览器手动解决, agent 每 %ss 重检 (超时 %ss)",
+        info.vendor, info.url[:80], poll_s, timeout_s,
     )
     notify("web-agent captcha", f"{info.vendor} 命中, 请在浏览器手解 ({info.url[:60]})")
     if await captcha_wait(page, timeout_s=timeout_s, poll_s=poll_s):
-        print(f"[captcha] {info.vendor} 已清除, loop 继续", flush=True)
+        logger.info("%s 已清除, loop 继续", info.vendor)
         return None
     result = (
         f"CAPTCHA_TIMEOUT at step {step_i}: {info.vendor} 未在 "
         f"{timeout_s}s 内解决 (url={info.url})"
     )
-    print(f"\n[captcha] {result}")
+    logger.warning("captcha %s", result)
     notify("web-agent captcha 超时", f"{info.vendor} {timeout_s}s 未解, loop 已中止")
     step = Step(
         step=step_i, ts=time.time(), thought="(captcha 超时)",
@@ -162,7 +164,7 @@ async def run_react_loop(
                     f"WALLCLOCK_EXCEEDED at step {step_i}: 已 {elapsed:.1f}s 超过 max_wallclock_s={max_wallclock_s}s。"
                     f"常见原因：perceive/网络卡顿、LLM 响应慢、SDK retry 累积。"
                 )
-                print(f"\n[wallclock] {result}")
+                logger.warning("wallclock %s", result)
                 end_task(conn, task_id, result)
                 return result
 
@@ -182,7 +184,7 @@ async def run_react_loop(
             shot_path = screenshots_dir / f"{task_id}-{step_i:02d}.png"
             shot_path.write_bytes(base64.b64decode(screenshot_b64))
 
-            print(f"\n[step {step_i}] perceive: {len(marks)} marks, screenshot {shot_path} | t+{elapsed:.1f}s")
+            logger.info("step %d perceive: %d marks, screenshot %s | t+%.1fs", step_i, len(marks), shot_path, elapsed)
 
             try:
                 action: Action = await client.plan(goal, screenshot_b64, marks, trace)
@@ -191,7 +193,7 @@ async def run_react_loop(
                 result = (
                     f"LLM_FAILED at step {step_i}: {type(e).__name__}: {e}"
                 )
-                print(f"\n[llm-failed] {result}")
+                logger.warning("llm-failed %s", result)
                 step = Step(
                     step=step_i, ts=time.time(), thought="(LLM 调用失败)",
                     action_type="error", action_args={"error": str(e)[:200]},
@@ -201,7 +203,7 @@ async def run_react_loop(
                 write_step(conn, task_id, step, str(shot_path))
                 end_task(conn, task_id, result)
                 return result
-            print(f"[step {step_i}] action ({client.name}): {action.type} {action.args} | thought: {action.thought[:120]}")
+            logger.info("step %d action (%s): %s %s | thought: %s", step_i, client.name, action.type, action.args, action.thought[:120])
 
             # safety check：在 actuator 之前 intercept 敏感 action（send/pay/delete/密码字段...）
             if action.type in ("click", "type"):
@@ -213,7 +215,7 @@ async def run_react_loop(
                 decision = safety_check(action, check_mark, marks)
                 if not decision.allow:
                     result = f"SAFETY_BLOCK at step {step_i}: {decision.reason}"
-                    print(f"\n[safety] {result}")
+                    logger.info("safety %s", result)
                     step = Step(
                         step=step_i, ts=time.time(), thought=action.thought,
                         action_type="safety_block",
@@ -233,7 +235,7 @@ async def run_react_loop(
                     f"agent 卡死, 已强制中止。常见原因：SoM 没标到目标元素 / "
                     f"页面状态未按 LLM 预期变化 / system prompt 没说服 LLM 换策略。"
                 )
-                print(f"\n[anti-loop] {result}")
+                logger.warning("anti-loop %s", result)
                 step = Step(
                     step=step_i, ts=time.time(), thought=action.thought,
                     action_type=action.type, action_args=action.args,
@@ -298,12 +300,12 @@ async def run_react_loop(
 
             if action.type == "done":
                 end_task(conn, task_id, result)
-                print(f"\n[done] {result[:200]}")
+                logger.info("done %s", result[:200])
                 return result
 
         result = "(max_steps 耗尽未完成)"
         end_task(conn, task_id, result)
-        print(f"\n[max_steps] {result}")
+        logger.warning("max_steps %s", result)
         return result
     finally:
         conn.close()

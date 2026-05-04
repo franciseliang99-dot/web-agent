@@ -6,7 +6,7 @@ MultiOn 风格的「高度模仿人操作网页」AI web agent。
 
 ## 当前状态
 
-V0.15.11 (2026-05-04) — 36+ commits, 220 tests passing + 2 smoke skips (Kimi 国内 .cn cassette 已真录通; Anthropic + GPT 骨架 cassette 待用户接手). V0.15.10 Z 观察面板已撤回, V0.16.0+ 走 MCP server 路径
+V0.16.0 (2026-05-04) — 37+ commits, 220 tests passing + 2 smoke skips. **MCP server 第 1 步硬前提**: 25 处 print → logger.info(stderr) 改造完成 (业务零改动); V0.16.1+ 新建 mcp_server.py 暴露 3 tools (web_agent_run / get_replay / query_memory)
 
 **W milestone 进度**:
 - W1 ✅ Wikipedia 搜词条 + 提取首段 (骨架 + 多 LLM 支持)
@@ -96,7 +96,12 @@ uv run web-agent-memory wikipedia.org --db data/memory.db
 - W5-C 分层规划 ✅ (V0.15.0, prompt augmentation 路线; 真 plan-and-execute 留 W5-C.2)
 
 **进行中**:
-- **V0.16.0+ MCP server**: 暴露 web-agent 为 MCP server (Claude Desktop / 任意 MCP client 通过 tool 调用 `web_agent_run(goal, url)`). 第 1 步硬前提: print → logging.info(stderr) 全量改造 (~20 处), 第 2 步 mcp_server.py + 3 tools, 工时估 2.5-3 人天
+- **MCP server**: 暴露 web-agent 为 MCP server (Claude Desktop / 任意 MCP client 通过 tool 调用 `web_agent_run(goal, url)`)
+  - V0.16.0 ✅ 第 1 步硬前提: 25 处 print → logger.info(stderr), 业务零改动 220 tests 全过
+  - V0.16.1 ⏳ 新建 `mcp_server.py` 用官方 `mcp[cli]>=1.2` SDK 暴露 3 tools + progress notification + asyncio.Lock 串行化 + Chrome 9222 健康检查
+  - V0.16.2 ⏳ Resources (`resources://web_agent/replay/<id>` + `memory/<domain>` 只读视图)
+  - V0.16.3 ⏳ (可选) Elicitation 替代 WEB_AGENT_AUTO_APPROVE / HTTP transport
+  - 工时估剩 1-2 人天
 
 **已知缺口** (不在主蓝本但需追):
 - patchright-python 决断 (仍用 `playwright-stealth` 2.0.3, 未实测 Cloudflare 突破率)

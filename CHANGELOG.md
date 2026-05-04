@@ -2,6 +2,54 @@
 
 All notable changes to web-agent. 版本号遵循 SemVer 简化形式（V<major>.<minor>.<patch>）。
 
+## [0.16.0] - 2026-05-04
+
+### Refactor (MCP server 第 1 步硬前提: print → logging.info(stderr))
+- **6 模块 25 处 print() → logger** (业务逻辑零改动, 仅替代输出 channel):
+  - `browser.py` 3 处 stealth fallback → `logger.warning()` (新加 logger)
+  - `perceiver.py` 2 处: auto-dismiss failed → `warning`, dismissed N popup(s) → `info` (新加 logger)
+  - `loop.py` 11 处 ReAct 主循环状态 (新加 logger):
+    - `info`: captcha 命中 / captcha 已清除 / step N perceive / step N action / safety block / done
+    - `warning`: captcha timeout / wallclock exceeded / llm-failed / anti-loop / max_steps
+  - `cli.py` 7 处 (新加 logger; **保留 line 129/130 stdout** "=== 任务结果 === / result" 面向用户终端):
+    - `info`: navigating / LLM provider / recalled memories / subgoal hint injected
+    - `warning`: set_viewport_size 失败 / memory recall failed / memory record failed
+- **`cli.main()` 入口加** `logging.basicConfig(level=INFO, stream=sys.stderr, format='[%(name)s] %(message)s')`:
+  - INFO 走 stderr, stdout 仅留给用户面向输出 (=== 任务结果 ===)
+  - pytest 不调 main(), 业务模块默认 root logger (lastResort handler 输出 stderr / WARNING 级以上, INFO 静默) — 旧 220 tests 输出不变
+- **测试** 3 处 `capsys → caplog` 迁移 (`tests/test_browser.py` stealth 3 fallback case):
+  - `with caplog.at_level(logging.WARNING, logger="web_agent.browser"): ... assert "..." in caplog.text`
+- **保留** 7 处 print 不改 (用户面向 stdout, 与 MCP server 无关; MCP 模式下 server wrapper 拦截 stdout 重定向):
+  - `cli.py:129/130` "=== 任务结果 ===" + result
+  - `memory.py:180/182/186` CLI dump (web-agent-memory)
+  - `replay.py:293/299` "wrote ..." (web-agent-replay)
+
+### Why
+- V0.16.0 目标是把 web-agent 暴露为 MCP server (Claude Desktop / 任意 MCP client 通过 tool 调用 web_agent_run). 其中 stdio transport 模式 stdout 是 JSON-RPC 通道, 任何 print 污染会破坏协议
+- 第 1 步硬前提与 mcp_server.py 改造**解耦**: 业务逻辑零改动, 仅替代输出 channel, 220 tests 全过即可独立 commit, 失败可单独 revert 不影响后续
+- subagent (Plan) 审核反馈采纳:
+  - **`logger = logging.getLogger(__name__)` 每模块顶部** (新加 logger 4 模块: browser/perceiver/loop/cli; notify.py 已有保留)
+  - **demos/*.py 不改** (用户直跑脚本, stdout 给人看, 不进 MCP stdio)
+  - **stdout 保留白名单** 7 处 (用户面向 CLI dump / 任务结果, 不属内部诊断)
+  - **WARNING 分级**: 含 "失败/未匹配/未安装/超时/timeout" → warning; 含 "命中/已清除/perceive/action/done" → info
+  - **测试影响估算精确**: 仅 test_browser.py 3 case (capsys → caplog), 其他 capsys 测的是用户面向 stdout (test_cli/test_memory/test_replay), print 保留则 test 不动
+
+### Compatibility
+- 公共 API 零变化 (logger 是模块内部, 不影响 cli/loop/perceiver/browser 函数签名)
+- 220 passed + 2 smoke skip 与 V0.15.11 一致 (test_browser 3 case caplog 迁移后通过)
+- runtime deps 零变化 (logging 是 stdlib)
+- 行为变化:
+  - CLI 模式: 业务诊断信息从 stdout → stderr (用户跑 `web-agent ... 2>&1` 看到的内容不变)
+  - 程序化调用: import web_agent.cli 不调 main() 时 logger 默认 lastResort handler (stderr WARNING+), INFO 静默 — 调用方可自行 `logging.basicConfig(...)` 配
+  - MCP server (V0.16.1+) 模式: stdout 干净, 协议层无污染
+
+### V0.16.1 next steps (本 commit 不做)
+- 新建 `src/web_agent/mcp_server.py` (~200 行) 用官方 `mcp[cli]>=1.2` SDK
+- 暴露 3 tools: `web_agent_run` / `web_agent_get_replay` / `web_agent_query_memory`
+- progress notification (Claude Desktop 默认 60s timeout) + asyncio.Lock 串行化 + Chrome 9222 健康检查
+- pyproject.toml 加 entry `web-agent-mcp = "web_agent.mcp_server:main"` + dev-dep `mcp[cli]>=1.2,<2`
+- `tests/test_mcp_server.py` mock client (~10 case)
+
 ## [0.15.11] - 2026-05-04
 
 ### Removed (撤回 V0.15.10 Z 观察面板 → 切 MCP server 路径)

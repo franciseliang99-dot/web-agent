@@ -4,11 +4,15 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import logging
 import os
+import sys
 from pathlib import Path
 
 from dotenv import load_dotenv
 from playwright.async_api import async_playwright
+
+logger = logging.getLogger(__name__)
 
 from web_agent.browser import apply_stealth, connect
 from web_agent.llm import make_client
@@ -53,14 +57,14 @@ async def run_task(
         try:
             await page.set_viewport_size({"width": vw, "height": vh})
         except Exception as e:
-            print(f"[cli] set_viewport_size 失败 ({e!r})，沿用 Chrome 默认视口")
+            logger.warning("set_viewport_size 失败 (%r)，沿用 Chrome 默认视口", e)
 
         if start_url:
-            print(f"[cli] navigating to {start_url}")
+            logger.info("navigating to %s", start_url)
             await page.goto(start_url, wait_until="domcontentloaded")
 
         client = make_client(provider=provider, model=model)
-        print(f"[cli] LLM provider={client.name} model={client.model}")
+        logger.info("LLM provider=%s model=%s", client.name, client.model)
 
         # W5-D.2 长期记忆 inject: 跑 ReAct 前召回该 domain 历史, 渲染成字符串注入 trace
         memories_str: str | None = None
@@ -71,15 +75,15 @@ async def run_task(
                 entries = recall_by_domain(mem_db, domain, limit=5)
                 memories_str = format_memories_for_trace(entries) or None
                 if memories_str:
-                    print(f"[cli] recalled {len(entries)} memories for domain={domain!r}")
+                    logger.info("recalled %d memories for domain=%r", len(entries), domain)
             except Exception as e:
-                print(f"[cli] memory recall failed (non-fatal): {e!r}")
+                logger.warning("memory recall failed (non-fatal): %r", e)
 
         # W5-C 分层规划: 长任务 / 带序号任务注入 subgoal hint (纯字符串, 无 LLM 调用)
         # 复用 W5-D.2 memories= 通道, loop step=-1 synthetic step 一并 carry
         if should_decompose(goal):
             memories_str = merge_into_memories(memories_str, build_subgoal_hint_text())
-            print("[cli] subgoal hint injected (W5-C: 长任务 / 带序号触发)")
+            logger.info("subgoal hint injected (W5-C: 长任务 / 带序号触发)")
 
         result = await run_react_loop(
             page=page,
@@ -99,12 +103,19 @@ async def run_task(
                 mem_db = Path(os.environ.get("WEB_AGENT_MEMORY_DB", str(_MEM_DB)))
                 record_task(mem_db, extract_domain(start_url), goal, result, is_success(result))
             except Exception as e:
-                print(f"[cli] memory record failed (non-fatal): {e!r}")
+                logger.warning("memory record failed (non-fatal): %r", e)
 
         return result
 
 
 def main() -> None:
+    # MCP server (V0.16.0+) 硬前提: 业务模块全用 logging.info(stderr) 不污染 stdout (JSON-RPC 通道)
+    # CLI 模式 stdout 仍留给用户结果 (=== 任务结果 ===), logger 走 stderr
+    logging.basicConfig(
+        level=logging.INFO,
+        stream=sys.stderr,
+        format="[%(name)s] %(message)s",
+    )
     parser = argparse.ArgumentParser(prog="web-agent", description="高度拟人 AI web agent")
     parser.add_argument("goal", help="自然语言任务描述")
     parser.add_argument("--url", default=None, help="起始 URL（可选）")

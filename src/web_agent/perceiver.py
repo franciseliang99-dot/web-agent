@@ -3,10 +3,13 @@
 from __future__ import annotations
 
 import base64
+import logging
 import os
 from dataclasses import dataclass
 
 from playwright.async_api import Page
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -153,7 +156,7 @@ async def maybe_auto_dismiss(page: Page) -> list[str]:
             await page.wait_for_timeout(300)  # 等弹窗关闭动画
         return dismissed
     except Exception as e:
-        print(f"[perceive] auto-dismiss failed: {e!r}")
+        logger.warning("auto-dismiss failed: %r", e)
         return []
 
 
@@ -165,7 +168,7 @@ async def perceive(page: Page) -> tuple[list[Mark], str]:
     """
     dismissed = await maybe_auto_dismiss(page)
     if dismissed:
-        print(f"[perceive] auto-dismissed {len(dismissed)} popup(s): {dismissed}")
+        logger.info("auto-dismissed %d popup(s): %s", len(dismissed), dismissed)
     # W5-B: WEB_AGENT_SOM_SHADOW=false 退化到 V0.11.x light-DOM only 行为
     shadow_on = os.environ.get("WEB_AGENT_SOM_SHADOW", "true").lower() not in ("false", "0", "no", "off")
     raw = await page.evaluate(_SOM_INJECT_JS, {"shadow": shadow_on})

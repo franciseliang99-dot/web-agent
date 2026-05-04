@@ -88,8 +88,10 @@ async def test_apply_stealth_falls_back_to_apply_async(monkeypatch):
     apply_mock.assert_called_once_with(page)
 
 
-async def test_apply_stealth_unmatched_api_prints_skip(monkeypatch, capsys):
-    """两个 API 都没 → 打印 skip, 不抛。"""
+async def test_apply_stealth_unmatched_api_prints_skip(monkeypatch, caplog):
+    """两个 API 都没 → logger warning skip, 不抛。 (V0.16.0 print → logger 改造)"""
+    import logging
+
     class _Stealth:
         pass  # 既无 apply_stealth_async 也无 apply_async
 
@@ -97,23 +99,27 @@ async def test_apply_stealth_unmatched_api_prints_skip(monkeypatch, capsys):
     monkeypatch.setitem(sys.modules, "playwright_stealth", fake_module)
 
     page = SimpleNamespace()
-    await apply_stealth(page)
-    captured = capsys.readouterr().out
-    assert "API 未匹配" in captured
+    with caplog.at_level(logging.WARNING, logger="web_agent.browser"):
+        await apply_stealth(page)
+    assert "API 未匹配" in caplog.text
 
 
-async def test_apply_stealth_import_error_swallowed(monkeypatch, capsys):
-    """playwright-stealth 未装 → ImportError 吞掉, 打印警告, 不抛。"""
+async def test_apply_stealth_import_error_swallowed(monkeypatch, caplog):
+    """playwright-stealth 未装 → ImportError 吞掉, logger warning, 不抛。"""
+    import logging
+
     monkeypatch.setitem(sys.modules, "playwright_stealth", None)  # None → ImportError on import
 
     page = SimpleNamespace()
-    await apply_stealth(page)  # 不抛
-    captured = capsys.readouterr().out
-    assert "未安装" in captured
+    with caplog.at_level(logging.WARNING, logger="web_agent.browser"):
+        await apply_stealth(page)
+    assert "未安装" in caplog.text
 
 
-async def test_apply_stealth_general_exception_swallowed(monkeypatch, capsys):
-    """stealth 内部抛任何异常 → 吞掉, 打印警告, 不阻塞主流程。"""
+async def test_apply_stealth_general_exception_swallowed(monkeypatch, caplog):
+    """stealth 内部抛任何异常 → 吞掉, logger warning, 不阻塞主流程。"""
+    import logging
+
     def boom():
         raise RuntimeError("stealth init bombed")
 
@@ -121,6 +127,6 @@ async def test_apply_stealth_general_exception_swallowed(monkeypatch, capsys):
     monkeypatch.setitem(sys.modules, "playwright_stealth", fake_module)
 
     page = SimpleNamespace()
-    await apply_stealth(page)
-    captured = capsys.readouterr().out
-    assert "stealth" in captured.lower()
+    with caplog.at_level(logging.WARNING, logger="web_agent.browser"):
+        await apply_stealth(page)
+    assert "stealth" in caplog.text.lower()

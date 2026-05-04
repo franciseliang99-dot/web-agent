@@ -2,7 +2,11 @@
 
 from __future__ import annotations
 
+import logging
+
 from playwright.async_api import Browser, BrowserContext, Page, Playwright
+
+logger = logging.getLogger(__name__)
 
 
 async def connect(
@@ -42,8 +46,8 @@ async def apply_stealth(page: Page) -> None:
         elif hasattr(stealth, "apply_async"):
             await stealth.apply_async(page)
         else:
-            print("[browser] playwright-stealth API 未匹配（既无 apply_stealth_async 也无 apply_async），跳过")
+            logger.warning("playwright-stealth API 未匹配（既无 apply_stealth_async 也无 apply_async），跳过")
     except ImportError:
-        print("[browser] playwright-stealth 未安装，跳过 stealth")
+        logger.warning("playwright-stealth 未安装，跳过 stealth")
     except Exception as e:
-        print(f"[browser] stealth 注入失败 ({e!r})，跳过")
+        logger.warning("stealth 注入失败 (%r)，跳过", e)
