@@ -2,6 +2,28 @@
 
 All notable changes to web-agent. 版本号遵循 SemVer 简化形式（V<major>.<minor>.<patch>）。
 
+## [0.12.4] - 2026-05-03
+
+### Tests (audit gap fill: trace.py 13 case)
+- **新建** `tests/test_trace.py`: 持久化层 (V0.5.0 来 0 单测) 13 case 覆盖
+  - `init_db` 3: tasks/steps schemas 创建 (PRAGMA table_info 验 PK) / parent dir mkdir / idempotent 第二次调不抛
+  - `start_task` 1: 中文 goal 不转义 + started_at 是 float ±10s + ended_at/result NULL
+  - `end_task` 2: update ended_at + result / 不存在 task_id 不抛 (UPDATE 0 行, 防御 case 留位回归保护 loop.py 容错)
+  - `write_step` 3: row 全字段 + action_args JSON + 中文 ensure_ascii=False raw 落字符 (replay/grep 友好) + INSERT OR REPLACE 同 PK 覆盖语义
+  - `Step.for_llm` 2: observation 200 字硬编码截断回归保护 / 短 obs 不被截断 + 含 step/thought/action 字段
+  - `Trace.append` + `for_llm` 2: maxlen=20 deque popleft FIFO (写 25 留 step 5..24) / for_llm 返 list[dict] 走 Step.for_llm
+- 全用 stdlib (sqlite3 + tmp_path + json), 直连 sqlite 验副作用, 与 V0.12.0 W5-B perceiver 12 case + V0.12.2 W4-1.1 replay +5 case 同档 audit gap 填补风格
+
+### Why
+- V0.5.0 之前 trace.py 已稳定但一直 0 单测, audit findings 多次列入测试覆盖盲区
+- 持久化层是 loop / replay / 所有 demo 共依赖, 改动这层无单测裸奔风险高
+- 蓝本认知层 (ReAct / 短期记忆 / 自反思 V0.11.0 / step limit V0.5.0 / 回退暗含 W5-A reflect 4 策略) 已基本覆盖, runtime 类技术债 (patchright / 住宅代理) 不可离线测; trace 单测是当前最高 ROI 代码可交付项
+
+### Compatibility
+- 零代码改动 (trace.py / loop.py / replay.py / cli.py / browser.py 全不动)
+- 旧 135 测试零修改全过; 新增 13 case, 总 148 tests 全绿
+- 公共 API 零变化, 行为零变化
+
 ## [0.12.3] - 2026-05-03
 
 ### Refactor (/simplify W4-1.1 索引页)
