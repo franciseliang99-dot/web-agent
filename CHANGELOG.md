@@ -2,6 +2,45 @@
 
 All notable changes to web-agent. 版本号遵循 SemVer 简化形式（V<major>.<minor>.<patch>）。
 
+## [0.15.0] - 2026-05-03
+
+### Added (W5-C: 分层规划 prompt augmentation 路线)
+- **新模块** `src/web_agent/planner_hierarchy.py` (~70 行, stdlib only):
+  - `should_decompose(goal: str) -> bool` 启发式: 长任务 (≥200 字) OR ≥2 个序号前缀 (1./①/-) → True; env `WEB_AGENT_SUBGOAL_DISABLE=true` 任何 truthy 值覆盖一切返 False
+  - `build_subgoal_hint_text() -> str` 返回纯字符串模板 (固定常量, 无 LLM 调用): 提示 LLM 在第一步 thought 里把任务拆 3-6 个 subgoal 再执行
+  - `merge_into_memories(memories_str, subgoal_hint) -> str` 拼接, 保 W5-D.2 channel 通道复用
+- **`cli.run_task` 加 hook** (在 W5-D.2 memory recall 之后, run_react_loop 前):
+  - `if should_decompose(goal): memories_str = merge_into_memories(memories_str, build_subgoal_hint_text())`
+  - 复用 V0.14.0 W5-D.2 已建好的 `step=-1 memory_recall` 通道, 零改动 loop.py / Protocol
+- **env**: `WEB_AGENT_SUBGOAL_DISABLE=true` 完全关
+- **测试** `tests/test_planner_hierarchy.py` 14 case (parametrize 展开):
+  - should_decompose 7: 短任务 / 长 250 字 / `1.` 序号 / `①` 圆圈 / `-` bullet / 单序号短任务不触发 / env disable 4 truthy 值覆盖
+  - build_subgoal_hint 1: 含 "subgoal" / "thought" / "3-6" 关键词
+  - merge_into_memories 4: append+分隔 / 空 existing / 空 subgoal / 都空
+
+### Why
+- 蓝本明确点 subgoal 拆分; 当前 ReAct loop 单层, 复杂任务 ("Amazon 搜耳机 → 比价 → 加购 → 填地址") 易在中段 stuck
+- subagent (Plan) 原方案要真调 LLM (一次额外 plan() 调用拿 subgoal 计划), 但 `screenshot_b64=""` 在真 Anthropic/OpenAI SDK 兼容性未验证 → **简化为 prompt augmentation 路线**: 不调 LLM, 仅注入 hint 字符串, LLM 自己用 thought 字段拆
+  - 零 token 浪费 (无额外 LLM 调用)
+  - 零 SDK 兼容风险
+  - 零 Protocol 改动
+  - 真实效果略弱于 plan-and-execute, 但 ROI/风险比远好
+- 复用 W5-D.2 V0.14.0 已建好的 `step=-1 memory_recall` channel: cli 端 1 行 merge, loop / Protocol / safety / captcha 全不动
+- 启发式触发严控: 短任务 (e.g. "搜苹果价格") 跳过, 长任务才付一段 hint 的代价
+
+### Limitations
+- **不是 plan-and-execute 强约束**: LLM 收到 hint 后是否真拆 subgoal 取决于自己, 我们只是 nudge
+- **没在真 LLM 上 eval**: 无法量化 hint 是否真提升复杂任务成功率, MVP 假设 "LLM 看到提示就会用"
+- **触发启发式可能漏判**: 例如英文任务用 "First, ... Second, ..." 不会被 `_NUM_PREFIX_RE` 匹配, 长度也可能 <200; 真用上后视情况调
+- **若需真 plan-and-execute**: 未来 W5-C.2 可加 `WEB_AGENT_SUBGOAL_MODE=force-plan` 调真 LLM 走 plan() 拆 subgoal (含 1x1 PNG fallback 等 SDK 兼容工程)
+
+### Compatibility
+- 公共 API 加 (`planner_hierarchy.{should_decompose, build_subgoal_hint_text, merge_into_memories}`)
+- LLMClient Protocol 零变化 (W5-C 完全走 trace/memories 通道)
+- run_react_loop 签名零变化 (V0.14.0 W5-D.2 已加的 `memories=` kwarg 直接复用)
+- 旧 190 测试零修改全过; 新 14 case (parametrize 展开), 总 204 tests 全绿
+- 行为变化: 长任务 / 带序号任务 trace step=-1 多出 subgoal hint 段 (短任务零感知)
+
 ## [0.14.0] - 2026-05-03
 
 ### Added (W5-D.2: 长期记忆 inject 到 planner 上下文)

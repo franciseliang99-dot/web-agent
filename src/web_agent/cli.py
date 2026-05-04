@@ -21,6 +21,11 @@ from web_agent.memory import (
     recall_by_domain,
     record_task,
 )
+from web_agent.planner_hierarchy import (
+    build_subgoal_hint_text,
+    merge_into_memories,
+    should_decompose,
+)
 
 
 async def run_task(
@@ -69,6 +74,12 @@ async def run_task(
                     print(f"[cli] recalled {len(entries)} memories for domain={domain!r}")
             except Exception as e:
                 print(f"[cli] memory recall failed (non-fatal): {e!r}")
+
+        # W5-C 分层规划: 长任务 / 带序号任务注入 subgoal hint (纯字符串, 无 LLM 调用)
+        # 复用 W5-D.2 memories= 通道, loop step=-1 synthetic step 一并 carry
+        if should_decompose(goal):
+            memories_str = merge_into_memories(memories_str, build_subgoal_hint_text())
+            print("[cli] subgoal hint injected (W5-C: 长任务 / 带序号触发)")
 
         result = await run_react_loop(
             page=page,
