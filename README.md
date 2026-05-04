@@ -6,7 +6,7 @@ MultiOn 风格的「高度模仿人操作网页」AI web agent。
 
 ## 当前状态
 
-V0.15.10 (2026-05-04) — 35+ commits, 220 tests + 2 smoke skip; **两形态启动**: Z Chrome 观察面板 Phase 1/4 已落 (扩展骨架 + web-agent-serve helper), A MCP server 串行待 Z 完
+V0.15.11 (2026-05-04) — 36+ commits, 220 tests passing + 2 smoke skips (Kimi 国内 .cn cassette 已真录通; Anthropic + GPT 骨架 cassette 待用户接手). V0.15.10 Z 观察面板已撤回, V0.16.0+ 走 MCP server 路径
 
 **W milestone 进度**:
 - W1 ✅ Wikipedia 搜词条 + 提取首段 (骨架 + 多 LLM 支持)
@@ -94,6 +94,9 @@ uv run web-agent-memory wikipedia.org --db data/memory.db
 - W5-D 长期记忆 cross-session episodic ✅ (V0.13.0 持久化 + CLI dump)
 - W5-D.2 memory inject 到 planner 上下文 ✅ (V0.14.0)
 - W5-C 分层规划 ✅ (V0.15.0, prompt augmentation 路线; 真 plan-and-execute 留 W5-C.2)
+
+**进行中**:
+- **V0.16.0+ MCP server**: 暴露 web-agent 为 MCP server (Claude Desktop / 任意 MCP client 通过 tool 调用 `web_agent_run(goal, url)`). 第 1 步硬前提: print → logging.info(stderr) 全量改造 (~20 处), 第 2 步 mcp_server.py + 3 tools, 工时估 2.5-3 人天
 
 **已知缺口** (不在主蓝本但需追):
 - patchright-python 决断 (仍用 `playwright-stealth` 2.0.3, 未实测 Cloudflare 突破率)

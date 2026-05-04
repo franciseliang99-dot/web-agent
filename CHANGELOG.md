@@ -2,6 +2,36 @@
 
 All notable changes to web-agent. 版本号遵循 SemVer 简化形式（V<major>.<minor>.<patch>）。
 
+## [0.15.11] - 2026-05-04
+
+### Removed (撤回 V0.15.10 Z 观察面板 → 切 MCP server 路径)
+- **删** `extension/` 整目录 (`manifest.json` / `popup.html` / `popup.js` / `icon-128.png` / `extension/README.md`) — 浏览器扩展骨架不再维护
+- **删** `src/web_agent/serve.py` (~30 行 stdlib HTTP server, 给扩展 popup iframe 用)
+- **删** `pyproject.toml [project.scripts]` 的 `web-agent-serve = "web_agent.serve:main"` entry
+- **保留** V0.15.10 commit (1907904) 历史 + CHANGELOG [0.15.10] 段不动 (创建新 commit, 不改写历史 — CLAUDE.md 提交纪律)
+- **保留** V0.15.9 conftest dotenv autoload + smoke helpers 抽象 + 220 tests + 2 smoke skip
+
+### Why
+- V0.15.10 Z 观察面板路径仅 read-only (浏览器扩展嵌 iframe 看 web-agent-replay 已生成的 HTML), 无 LLM 调用 web-agent 的能力
+- 用户决定走 **MCP server 路径** (V0.16.0+): Claude Desktop / 任意 MCP client 通过 tool 调用 `web_agent_run(goal, url)`, 涵盖 read+write 全场景, 替代 Z 观察面板的 read-only 用例
+- 撤回防 V0.16.0 改造时维护两套交互前端 (扩展 + MCP) 增加负担; ARCHITECTURE.md 决策 1.1 否决 MV3 重写执行栈, 但 MV3 read-only 观察的 ROI 也弱于 MCP server 通用性
+- subagent (general-purpose) 审核反馈采纳:
+  - **`git rm extension/icon-128.png` 必须显式补**: 用户外部撤回时漏掉这个 git tracked 二进制, 不删则撤回不彻底 (commit 完仍有孤儿 icon)
+  - **`git checkout HEAD -- CHANGELOG.md` 恢复 [0.15.10] 段**比手抄安全 (HEAD = V0.15.10 commit 含完整段)
+  - **version 0.15.9 → 0.15.11 一步跳, 不经 0.15.10**: git history 顺序 V0.15.9 → V0.15.10 (1907904) → V0.15.11 (新), CHANGELOG [0.15.10] 段保留, 单调递增不算倒退
+
+### V0.16.0 MCP server roadmap (引子, 实施时再展开)
+- 第 1 步硬前提: print → logging.info(stderr) 全量改造 (cli.py / loop.py / browser.py / captcha.py 共 ~20 处), 220 tests 全过即可独立 commit
+- 第 2 步: 新建 `src/web_agent/mcp_server.py` (~200 行) 用官方 `mcp[cli]>=1.2` SDK, 暴露 3 tools: `web_agent_run` / `web_agent_get_replay` / `web_agent_query_memory`
+- 第 3 步: progress notification (Claude Desktop 默认 60s timeout) + `asyncio.Lock` 串行化并发 task + Chrome 9222 健康检查
+- 详见 V0.16.0 commit message + ARCHITECTURE.md §6 (待加)
+
+### Compatibility
+- 公共 API 退: `web_agent.serve.main` 删 + entry script `web-agent-serve` 删
+- src/ 业务模块零变化 (V0.15.10 的 serve.py 本就是 sibling 独立模块, 删除不影响 cli/loop/perceiver)
+- runtime deps 零变化
+- 220 tests + 2 smoke skip 与 V0.15.9 / V0.15.10 一致
+
 ## [0.15.10] - 2026-05-04
 
 ### Added (Z 观察面板 Phase 1/4: 扩展骨架 + serve helper)
