@@ -48,6 +48,19 @@ def _reset_cache_for_tests() -> None:
     _BACKEND_CACHE = None
 
 
+_RUN_KW = {
+    "timeout": 3,
+    "check": False,
+    "stdout": subprocess.DEVNULL,
+    "stderr": subprocess.DEVNULL,
+}
+
+
+def _applescript_str(s: str) -> str:
+    """AppleScript 字符串字面量: 用双引号 + escape `\\` 和 `"`。Python repr 不能用 (会改外层引号)。"""
+    return '"' + s.replace("\\", "\\\\").replace('"', '\\"') + '"'
+
+
 def notify(title: str, message: str) -> None:
     """fire-and-forget 桌面通知; 失败/不可用静默无感, 不影响 caller。"""
     if _disabled():
@@ -57,16 +70,12 @@ def notify(title: str, message: str) -> None:
         return
     try:
         if kind == "osascript":
-            # AppleScript: display notification "msg" with title "title"
-            script = f"display notification {message!r} with title {title!r}"
-            subprocess.run(
-                [path, "-e", script], timeout=3, check=False,
-                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+            script = (
+                f"display notification {_applescript_str(message)} "
+                f"with title {_applescript_str(title)}"
             )
+            subprocess.run([path, "-e", script], **_RUN_KW)
         elif kind == "notify-send":
-            subprocess.run(
-                [path, title, message], timeout=3, check=False,
-                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
-            )
+            subprocess.run([path, title, message], **_RUN_KW)
     except (OSError, subprocess.SubprocessError):
         log.debug("notify failed", exc_info=True)  # silently swallow, 不污染 stdout

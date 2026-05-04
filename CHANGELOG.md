@@ -2,6 +2,31 @@
 
 All notable changes to web-agent. 版本号遵循 SemVer 简化形式（V<major>.<minor>.<patch>）。
 
+## [0.10.1] - 2026-05-03
+
+### Refactor (/simplify W4-3 notify)
+- **修 `notify.py` macOS AppleScript escape bug**: 原 `f"... {message!r} ..."` 用 Python `repr()`,
+  对含单引号的字符串会改外层引号为双引号 + 内层 escape, 但 AppleScript 字符串字面量必须用双引号 + `\\"` / `\\\\` escape;
+  Python repr 对 `say "hi"` 会输出 `'say "hi"'` (外层单引号), AppleScript 解析失败 → notification silent miss
+  抽 `_applescript_str()` 显式 escape `\\` 和 `"`, 保证任意 title/message 都生成合法 AppleScript
+- **抽 `_RUN_KW` dict**: macOS / Linux 分支两份完全相同的 `timeout=3, check=False, stdout/stderr=DEVNULL`
+  抽出 dict 共用, -3 行 + 减少未来漂移风险 (改超时/重定向只改一处)
+- **测试** `tests/test_notify.py` +1 case (`test_macos_applescript_escapes_quotes_and_backslash`):
+  传含 `"` + `\\` 的 title/message, 断言生成的 AppleScript 用 `\\"` escape 且不含 Python repr 单引号
+- 总 111 tests 全绿 (原 110 + 1 escape 回归测)
+
+### Why (/simplify subagent 审 V0.10.0 5 项判定)
+- 采纳 2/5: AppleScript escape (正确性 bug) + `_RUN_KW` dict (DRY)
+- 跳过 3/5:
+  - `_disabled()` / `_captcha_enabled()` truthy 解析重复 → N=2 不抽 util (跨模块, 抽出新一层抽象不值)
+  - `_, kwargs = spy.calls[0]` unused 变量 → cosmetic 0 行受益
+  - `_handle_captcha` 已是 V0.9.1 抽出, W4-3 仅在两处插 notify call → 无可优化
+
+### Compatibility
+- 行为变化: 仅 macOS 含特殊字符 (`"` / `\\` / `'`) 的 title/message 通知现在能正确显示 (V0.10.0 silent miss)
+- Linux / Windows / 简单 ASCII 路径完全不变
+- env / API 签名零变化
+
 ## [0.10.0] - 2026-05-03
 
 ### Added (W4-3: desktop notification)

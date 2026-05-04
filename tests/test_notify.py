@@ -98,6 +98,24 @@ def test_backend_binary_missing_noop(monkeypatch):
     assert spy.calls == []
 
 
+def test_macos_applescript_escapes_quotes_and_backslash(monkeypatch):
+    """AppleScript 字符串字面量必须 escape `"` 和 `\\` (Python repr 用单引号会破 AppleScript 语法)。"""
+    monkeypatch.delenv("WEB_AGENT_NOTIFY_DISABLE", raising=False)
+    monkeypatch.setattr("web_agent.notify.sys.platform", "darwin")
+    monkeypatch.setattr("web_agent.notify.shutil.which", lambda name: "/usr/bin/osascript")
+    spy = _Spy()
+    monkeypatch.setattr("web_agent.notify.subprocess.run", spy)
+
+    notify('say "hi"', r"path\to\x")
+
+    assert len(spy.calls) == 1
+    script = spy.calls[0][0][2]
+    # 含双引号包裹的 escape 字面量, 不含 Python repr 的单引号外层
+    assert r'\"hi\"' in script
+    assert r"\\to\\x" in script
+    assert "'" not in script  # 不该出现 Python repr 的单引号
+
+
 def test_subprocess_oserror_swallowed(monkeypatch):
     """subprocess.run 抛 OSError (e.g. 缺 dbus) → notify() 不传播。"""
     monkeypatch.delenv("WEB_AGENT_NOTIFY_DISABLE", raising=False)
