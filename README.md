@@ -6,16 +6,18 @@ MultiOn 风格的「高度模仿人操作网页」AI web agent。
 
 ## 当前状态
 
-V0.13.1 (2026-05-03) — 44+ commits, 187 tests passing
+V0.15.2 (2026-05-03) — 27+ commits, 219 tests passing
 
 **W milestone 进度**:
 - W1 ✅ Wikipedia 搜词条 + 提取首段 (骨架 + 多 LLM 支持)
 - W2 ✅ GitHub 搜 repo + 拟人 actuator (3 阶贝塞尔 + smootherstep + 正态键入 + typo+backspace)
 - W3 ✅ Gmail 登录态: read-only 总结 (W3-B) + compose 写操作 (W3-C) + `safety.py` 授权白名单 (W3-A)
 - W4 ✅ replay 日志面板 (W4-1) + index 索引页 (W4-1.1) + Cloudflare/reCAPTCHA 暂停接管 UX (W4-2) + 桌面通知 (W4-3)
-- W5 部分 ✅ — 自反思 page-stuck hint (W5-A, V0.11.0) + Shadow DOM 穿透 (W5-B, V0.12.0) + 长期记忆 cross-session episodic (W5-D, V0.13.0); W5-C 分层规划未启动
+- W5 ✅ — 自反思 page-stuck hint (W5-A, V0.11.0) + Shadow DOM 穿透 (W5-B, V0.12.0) + 长期记忆 cross-session episodic (W5-D, V0.13.0) + memory inject 到 planner (W5-D.2, V0.14.0) + 分层规划 prompt augmentation (W5-C, V0.15.0)
 
-**Audit gap 收尾**: perceiver (V0.12.0) / trace (V0.12.4) / cli (V0.12.6) / loop 主体 abort 路径 (V0.12.8) 四大模块单测填补完成 — 蓝本认知层全模块均落到单测保护下
+**Audit gap 收尾 (6/6 全)**: perceiver (V0.12.0) / trace (V0.12.4) / cli (V0.12.6) / loop 主体 (V0.12.8) / browser (V0.15.1) / anthropic (V0.15.1) — 蓝本全模块均落到单测保护下
+
+**架构决策**: 见 [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) — 决策树 / 模块边界 / 三轨同道 (reflect/memory/subgoal 共用 trace 通道) / 双层防御 (safety+anti-loop+reflect+captcha 信号正交)
 
 ## 栈
 
@@ -89,13 +91,16 @@ uv run web-agent-memory wikipedia.org --db data/memory.db
 - W1 ✅ / W2 ✅ / W3 ✅ / W4 ✅ — 详见 [`CHANGELOG.md`](CHANGELOG.md)
 - W5-A 自反思 page-stuck soft hint ✅ (V0.11.0)
 - W5-B Shadow DOM 穿透 ✅ (V0.12.0)
-- W5-D 长期记忆 cross-session episodic ✅ (V0.13.0; MVP 仅持久化 + CLI dump, planner inject 留 W5-D.2)
-- W5-C 分层规划 (subgoal split + replan) — 未启动
+- W5-D 长期记忆 cross-session episodic ✅ (V0.13.0 持久化 + CLI dump)
+- W5-D.2 memory inject 到 planner 上下文 ✅ (V0.14.0)
+- W5-C 分层规划 ✅ (V0.15.0, prompt augmentation 路线; 真 plan-and-execute 留 W5-C.2)
 
-**已知缺口** (不在 W5 路线但需追):
+**已知缺口** (不在主蓝本但需追):
 - patchright-python 决断 (仍用 `playwright-stealth` 2.0.3, 未实测 Cloudflare 突破率)
 - 住宅代理 + curl_cffi TLS 指纹接入
 - Gmail 真账号端到端验收 (CI 不发邮件; W3-C demo 需用户 `WEB_AGENT_TEST_RECIPIENT` 真投)
+- **真实 LLM smoke + cassette**: 当前 219 tests 全是 mock LLM, 无 cassette 录制真 Anthropic/OpenAI 响应。需用户接手用真 API key 跑 1-2 个 demo 并 record (`vcr.py` / `pytest-recording`), 受 Claude 沙箱回收 + token cost 限制无法在本会话完成
+- **SYSTEM_PROMPT snapshot test**: `llm/_schema.SYSTEM_PROMPT` 7 条规则被改动易回归, 但当前无 snapshot 锁定; 留位下次以 `tests/test_llm_schema_snapshot.py` 补
 
 ## BYO LLM API key
 
@@ -218,9 +223,10 @@ demos/
   gmail_compose.py       # W3-C (write, safety 拦 Send 默认 abort)
 scripts/
   start_chrome.sh  # 启动 9222 调试端口的独立 Chrome (auto/xvfb/headed/headless)
-tests/             # 187 case, 16 文件 (含 audit gap 填补: trace/perceiver/cli/loop_main + W5-D test_memory)
+tests/             # 219 case, 18 文件 (含 audit gap 6/6: trace/perceiver/cli/loop_main/browser/anthropic + W5-D test_memory + W5-C test_planner_hierarchy)
 docs/
   高度模仿人操作网页的agent技术路径图.txt  # 用户原始技术蓝本
+  ARCHITECTURE.md  # V0.15.2 架构决策 / 模块边界 / 三轨同道 / 双层防御
 data/
   trace.db                 # SQLite trace (gitignored)
   memory.db                # W5-D cross-session 长期记忆 (gitignored)

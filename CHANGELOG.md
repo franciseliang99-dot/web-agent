@@ -2,6 +2,34 @@
 
 All notable changes to web-agent. 版本号遵循 SemVer 简化形式（V<major>.<minor>.<patch>）。
 
+## [0.15.2] - 2026-05-03
+
+### Docs (架构决策入账 + README known-gap 补全)
+- **新建** `docs/ARCHITECTURE.md` ~250 行 4 章:
+  - **决策树**: 5 条核心选择 (CDP 接管 vs MV3 / SoM vs a11y / patchright vs stealth / trace.db vs memory.db 分库 / W5-C prompt augmentation vs plan-and-execute), 每条列可选项 + 选了什么 + 否决理由
+  - **模块边界**: 14 模块一句话职责 + 严格依赖方向 (domain ← ports ← 业务层 ← 组合根) + LLMClient Protocol 不被业务层导入只在 cli.py 实例化的约束
+  - **三轨同道**: W5-A reflect / W5-D.2 memory / W5-C subgoal 三个 milestone 都走 `step=-1 memory_recall` synthetic trace step 通道, 累计 0 次 LLMClient Protocol 改动 — 项目最重要的"通道复用 vs 新增抽象"原则
+  - **双层防御**: safety 硬拦 + anti-loop 硬 abort + reflect 软提示 + captcha 暂停 — 4 类信号正交 (失效根因不同/对策不同), captcha 在 perceive 之前 / reflect 在 perceive 之后的位置原因
+  - 附录 A 版本里程碑速览; 附录 B 硬约束 (test gate / gitignore / secrets / actuator 退化)
+- **README 更新**:
+  - "当前状态" 段 V0.13.1 → V0.15.2, 187 → 219 tests, audit gap 4/6 → 6/6, W5 部分 ✅ → 全 ✅, 加 ARCHITECTURE.md 索引行
+  - 路线图 W5-D.2 / W5-C 标 ✅, MVP 限定语去掉
+  - "已知缺口" 加 2 条:
+    - **真实 LLM smoke + cassette**: 219 tests 全 mock LLM, 无 cassette 录真 Anthropic/OpenAI 响应; 需用户接手用真 API key + `vcr.py` / `pytest-recording`, 受 Claude 沙箱回收 + token cost 限制无法本会话完成
+    - **SYSTEM_PROMPT snapshot test**: `llm/_schema.SYSTEM_PROMPT` 7 条规则改动易回归无 lock, 留位下次以 `tests/test_llm_schema_snapshot.py` 补
+  - 目录树 tests 187 → 219 / 16 → 18 文件; docs 加 ARCHITECTURE.md 行
+- **bump** `__version__` 0.15.1 → 0.15.2; `pyproject.toml` version 同步
+
+### Why
+- 11 个 milestone (V0.6.0 → V0.15.1) 累积的架构决策散在 CHANGELOG / commit message / 我的脑里, 接手者读不到 "为什么不走 patchright" / "为什么 W5-C 不调真 LLM" / "为什么 reflect/memory/subgoal 共用一个 trace 通道"
+- README 之前标的 audit gap 范围已被 V0.12.0~V0.15.1 实际填到 6/6, 也漏标 W5-D.2 / W5-C 完成; 路线图与现状对齐
+- 真实 LLM smoke + SYSTEM_PROMPT snapshot 是已识别但本会话受沙箱限制无法做的两个 known-gap, 入账避免下次接手"为啥这俩没做"反查会话
+
+### Compatibility
+- 零代码改动 (仅 docs + README + version bump + CHANGELOG)
+- 219 tests 零变化全绿
+- 公共 API 零变化, 行为零变化
+
 ## [0.15.1] - 2026-05-03
 
 ### Tests (audit gap 100% 收尾: browser + anthropic 最后两模块)
