@@ -7,6 +7,7 @@ import base64
 import json
 import logging
 import os
+import re
 import sqlite3
 import time
 import uuid
@@ -77,6 +78,71 @@ def _maybe_inject_reflect_hint(trace: Trace, recent_pages: deque[str], fp: str) 
     trace.steps[-1].observation = (
         trace.steps[-1].observation + "\n" + _REFLECT_HINT
     ).strip()
+
+
+# V0.16.20 W5-C.2 logging spike: 量化 LLM 是否在 thought 拆 subgoal (ARCHITECTURE §1.5 触发条件 ③).
+# 仅在 env WEB_AGENT_SPIKE_W5C2=1 时激活, noop overhead 极小.
+_SPIKE_M1_RE = re.compile(
+    r"子目标|步骤\s*\d|第\s*\d\s*步|"
+    r"(?:^|[^\w])(?:1\.|2\.|3\.|①|②|③|④|⑤)|"
+    r"\b(?:first|then|next|finally|step\s*\d)\b",
+    re.IGNORECASE,
+)
+_SPIKE_M2_RE = re.compile(
+    r"(?:目前|当前|现在)在\s*(?:第|subgoal|步骤)|按计划|根据(?:上面|前面)拆|"
+    r"\bcurrently\s+(?:on|at)\s+(?:subgoal|step)|"
+    r"\baccording\s+to\s+(?:the\s+)?plan|\bas\s+planned",
+    re.IGNORECASE,
+)
+_SPIKE_M5_RE = re.compile(
+    r"(?:换|改|重新|另一).{0,4}?(?:策略|方法|思路|方案|路径|途径|搜索|尝试)|"
+    r"\b(?:try\s+(?:a\s+)?(?:another|different)|switch\s+(?:strategy|approach)|"
+    r"alternative\s+approach|reconsider)\b",
+    re.IGNORECASE,
+)
+_SPIKE_FAILURE_OBS_MARKERS = (
+    "ERROR", "SAFETY_BLOCK", "LOOP_DETECTED", "CAPTCHA", "WALLCLOCK", "LLM_FAILED",
+)
+
+
+def _dump_spike_metrics(task_id: str, goal: str, trace: Trace) -> None:
+    """task 结束 task 后一次性 dump 每个 step 的 5 指标到 jsonl (W5-C.2 spike).
+
+    env WEB_AGENT_SPIKE_W5C2 != "1" → noop. 输出 ~/.cache/web-agent/spike-w5c2/{task_label}-{task_id}.jsonl.
+    M1/M2/M5 单步级 regex; M3/M4 留 summary 阶段聚合 (scripts/run_w5c2_spike.py).
+    silent swallow 失败: spike 不该阻塞主路径 (与 memory.record_task 同档).
+    """
+    if os.environ.get("WEB_AGENT_SPIKE_W5C2", "") != "1":
+        return
+    try:
+        out_dir = Path.home() / ".cache" / "web-agent" / "spike-w5c2"
+        out_dir.mkdir(parents=True, exist_ok=True)
+        label = os.environ.get("WEB_AGENT_SPIKE_TASK_LABEL", "") or "unknown"
+        path = out_dir / f"{label}-{task_id}.jsonl"
+        with path.open("w", encoding="utf-8") as f:
+            for step in trace.steps:
+                if step.step < 0:  # W5-D.2 synthetic memory_recall step
+                    continue
+                thought = step.thought or ""
+                obs = step.observation or ""
+                is_failure_step = any(m in obs for m in _SPIKE_FAILURE_OBS_MARKERS)
+                record = {
+                    "task_id": task_id,
+                    "task_label": label,
+                    "step": step.step,
+                    "ts": step.ts,
+                    "goal": goal[:300],
+                    "thought": thought[:600],
+                    "action_type": step.action_type,
+                    "obs_head": obs[:200],
+                    "M1": bool(_SPIKE_M1_RE.search(thought)),
+                    "M2": bool(_SPIKE_M2_RE.search(thought)),
+                    "M5": bool(_SPIKE_M5_RE.search(thought)) if is_failure_step else False,
+                    "is_failure_step": is_failure_step,
+                }
+                f.write(json.dumps(record, ensure_ascii=False) + "\n")
+    except Exception:
+        pass
 
 
 def _captcha_enabled() -> bool:
@@ -345,3 +411,4 @@ async def run_react_loop(
         return result
     finally:
         conn.close()
+        _dump_spike_metrics(task_id, goal, trace)

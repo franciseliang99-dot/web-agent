@@ -2,6 +2,43 @@
 
 All notable changes to web-agent. 版本号遵循 SemVer 简化形式（V<major>.<minor>.<patch>）。
 
+## [0.16.20] - 2026-05-05
+
+### Add (W5-C.2 logging spike instrumentation: 量化 prompt augmentation 是否真在 thought 拆 subgoal)
+- **`src/web_agent/loop.py` `_dump_spike_metrics()` + 3 regex (M1/M2/M5)**: `run_react_loop` finally block 1 处调用, task 结束后一次性 dump 每 step 到 jsonl. env `WEB_AGENT_SPIKE_W5C2=1` 激活, 默认 noop. 输出 `~/.cache/web-agent/spike-w5c2/{label}-{task_id}.jsonl`. IO 失败 silent swallow (spike 不该阻塞主路径, 与 memory.record_task 同档)
+- **`scripts/run_w5c2_spike.py` 新建** (~280 行): 20 任务清单 (6 个 ≥200 字 should_decompose=True 长任务: label 04/15/16/17/18/20 + 12 个 W1 deterministic 短任务 + 2 个 W3-C SAFETY_BLOCK 反指标 label 15/16) + 跑批 + summary 聚合 + 决策矩阵打印. env `WEB_AGENT_SPIKE_ONLY=01,03,15` 限定 label 跑小样, `WEB_AGENT_SPIKE_TASK_SLEEP_S=15` 调任务间 sleep
+- **`tests/test_loop_spike_w5c2.py` 新建 10 case**:
+  - 6 regex case: 中文 / 英文 M1 subgoal_marker 命中 + no-match 反例 / M2 plan_referenced 中英 / M5 revision_on_failure
+  - 4 dump 行为 case: env 关 noop / env 开写 jsonl schema 字段齐 / W5-D.2 step=-1 synthetic memory_recall 跳过 / IO error silent swallow
+- **`docs/ARCHITECTURE.md` §1.5 加 V0.16.20 spike instrumentation 段**: 5 指标定义 + 20 任务设计 + 决策矩阵 (compliance × success → verdict 4 路) + 数据待补 V0.16.21 落档
+
+### Why
+- V0.16.16 W5-C.2 DEFER 落档时已写明触发条件 ③ = "前置 spike 数据证 plan-and-execute 失败率比 augmentation 低 >20%". 但要触发 ③, 需先量化**现状**: prompt augmentation 在 thought 字段里**是否真拆** subgoal? 拆得好不好? — 此前**无 A/B 证据**
+- V0.16.20 = 把 ARCHITECTURE §1.5 L143 "最低成本前置 spike (1-2h, 不立项)" 提议从 plan 升级为可执行: 工具 ship + 数据采集等用户跑
+- 1-2h instrumentation vs 影响 27h 立项决策 → 高杠杆, 与最近 4 版 (patchright/curl_cffi/W5-C.2 自身 DEFER) "spike → 决断" 节奏一致
+
+### 5 指标 (per-step / per-task)
+- **M1** subgoal_marker_present (per step): thought 含 subgoal 标记词 ("子目标 / 步骤 N / 第 N 步 / 1./① / first / step N / then / next / finally")
+- **M2** plan_referenced (per step): thought 引用整体 plan ("目前在第 2 步 / 当前在 subgoal / 按计划 / according to the plan / as planned")
+- **M3** task_has_plan (per task): 前 3 步任意一步 M1=True ("开局有没有拆")
+- **M4** plan_consistency (per task): M2 命中步数 ≥ ⌈n/3⌉ ("拆了之后跟着走没")
+- **M5** revision_on_failure (per failed step): is_failure_step=True 步下一步 thought 含"换/改/重新 + 策略/方法/思路 / try a different approach / switch strategy / reconsider"
+
+### 决策矩阵 (data → verdict)
+- compliance ≥80% ∧ success ≥70% → **升级永久 NO-GO** (augmentation 已够用)
+- compliance 30-80% / success 50-70% → **维持 DEFER** (等真实用户反馈触发 ①)
+- compliance <30% ∧ success <50% → **触发条件 ③ 候选** (跑 plan-and-execute 对照 spike, +3h Anthropic-only MVP)
+- compliance ≥30% ∧ success <30% → **non-LLM 改造** (SoM/actuator 问题, 与 W5-C.2 无关, 另开工单)
+
+### 不包含 (留 V0.16.21)
+- **数据本身**: 80 min × 1 round (Anthropic provider) 跑批由用户后台触发, 数据落档延后到 V0.16.21
+- **plan-and-execute 对照 spike**: 决策矩阵 "compliance<30% ∧ success<50%" 路径才触发, 非默认要做; 命中后再 +3h 拷贝 anthropic.py 写 plan-and-execute 变体跑同 20 任务
+- **retry 机制**: 任务级 retry 1 次脚本侧未实现, 看 V0.16.21 数据是否需要 (MVP 先单跑)
+
+### Compatibility
+- 255 passed + 2 skipped (245 + 10 spike test 新加), ruff 0, mypy strict 0 (默认 noop, 主 path 行为 100% 与 V0.16.19 一致)
+- bump: pyproject.toml + `__init__.py` `0.16.19` → `0.16.20`
+
 ## [0.16.19] - 2026-05-05
 
 ### Add (约束 4 软化: auto-spawn Chrome — 9222 不可达自动 spawn)
