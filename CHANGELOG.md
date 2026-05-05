@@ -2,6 +2,27 @@
 
 All notable changes to web-agent. 版本号遵循 SemVer 简化形式（V<major>.<minor>.<patch>）。
 
+## [0.16.28] - 2026-05-05
+
+### Add (开源推广 α 路径微优化: README Featured Blog + Discussions + Release)
+
+V0.16.27 dev.to publish 后 HN dead + Reddit account deleted (反垃圾命中), 用户接受 α 路径 (静态收益 + 长尾 SEO), 不再多渠道分发. V0.16.28 = 3 微优化收尾 (零分发风险, 纯项目卫生).
+
+- **`README.md` 顶部加 "📝 Featured Blog" 段**: 链接到已 publish 的 dev.to 英文版 ("50% Compliance, Not 0%: How a Logging Spike Almost Triggered the Wrong Architecture Rewrite"), GitHub 访客 → dev.to 反向引流, 1 段 elevator pitch
+- **`README.md` CHANGELOG badge** V0.16.24 → V0.16.28
+- **GitHub Discussions 开启** (`gh api PATCH ... has_discussions=true`): 路过 contributor 有讨论入口, 比 Issues 更友好 (Q&A 类讨论)
+- **GitHub Release v0.16.27 创建** (`gh release create v0.16.27`): release 出现在 repo sidebar + GitHub user feed + email subscribers, SEO 加成. notes 含 V0.16.16-27 spike 闭环 + dev.to dogfooding 亮点
+
+### Why (α 路径定位)
+- HN dead (24h 等 dang 申诉) + Reddit account deleted (永久) 后, 主动多渠道分发暂停 — 防新账号反垃圾 ML 跨平台叠加 detection
+- 静态收益预期值 (1 年): dev.to 500-1500 views, GitHub 10-30 stars (诚实数字, 不画饼)
+- 3 微优化都是项目卫生不算分发: README 反向引流 + Discussions 入口 + Release SEO 加成
+
+### Compatibility
+- 主代码零改动, 行为 100% 与 V0.16.27 一致
+- 255 passed + 2 skipped, ruff 0, mypy strict 0
+- bump: pyproject.toml + `__init__.py` `0.16.27` → `0.16.28`
+
 ## [0.16.27] - 2026-05-05
 
 ### Add (英文版博客 + dev.to 草稿真账号 E2E verify dogfooding)

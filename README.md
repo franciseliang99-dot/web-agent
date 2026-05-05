@@ -5,7 +5,15 @@
 [![Python 3.12+](https://img.shields.io/badge/python-3.12+-blue.svg)](pyproject.toml)
 [![tests](https://img.shields.io/badge/tests-255_passed-green.svg)](tests/)
 [![mypy strict](https://img.shields.io/badge/mypy-strict_0_errors-blue.svg)](pyproject.toml)
-[![CHANGELOG](https://img.shields.io/badge/CHANGELOG-V0.16.24-orange.svg)](CHANGELOG.md)
+[![CHANGELOG](https://img.shields.io/badge/CHANGELOG-V0.16.28-orange.svg)](CHANGELOG.md)
+
+## 📝 Featured Blog
+
+**[50% Compliance, Not 0%: How a Logging Spike Almost Triggered the Wrong Architecture Rewrite](https://dev.to/francise_liang_e4544eadb9/50-compliance-not-0-how-a-logging-spike-almost-triggered-the-wrong-architecture-rewrite-1lna)** — dev.to · 8 min read
+
+W5-C.2 spike 7 版本闭环故事: 测量层 regex 假阴性差点引发错误架构重写, 真账号 dev.to dogfooding 实测 (V0.16.27).
+
+---
 
 **MultiOn 风格的高度拟人 Web Agent — Python + Playwright + VLM/SoM + stealth, BYO LLM (Anthropic/OpenAI/Kimi)**.
 
