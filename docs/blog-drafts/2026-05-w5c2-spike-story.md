@@ -2,6 +2,8 @@
 
 *W5-C.2 spike 7 版本闭环 · 2026-05*
 
+![hero — developer staring at compliance 0% screen with thought bubble revealing real 50%](assets/hero.jpg)
+
 > 故事 TL;DR：我以为我的 prompt augmentation 路线**完全无效**（compliance=0%），差点立项 27 小时去重写真 plan-and-execute 架构。最后发现 0% 是**测量工具的 regex bug**，真值是 50%。这个故事关于：spike 跑批比想像中复杂、Chrome GPU 死锁、和"读你自己的日志要很小心"。
 
 ---
@@ -41,12 +43,26 @@ augmentation 是 nudge 不是约束 — LLM 自己决定要不要拆。Anthropic
 
 加 20 个任务的清单（6 个 ≥200 字长任务触发 augmentation hint + 14 个短任务），写决策矩阵：
 
-| compliance (M3∧M4) | success | verdict |
+| compliance (M3 ∧ M4) | task success | verdict |
 |---|---|---|
-| ≥80% / ≥70% | augmentation 已够用 → **永久 NO-GO** |
-| 30-80% / 50-70% | **维持 DEFER** |
-| <30% / <50% | **触发条件 ③ 候选** (跑 plan-and-execute 对照 spike) |
-| ≥30% / <30% | non-LLM 改造 (SoM/actuator 问题) |
+| ≥80% | ≥70% | augmentation 已够用 → **永久 NO-GO** |
+| 30-80% | 50-70% | **维持 DEFER** |
+| <30% | <50% | **触发条件 ③ 候选** (跑 plan-and-execute 对照 spike) |
+| ≥30% | <30% | non-LLM 改造 (SoM/actuator 问题) |
+
+```mermaid
+quadrantChart
+    title W5-C.2 决策矩阵 + 3 版本数据落点
+    x-axis Low compliance --> High compliance
+    y-axis Low success --> High success
+    quadrant-1 NO-GO 永久
+    quadrant-2 中间地带 DEFER
+    quadrant-3 触发条件 ③
+    quadrant-4 non-LLM 改造
+    "V0.16.20 (4 根因 noise)": [0.0, 0.45]
+    "V0.16.21 (regex 假阴性)": [0.0, 0.65]
+    "V0.16.22 真 verdict ⭐": [0.5, 0.5]
+```
 
 跑 80 分钟，数据回来：
 
@@ -169,7 +185,25 @@ decompose subset (n=6, augmentation 实际目标群):
 
 4. **不重跑只重处理 jsonl 是省 80 分钟的关键 trick**。把 thought 原文存到 jsonl，让 regex 校准可以离线 re-aggregate — 这个设计在 V0.16.20 我没规划但 V0.16.22 自然涌现。下次设计 spike 工具时 thought 原文必须存。
 
-## 6. 数据 + 代码
+## 6. 7 版本闭环
+
+```mermaid
+timeline
+    title W5-C.2 真 plan-and-execute spike 闭环
+    V0.16.16 : subagent 调研 + DEFER 落档
+             : 3 个触发条件
+    V0.16.20 : spike instrumentation ship
+             : 第一次跑批 — 4 根因 invalidate 数据
+    V0.16.21 : Chrome respawn + 字数 + judge + regex 第二轮
+             : 重跑 — M3 decompose 仍 0%
+    V0.16.22 : regex 第三轮 (子任务/Subgoal/中文序数)
+             : reaggregate 不重跑 — compliance 0% to 50%
+             : 真 verdict 维持 DEFER
+```
+
+augmentation 路线获得 50% compliance 数据底座, plan-and-execute 立项 motivation 显著降低. 触发条件 ③ 失去 motivation, 触发条件 ① (用户反馈) 仍是未来 trigger.
+
+## 7. 数据 + 代码
 
 全部 7 版本闭环 + 决策路径都在:
 - [`CHANGELOG.md V0.16.16-22`](https://github.com/franciseliang99-dot/web-agent/blob/main/CHANGELOG.md)

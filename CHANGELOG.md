@@ -2,6 +2,34 @@
 
 All notable changes to web-agent. 版本号遵循 SemVer 简化形式（V<major>.<minor>.<patch>）。
 
+## [0.16.25] - 2026-05-05
+
+### Add (博客 draft 配图: 头图 + 2 张 mermaid 数据图)
+
+V0.16.24 ship 博客 draft 后, 用本机 picture-gen agent (Pollinations.ai 后端) 生成头图 + 嵌 2 张 mermaid 数据可视化, draft 现可直接发布 (用户审改后).
+
+- **`docs/blog-drafts/assets/hero.jpg` 新建** (64KB JPG): picture-gen prompt B "developer staring at screen showing compliance 0% with thought bubble revealing actual 50%" + style anchor "modern flat tech illustration, bold composition, high contrast". 蓝橙双色调 + 单一主角 + thought bubble, HN/Twitter 缩略图视觉冲击强. 注: Pollinations diffusion 文字渲染弱 (屏幕上数字乱码), 但博客头图不靠精确文字传故事
+- **`docs/blog-drafts/2026-05-w5c2-spike-story.md` 顶部嵌 hero image** (`![hero](assets/hero.jpg)`)
+- **决策矩阵段加 mermaid quadrantChart**: 4 象限 + 3 版本数据落点 (V0.16.20 [0,0.45] noise / V0.16.21 [0,0.65] 假阴性 / V0.16.22 [0.5,0.5] 真 verdict ⭐), 视觉化 spike 数据演进路径
+- **加新段 "## 6. 7 版本闭环" + mermaid timeline**: V0.16.16 / V0.16.20 / V0.16.21 / V0.16.22 关键节点, 每节点 2-3 行事件描述 (DEFER 落档 / 跑批 / 修 / reaggregate / 真 verdict). 原 "## 6. 数据 + 代码" → "## 7. 数据 + 代码"
+- **修决策矩阵 markdown 表格** (V0.16.24 误把 compliance/success 用 "/" 合并到一列): 拆 3 列 (compliance | success | verdict), 4 行各自列出 verdict 条件 + 行动
+
+### Why
+- 头图是 dev.to / HN / Twitter 缩略图的关键视觉信号, 直接影响点击率
+- mermaid 数据图 (quadrantChart + timeline) 在 GitHub / dev.to / Notion 原生 render, 不依赖外部图床, 知乎发布需用户截图
+- picture-gen 走 Pollinations diffusion (零依赖, 免费 API), 与 matplotlib (要 dev dep) 相比 ROI 高
+- 用 picture-gen 生成 1 张头图 (~30s) 比用户自己开 Figma/Canva 5 分钟更快
+
+### 不包含 (用户做)
+- **博客发布**: V0.16.25 仅 ship 配图. 用户审改 draft + 选标题 (3 候选) + 发 dev.to / 知乎 / HN
+- **mermaid → 截图**: 知乎/微信发布时浏览器截图 GitHub render 后的 mermaid (dev.to / GitHub 原生 render)
+- **更多概念图**: 候选 C (测量仪 + 放大镜抽象图) 等待 V0.16.25 反响后决定要不要做
+
+### Compatibility
+- 主代码零改动, 行为 100% 与 V0.16.24 一致
+- 255 passed + 2 skipped, ruff 0, mypy strict 0
+- bump: pyproject.toml + `__init__.py` `0.16.24` → `0.16.25`
+
 ## [0.16.24] - 2026-05-05
 
 ### Add (开源推广周边补全: 博客 draft + CI badge + CONTRIBUTING.md)
