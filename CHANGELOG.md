@@ -2,6 +2,41 @@
 
 All notable changes to web-agent. 版本号遵循 SemVer 简化形式（V<major>.<minor>.<patch>）。
 
+## [0.16.32] - 2026-05-05
+
+### Add (第 3 篇博客 ship: Build Time vs Edit Time — V0.16.31 能力边界 spike 故事)
+
+V0.16.31 spike NO-GO 落档后, 用户选 C (博客 3). 主题: web-agent dogfooding 4/5 = 80% 成功率, 失败的 1 个 (V0.16.31 edit existing) 暴露 actuator 能力边界. 中英双版 + picture-gen 头图 + 2 张 mermaid (能力边界 flowchart + spike-and-decide flowchart).
+
+#### 文件
+- **`docs/blog-drafts/2026-05-build-vs-edit-time-final.md` 新建** (~1300 字中文): 标题 "Build Time vs Edit Time — 我的 Web Agent 能 publish 但还不能 edit (一次诚实的能力边界 spike)". 8 段 (背景 5 次 dogfooding / V0.16.31 7 step 轨迹 / 根因 5 actions / 为什么保守 / V0.17+ 修复路径 + 触发条件 / spike-and-decide 胜利 / 教训 / repo CTA)
+- **`docs/blog-drafts/2026-05-build-vs-edit-time-final-en.md` 新建** (~1300 字英文): 标题 "Build Time vs Edit Time — My Web Agent Can Publish But Can't Edit (An Honest Capability-Boundary Spike)"
+- **`docs/blog-drafts/assets/hero-edit-time.jpg` 新建 75KB**: picture-gen "robotic web agent build vs edit split-screen", 绿/橙双色调 (与博客 1/2 蓝橙系列形成视觉差异化, 但风格一致)
+
+#### 配图 (mermaid 内嵌)
+- **flowchart 能力边界 (§2)**: edit existing → 缺 keyboard_shortcut → 反复 click → anti-loop abort → 用户数据保护
+- **flowchart spike-and-decide (§5)**: V0.16.31 跑 → LOOP_DETECTED → 根因 → V0.17+ 立项 vs DEFER → 落档边界
+
+#### Why
+- 博客 3 主题与博客 1/2 形成完整三部曲:
+  1. 博客 1: 测量层失败 (W5-C.2 regex 假阴性) — LLM 工程
+  2. 博客 2: 架构层 NO-GO (patchright + curl_cffi) — 反检测
+  3. 博客 3: actuator 能力边界 (V0.16.31 edit fail) — 工具设计
+- web-agent dogfooding 4/5 = 80% 成功率 + 失败原因明确不是 bug, 是**项目可信度的最强证据** — 不假装全能, 主动落档边界
+- 博客 3 audience 与博客 1/2 重叠较少: 1 是 LLM 工程窄, 2 是 web 自动化反检测窄, 3 是 web agent / browser automation tool 设计师
+
+#### 不包含 (用户做)
+- **博客 3 publish 到 dev.to**: V0.16.32 仅 ship draft 到 GitHub. 用户审改后决定:
+  - 走 web-agent dogfooding (V0.16.27/V0.16.30 同 publish 流程, ~3.4 min)
+  - 或手动复制 markdown 到 dev.to
+- **修博客 1/2 dev.to 加 cross-link 到博客 3**: V0.16.31 已落档 edit-existing 不可行 → 用户手动 5 分钟修两篇
+- **博客 4+**: 现 3 篇博客覆盖项目核心故事 (LLM 工程 / 反检测 / 工具边界), 短期不必再写
+
+### Compatibility
+- 主代码零改动, 行为 100% 与 V0.16.31 一致
+- 255 passed + 2 skipped, ruff 0, mypy strict 0
+- bump: pyproject.toml + `__init__.py` `0.16.31` → `0.16.32`
+
 ## [0.16.31] - 2026-05-05
 
 ### Spike (web-agent edit existing article 能力边界 NO-GO + V0.17+ actuator TODO)
