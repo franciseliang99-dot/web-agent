@@ -2,6 +2,44 @@
 
 All notable changes to web-agent. 版本号遵循 SemVer 简化形式（V<major>.<minor>.<patch>）。
 
+## [0.16.26] - 2026-05-05
+
+### Add (博客 final 版本: 删 draft markers + 强化 CTA + rename `-final.md`)
+
+V0.16.25 ship draft + 配图后, 用户要求"直接给可发布版本". 本版去掉所有 draft placeholder, 调整为可直接 copy-paste 到 dev.to / 知乎 / 微信公众号的 final 版本.
+
+- **`docs/blog-drafts/2026-05-w5c2-spike-story.md` → `2026-05-w5c2-spike-story-final.md`** (rename, 文件名表"final" 状态)
+- **顶部加发布元数据**: 阅读时长估 8 分钟 + 中英版本占位 (英文版用户后翻) + 作者 GitHub 链接 + 改 H2 sub-title 从"7 版本闭环"到"spike 闭环 · 阅读约 8 分钟" 标注准更准
+- **TL;DR 强化**: "TL;DR" 加粗 + 末尾加项目自介 ("开源 web-agent 项目 7 版本闭环节选"), 让首段直接传达"项目链接是干货"
+- **删末尾 "待补 (发布前)" 段** (V0.16.24 的 draft marker, V0.16.26 不再是 draft)
+- **重构 `## 7. 数据 + 代码` 段为 final 段**:
+  - 加 emoji 视觉锚点 (📊📖🔧🧪) 让链接列表扫读快
+  - 加可复现 spike 的 ~5 行 bash 代码块 (clone / sync / playwright install / WEB_AGENT_SPIKE_W5C2=1 跑批 / reaggregate)
+  - 加 "项目: web-agent" 段独立给 repo 自介 + star/fork/PR 邀请 + CONTRIBUTING 链接
+  - 强化结尾 CTA: "如果你...这个数据可能省你 27 小时" + "评论欢迎讨论" 提 1 个开放问题 (你的 spike 流程怎么避免类似测量层假阴性)
+- **末尾加发布 attribution**: "转载请注明来源 + repo 链接. 同步发布于 dev.to / 知乎 / Hacker News."
+
+### Why
+- draft 末尾"待补"段对发布无用 (用户已选好标题 / 配图已 ship), 留着反而显示 "未完工" 信号
+- final 段的 emoji + bash 复现代码 + repo 自介都是 "调到可直接发" 必要项: dev.to / 知乎 用户 5-10 秒决定要不要往下读, 这些视觉锚点 + 可执行命令是关键钩子
+- 发布元数据 (阅读时长 / 作者) 是 dev.to / Medium 标准做法, 提升点击率
+
+### 关于英文版
+本次仅 ship **中文 final 版本**. 英文版 (dev.to 主流英文社区受众) 留用户用 ChatGPT/DeepL 翻译现版即可, 不在本 commit scope. 如果英文翻译需求强 (post-launch), V0.16.27 可起独立 spike 推 `2026-05-w5c2-spike-story-final-en.md`.
+
+### 立即可发布的渠道映射
+| 渠道 | 文件复制方式 | mermaid 处理 | 发布 emoji 适配 |
+|---|---|---|---|
+| **dev.to** | markdown raw 直接 paste | 原生 render ✓ | 全保留 |
+| **知乎** | markdown 复制到富文本 | 截图 GitHub render 后贴图 | 部分保留 (复杂 emoji 渲染弱) |
+| **微信公众号** | markdown 复制到 mdnice (markdown 编辑器) | 截图 + 图床 | 全保留 |
+| **Hacker News** | 标题党 + 链接 dev.to 文章 | N/A | 不在 HN |
+
+### Compatibility
+- 主代码零改动, 行为 100% 与 V0.16.25 一致
+- 255 passed + 2 skipped, ruff 0, mypy strict 0
+- bump: pyproject.toml + `__init__.py` `0.16.25` → `0.16.26`
+
 ## [0.16.25] - 2026-05-05
 
 ### Add (博客 draft 配图: 头图 + 2 张 mermaid 数据图)

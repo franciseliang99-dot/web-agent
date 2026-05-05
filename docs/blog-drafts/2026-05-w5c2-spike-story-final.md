@@ -1,10 +1,10 @@
 # 我差点重写整个规划层 — 一个 regex 假阴性的故事
 
-*W5-C.2 spike 7 版本闭环 · 2026-05*
+*W5-C.2 spike 闭环 · 2026-05 · 阅读约 8 分钟 · [中文 / English](#) · 作者: [@franciseliang99-dot](https://github.com/franciseliang99-dot)*
 
-![hero — developer staring at compliance 0% screen with thought bubble revealing real 50%](assets/hero.jpg)
+![hero](assets/hero.jpg)
 
-> 故事 TL;DR：我以为我的 prompt augmentation 路线**完全无效**（compliance=0%），差点立项 27 小时去重写真 plan-and-execute 架构。最后发现 0% 是**测量工具的 regex bug**，真值是 50%。这个故事关于：spike 跑批比想像中复杂、Chrome GPU 死锁、和"读你自己的日志要很小心"。
+> **TL;DR**：我以为我的 prompt augmentation 路线**完全无效**（compliance=0%），差点立项 27 小时去重写整个 plan-and-execute 架构。最后发现 0% 是**测量工具的 regex bug**，真值是 50%。这是关于 spike 跑批怎么踩 4 个坑、Chrome GPU 死锁的诡异、和"读你自己的日志要很小心"的故事——开源 web-agent 项目 7 版本闭环节选。
 
 ---
 
@@ -203,30 +203,41 @@ timeline
 
 augmentation 路线获得 50% compliance 数据底座, plan-and-execute 立项 motivation 显著降低. 触发条件 ③ 失去 motivation, 触发条件 ① (用户反馈) 仍是未来 trigger.
 
-## 7. 数据 + 代码
+## 7. 数据 + 代码 (开源 MIT)
 
-全部 7 版本闭环 + 决策路径都在:
-- [`CHANGELOG.md V0.16.16-22`](https://github.com/franciseliang99-dot/web-agent/blob/main/CHANGELOG.md)
-- [`docs/ARCHITECTURE.md §1.5`](https://github.com/franciseliang99-dot/web-agent/blob/main/docs/ARCHITECTURE.md)
-- `scripts/run_w5c2_spike.py` (跑批) + `scripts/reaggregate_w5c2.py` (重处理)
-- `~/.cache/web-agent/spike-w5c2-v021-backup/` (V0.16.21 原始 jsonl，audit trail)
+全部 7 版本闭环 + 决策路径开源在 GitHub:
 
-repo: **github.com/franciseliang99-dot/web-agent** ⭐
+- 📊 [`CHANGELOG.md V0.16.16-22`](https://github.com/franciseliang99-dot/web-agent/blob/main/CHANGELOG.md) — 每版本数据 + 决策推演
+- 📖 [`docs/ARCHITECTURE.md §1.5`](https://github.com/franciseliang99-dot/web-agent/blob/main/docs/ARCHITECTURE.md) — DEFER 落档 + 触发条件 + 真 verdict
+- 🔧 [`scripts/run_w5c2_spike.py`](https://github.com/franciseliang99-dot/web-agent/blob/main/scripts/run_w5c2_spike.py) (跑批 280 行) + [`scripts/reaggregate_w5c2.py`](https://github.com/franciseliang99-dot/web-agent/blob/main/scripts/reaggregate_w5c2.py) (重处理 75 行)
+- 🧪 [`tests/test_loop_spike_w5c2.py`](https://github.com/franciseliang99-dot/web-agent/blob/main/tests/test_loop_spike_w5c2.py) — 10 case 验证 regex + jsonl schema
 
-如果你也在做 plan-and-execute vs prompt augmentation 的选型，或者准备给 LLM 路线写决策矩阵——这个数据可能省你 27 小时。
+```bash
+# 复现 spike 跑批 (要 ANTHROPIC_API_KEY + Chrome)
+git clone https://github.com/franciseliang99-dot/web-agent && cd web-agent
+uv sync && uv run playwright install chromium
+cp .env.example .env  # 填 ANTHROPIC_API_KEY
+WEB_AGENT_SPIKE_W5C2=1 uv run python scripts/run_w5c2_spike.py
+
+# 之后改 regex / 加任务 → 不必重跑
+uv run python scripts/reaggregate_w5c2.py
+```
+
+## 项目: web-agent
+
+> MultiOn 风格的高度拟人 Web Agent. Python + Playwright + VLM/SoM + stealth, BYO LLM (Anthropic/OpenAI/Kimi). 接管已登录 Chrome 保留 cookies/profile.
+
+- ⭐ **github.com/franciseliang99-dot/web-agent** — MIT License, 欢迎 star / fork / PR
+- 📋 80+ commits, 255 tests passed, mypy strict 0 errors, GitHub Actions CI 全绿
+- 🤝 [CONTRIBUTING.md](https://github.com/franciseliang99-dot/web-agent/blob/main/CONTRIBUTING.md) — 鼓励 spike/决策落档习惯, 跟 ARCHITECTURE 同模式
+
+如果你也在做 plan-and-execute vs prompt augmentation 选型, 或者要给 LLM 工程路线写决策矩阵, 这个数据可能省你 27 小时。如果踩到类似 Chrome GPU SwiftShader 死锁的坑, 看 [V0.16.21 CHANGELOG](https://github.com/franciseliang99-dot/web-agent/blob/main/CHANGELOG.md) 的 4 根因诊断章节。
+
+**评论欢迎讨论**: 你的 spike 流程怎么避免类似的测量层假阴性? regex / LLM-as-judge / human-in-the-loop, 怎么 trade-off?
 
 ---
 
-## 待补 (发布前)
-
-- [ ] 配 4-5 张图（V0.16.20-22 数据对比表 / 决策矩阵 / Chrome GPU 死锁 ps 截图 / regex 拓宽前后命中表 / reaggregate.py 关键代码截图）
-- [ ] 选标题（中英任选）:
-  - 中文: "我差点重写整个规划层 — 一个 regex 假阴性的故事"
-  - 英文: "50% Compliance, Not 0%: How a Logging Spike Almost Triggered the Wrong Architecture Rewrite"
-  - HN 党: "The Spike That Saved 27 Hours: Reading Your Own Logs Wrong"
-- [ ] 发布渠道:
-  - 首发 dev.to (英文) / 知乎 (中文)
-  - 同步 Show HN / r/LocalLLaMA / r/MachineLearning / Twitter
+*转载请注明来源 + repo 链接. 同步发布于 dev.to / 知乎 / Hacker News.*
 - [ ] 评论区准备答案:
   - "为什么用 Anthropic 不用 OpenAI" → vision model 兼容性 + prompt caching
   - "patchright 真不能用吗" → V0.16.14 spike NO-GO，与 connect_over_cdp 接管模式冲突
