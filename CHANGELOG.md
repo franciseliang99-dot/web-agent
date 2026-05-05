@@ -2,6 +2,32 @@
 
 All notable changes to web-agent. 版本号遵循 SemVer 简化形式（V<major>.<minor>.<patch>）。
 
+## [0.16.24] - 2026-05-05
+
+### Add (开源推广周边补全: 博客 draft + CI badge + CONTRIBUTING.md)
+
+V0.16.23 LICENSE/README/topics 把开源基础打好后, V0.16.24 补开源推广路径上的"周边" — 博客分发载体 + 社区入口 + 第一印象信号.
+
+- **`docs/blog-drafts/2026-05-w5c2-spike-story.md` 新建** (~1500 字): 第一篇博客 draft, 主题 "我差点重写整个规划层 — 一个 regex 假阴性的故事 (W5-C.2 spike 7 版本闭环)". 6 段结构: 引子 / V0.16.20 跑批 / V0.16.21 4 根因修 / V0.16.22 reaggregate 关键发现 / 真 verdict + 教训 / repo 链接. 末尾"待补"列待用户做的: 配 4-5 张图 + 选标题 (中/英/HN 党 3 备选) + 发布渠道 + 评论区高频问答准备
+- **`README.md` 加 CI badge**: 顶部 5 badges → 6 badges, 加 GitHub Actions CI badge (workflows/ci.yml), 第一印象信号 + ruff/mypy/pytest 三层 release gate 公开可见
+- **`CONTRIBUTING.md` 新建** (~50 行): dev setup + 跑测试 (3 层 release gate) + Conventional Commits 风格 + 代码风格 (mypy strict / ruff line-length=110) + PR 流程 + **Spike/决策落档习惯** (鼓励 PR 同时落档 ARCHITECTURE §1.X) + bug 报告模板
+
+### Why
+- LICENSE/README/topics 是基础(repo 看起来正经), 但**没博客分发没人看到** — 博客是知名度路径上的关键动作
+- W5-C.2 spike 7 版本闭环故事曲折度高 (触发条件 ③ 看似命中 → 测量假阴性发现 → 真 verdict)，对 LLM 工程读者代入感强 ("我以为 augmentation 不工作, 结果 regex 骗了我"), HN 党风格容易上首页
+- CI badge 是 GitHub README 第一印象信号: 绿色 → 项目 active 维护 + 测试覆盖好
+- CONTRIBUTING 是社区门槛降低: 没 CONTRIBUTING 大部分人不会发 PR, 有了直接看到 "怎么参与"
+
+### 不包含 (留下一步)
+- **博客发布**: V0.16.24 仅含 draft, 用户审改后自发 dev.to / 知乎 / HN. 配图 + 选标题 + 发布渠道 / 评论区准备见 draft "待补" 段
+- **demos/ 加 README + GIF**: 候选 #2, 等博客发出第一波流量后再做 (用真实访客反馈优化优先级)
+- **V0.17 Action discriminated union 重构**: 工程清债, 知名度路径上是绕路
+
+### Compatibility
+- 255 passed + 2 skipped (无新 test 也无改动测试), ruff 0, mypy strict 0
+- 主代码零改动, 行为 100% 与 V0.16.23 一致
+- bump: pyproject.toml + `__init__.py` `0.16.23` → `0.16.24`
+
 ## [0.16.23] - 2026-05-05
 
 ### Add (开源准备: LICENSE + README 大改 + pyproject.toml 元数据)
