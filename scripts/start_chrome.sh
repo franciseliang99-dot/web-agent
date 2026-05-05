@@ -22,15 +22,23 @@ USER_DATA="${CHROME_USER_DATA_DIR:-${HOME}/.config/web-agent-chrome}"
 MODE="${CHROME_MODE:-auto}"
 mkdir -p "${USER_DATA}"
 
-CHROME_BIN=""
-for c in google-chrome google-chrome-stable chromium chromium-browser; do
-  if command -v "$c" >/dev/null 2>&1; then
-    CHROME_BIN="$(command -v "$c")"
-    break
-  fi
-done
+# V0.16.18: 支持 Chromium 系 fork — Brave/Edge/Vivaldi/Opera 都基于 Chromium, 启动加 9222 同样能被
+# connect_over_cdp 接管. CDP 协议层零差异, 仅 binary 名不同. 按优先级查找, 第一个找到的用.
+# 用户显式覆盖: CHROME_BIN=/path/to/your/binary bash scripts/start_chrome.sh
+CHROME_BIN="${CHROME_BIN:-}"
 if [[ -z "${CHROME_BIN}" ]]; then
-  echo "找不到 Chrome / Chromium 可执行文件" >&2
+  for c in google-chrome google-chrome-stable chromium chromium-browser \
+           brave-browser brave microsoft-edge microsoft-edge-stable msedge \
+           vivaldi vivaldi-stable opera; do
+    if command -v "$c" >/dev/null 2>&1; then
+      CHROME_BIN="$(command -v "$c")"
+      break
+    fi
+  done
+fi
+if [[ -z "${CHROME_BIN}" ]]; then
+  echo "找不到 Chrome / Chromium / Brave / Edge / Vivaldi / Opera 任一可执行文件" >&2
+  echo "或显式 export CHROME_BIN=/path/to/your/chromium-fork" >&2
   exit 1
 fi
 

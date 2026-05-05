@@ -2,6 +2,33 @@
 
 All notable changes to web-agent. 版本号遵循 SemVer 简化形式（V<major>.<minor>.<patch>）。
 
+## [0.16.18] - 2026-05-05
+
+### Add (Chromium 系 fork 支持: Brave / Edge / Vivaldi / Opera)
+- **`scripts/start_chrome.sh` binary 检测**: 4 个 → 11 个 (按优先级):
+  - Chromium 原生: `google-chrome` / `google-chrome-stable` / `chromium` / `chromium-browser`
+  - Brave: `brave-browser` / `brave`
+  - Edge: `microsoft-edge` / `microsoft-edge-stable` / `msedge`
+  - Vivaldi: `vivaldi` / `vivaldi-stable`
+  - Opera: `opera`
+- **`CHROME_BIN` env 覆盖**: 用户显式 `CHROME_BIN=/path/to/your/chromium-fork bash scripts/start_chrome.sh` 可手动指定任意 Chromium fork binary, 自动检测失效时的兜底
+- **错误信息升级**: "找不到 Chrome / Chromium" → "找不到 Chrome / Chromium / Brave / Edge / Vivaldi / Opera 任一可执行文件 + 显式 CHROME_BIN env 提示"
+- **`docs/ARCHITECTURE.md` §1.1 加 V0.16.18 浏览器边界段**:
+  - 列 11 个支持的 binary
+  - 明确 Firefox / Safari 不支持的根因 (协议不同 + launch 模式丢登录态 = 与 patchright NO-GO 同根因)
+  - WebDriver BiDi 是未来路径但 Playwright 1.59+ 试验性, 未成熟
+- **`README.md` 栈段加注脚**: V0.16.18 起 Chromium fork 支持 + ARCHITECTURE §1.1 引用
+
+### Why
+- 用户问"项目只能控制 Chrome 吗" → 实际架构上是 Chromium 系都行 (CDP 协议零差异), 只是脚本只检测 Chrome/Chromium 4 个 binary
+- 5 行改动覆盖 Brave/Edge/Vivaldi/Opera 4 个主流 fork, ROI 高
+- 浏览器边界清晰落档: Chromium 系 ✅ / Firefox/Safari ❌ (架构) / WebDriver BiDi 未来路径
+
+### Compatibility
+- 235 passed + 2 skipped 与 V0.16.17 一致 (sh + markdown 改动, 无代码)
+- 现有 Chrome/Chromium 用户行为零变化 (binary 检测优先级 google-chrome 在前)
+- bump: pyproject.toml + `__init__.py` `0.16.17` → `0.16.18`
+
 ## [0.16.17] - 2026-05-04
 
 ### Verify (W3-C Gmail compose 真账号 E2E 实测通过)

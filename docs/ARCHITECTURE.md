@@ -19,6 +19,12 @@
 - **Playwright `launch`**：起隔离 Chromium 拿到的是新 user-data-dir，丢失用户登录态/Cookies/扩展，违背蓝本"无缝接管日常 profile"的目标。
 - **CDP 接管 (选定)**：用户用 `scripts/start_chrome.sh` 启动带 `--remote-debugging-port=9222` 的独立 user-data-dir Chrome（不污染日常 profile，但同时保留登录态），agent 从 9222 接管即可继承 Cookies / 已登录 Gmail / 已装扩展，且能用 Playwright 全部 API。这是 MultiOn 同款路线。
 
+#### V0.16.18 浏览器边界明确
+
+CDP 是 **Chromium 独有协议** → 项目仅支持 Chromium 系浏览器。`scripts/start_chrome.sh` V0.16.18 起按优先级检测 11 个 binary：`google-chrome` / `google-chrome-stable` / `chromium` / `chromium-browser` / `brave-browser` / `brave` / `microsoft-edge` / `microsoft-edge-stable` / `msedge` / `vivaldi` / `vivaldi-stable` / `opera`。**Brave / Edge / Vivaldi / Opera 都基于 Chromium，CDP 协议层零差异**，启动加 `--remote-debugging-port=9222` 同样能被 `connect_over_cdp` 接管。用户也可 `CHROME_BIN=/path/to/...` env 覆盖。
+
+**Firefox / Safari 架构上不支持**：协议不同（Firefox = Marionette/BiDi，Safari = Remote Web Inspector），且 Playwright 对它们只能 `launch_persistent_context()` 启**新进程** = 失去登录态接管。要支持必须放弃"无缝接管日常 profile"核心架构 → 与 patchright NO-GO 同根因。**WebDriver BiDi**（Playwright 1.59+ 试验性，W3C 跨浏览器协议）是未来路径但未成熟。
+
 ### 1.2 元素感知：Set-of-Mark (SoM) vs Accessibility Tree
 
 **选择**：SoM JS 注入 + Shadow DOM 穿透 (V0.12.0 W5-B)。
