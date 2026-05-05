@@ -58,6 +58,28 @@
 
 spike 暴露 sannysoft 上 B 的 2 个 FAIL 全是 `WebGL Vendor/Renderer = "Canvas has no webgl context"` — Xvfb 无 GPU 导致 SwiftShader 没启。修法：`scripts/start_chrome.sh` ARGS 加 `--use-gl=angle --use-angle=swiftshader --enable-unsafe-swiftshader`，headless 模式删 deprecated 的 `--disable-gpu`。预期 B 跳到 23/32 (~72%) 且 FAIL=0。
 
+#### V0.16.15 关联决策：curl_cffi TLS 指纹 NO-GO（当前架构）
+
+**选择**：永久 NO-GO（直到 W6+ 引入"内部 HTTP 旁路"路径才重评估）。
+
+curl_cffi（[lexiforest/curl_cffi](https://github.com/lexiforest/curl_cffi)，patched BoringSSL 把 ClientHello 字节级伪装成真 Chrome 145/146）解决 JA3/JA4 TLS 指纹反爬——Cloudflare bot management / DataDome / PerimeterX 在 HTTP 之前的 TLS 层识别"非浏览器"。
+
+**为什么 web-agent 当前架构下 ROI = 0**：
+
+| 流量路径 | 出口 TLS 栈 | 反爬目标？ | curl_cffi 增量？ |
+|---|---|---|---|
+| 浏览（goto / click / type） | Chrome 自己的 BoringSSL | ✓（CF/DataDome 看 JA3） | ❌ 已是真 Chrome 指纹，curl_cffi 改不到 |
+| LLM API（anthropic/openai SDK） | Python httpx → OpenSSL | ❌（API 端点不做反爬） | ❌ Anthropic/OpenAI 不会拦 |
+
+**核心**：所有网页流量从 `connect_over_cdp` 接管的真 Chrome 出去 → 默认就是真 Chrome JA3/JA4。curl_cffi 在浏览路径**完全没用**。LLM API 调用是与项目合作方的合规端点，不需要伪装。
+
+**何时重评估**：W6+ 若引入"Python 直发 HTTP 旁路抓某 JSON API"的优化路径（绕过 Chrome 加速），那时候 curl_cffi 才有意义。**当前永久锁 NO-GO**，避免后人误以为是待办。
+
+**与 patchright 的对比**（同根：反检测层升级路径决断）：
+- patchright NO-GO 因为 connect_over_cdp 模式下 launch 阶段 patch 旁路（架构冲突）
+- curl_cffi NO-GO 因为 Chrome 已经是真 TLS 栈（路径不需要）
+- 两者**都不阻塞** "命中 Cloudflare 时上住宅代理" 这条真正的下一层防御路径
+
 ### 1.4 数据持久化：单库 trace.db vs 分库 trace.db + memory.db
 
 **选择**：分库（V0.13.0 W5-D）。

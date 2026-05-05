@@ -2,6 +2,27 @@
 
 All notable changes to web-agent. 版本号遵循 SemVer 简化形式（V<major>.<minor>.<patch>）。
 
+## [0.16.15] - 2026-05-04
+
+### Doc (curl_cffi TLS 指纹永久 NO-GO 落档 + 住宅代理路径明确)
+- **`docs/ARCHITECTURE.md` §1.3 加 V0.16.15 关联决策段**: curl_cffi NO-GO 锁定 (当前架构). 流量路径表说清楚为什么没用:
+  - 浏览流量 → Chrome 自己的 BoringSSL = 真 Chrome JA3/JA4, curl_cffi 改不到
+  - LLM API → Anthropic/OpenAI 端点不做反爬, curl_cffi 也用不上
+  - W6+ 若引入"Python 直发 HTTP 旁路"路径才重评估. 与 patchright NO-GO 同源 (反检测层升级路径决断), 但根因不同 (架构冲突 vs 路径不需要)
+- **`README.md` 已知缺口 (L127)**: 把"住宅代理 + curl_cffi TLS 指纹接入"拆成两条:
+  - curl_cffi → ~~strikethrough~~ + V0.16.15 NO-GO 摘要 + ARCHITECTURE 引用 (与 patchright 同等待遇)
+  - **住宅代理**单列保留为"Cloudflare 命中后启用", 加候选商业服务 (IPRoyal $7/GB / Smartproxy $8.5/GB) + Chrome --proxy-server= 与 connect_over_cdp 兼容性说明 + 凭证认证坑提示
+- **`README.md` 反检测层段 (L238-242)**: curl_cffi 标 NO-GO; 住宅代理升为"真正下一层防御"; 重新编号 1-4 步
+
+### Why
+- V0.16.14 spike 关闭 patchright 后, 用户进一步问"住宅代理 + curl_cffi"作用. 独立 subagent 调研后判定: 在 Playwright 接管真 Chrome 架构下, **curl_cffi 在浏览路径完全没用** (Chrome 自己已是真 BoringSSL), 与 patchright 一样应该永久落档而非留在"已知缺口"待办列表
+- 住宅代理是另一回事: 与 connect_over_cdp 完全兼容 (Chrome 自己处理代理, web-agent 无感), 命中 Cloudflare 时是真有用的下一层防御. 单列保留 + 加候选商业服务 + 实施坑 (`--proxy-server=` 不支持 user:pass 内联凭证) 让后人看到时不用再调研一遍
+- 反检测层升级路径走完: patchright (NO-GO 架构冲突) / curl_cffi (NO-GO 路径不需要) / 住宅代理 (Defer to CF 命中) / 验证码暂停 UX (W4-2 V0.9.0 已实现) — 整个反检测决策树闭环
+
+### Compatibility
+- 235 passed + 2 skipped 与 V0.16.14 一致, 仅 markdown 文档改动 (无代码 / 无 sh 改动)
+- bump: pyproject.toml + `__init__.py` `0.16.14` → `0.16.15`
+
 ## [0.16.14] - 2026-05-04
 
 ### Fix (P0 WebGL SwiftShader flags + patchright spike NO-GO 落档)
