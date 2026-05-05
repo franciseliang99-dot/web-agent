@@ -13,6 +13,7 @@ from dotenv import load_dotenv
 from playwright.async_api import async_playwright
 
 from web_agent.browser import apply_stealth, connect
+from web_agent.chrome_launcher import ensure_chrome_running
 from web_agent.llm import make_client
 from web_agent.loop import ProgressCallback, run_react_loop
 from web_agent.memory import (
@@ -48,6 +49,9 @@ async def run_task(
         max_steps = int(os.environ.get("WEB_AGENT_MAX_STEPS", "20"))
     if max_wallclock_s is None:
         max_wallclock_s = float(os.environ.get("WEB_AGENT_MAX_WALLCLOCK_S", "300"))
+
+    # V0.16.19: 9222 不可达时自动 spawn Chrome (WEB_AGENT_AUTO_SPAWN_CHROME=false 关)
+    await asyncio.to_thread(ensure_chrome_running, cdp_url)
 
     async with async_playwright() as p:
         browser, ctx, page = await connect(p, cdp_url=cdp_url)

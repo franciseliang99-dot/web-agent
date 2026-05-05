@@ -2,6 +2,33 @@
 
 All notable changes to web-agent. 版本号遵循 SemVer 简化形式（V<major>.<minor>.<patch>）。
 
+## [0.16.19] - 2026-05-05
+
+### Add (约束 4 软化: auto-spawn Chrome — 9222 不可达自动 spawn)
+- **新模块 `src/web_agent/chrome_launcher.py`** (~100 行, stdlib only): 3 个 helper:
+  - `check_chrome_alive(cdp_url, timeout=2.0) -> bool`: 9222 健康检查 (urllib, 不抛)
+  - `spawn_chrome_detached(script_path, cdp_url, ready_timeout=30.0) -> int`: `subprocess.Popen([bash, script], start_new_session=True, stdio=DEVNULL, close_fds=True)` + 轮询 9222 直到 ready_timeout
+  - `ensure_chrome_running(cdp_url, script_path=None)`: 顶层 orchestrator (alive 直接返 / `WEB_AGENT_AUTO_SPAWN_CHROME=false` 抛错引导手启 / 默认开自动 spawn)
+- **`src/web_agent/cli.py` L54**: `await asyncio.to_thread(ensure_chrome_running, cdp_url)` 在 connect 之前
+- **`src/web_agent/mcp_server.py` `_check_chrome_alive` delegate**: 实现转移到 chrome_launcher, 但保留模块级符号名向后兼容 (test_mcp_server.py L46/57 monkeypatch fixture 不破)
+- **`tests/test_chrome_launcher.py` 新建 10 case**: 健康检查 / Popen detached args / 等就绪 / timeout 抛错 / script 缺失 / ensure 路径全覆盖 / env 开关 / 默认 script_path
+- **`tests/test_cli.py` patch_run_task_io_chain fixture**: 加 `monkeypatch.setattr("web_agent.cli.ensure_chrome_running", lambda url: None)` 防 IO 边界
+
+### Why
+- V0.16.18 之前 onboarding 4 步: ① 终端 A 启 Chrome ② 等启动 ③ 终端 B 设 env ④ 跑 demo. ① 是用户最容易忘的(V0.16.17 Gmail E2E spike 实测过用户问"为什么 ECONNREFUSED")
+- V0.16.19 软化为 1 步: 直接 `uv run python demos/wikipedia_search.py "..."` — 不可达自动 spawn, 用户首跑 onboarding 摩擦显著降低
+- env 开关 `WEB_AGENT_AUTO_SPAWN_CHROME=false` 给偏好显式控制的用户回退路径 (与 V0.16.18 行为完全一致)
+- 设计原则: stdio MCP 模式 stdout/stderr 必须 DEVNULL 防 Chrome log 污染 JSON-RPC; start_new_session 让 Chrome 脱离 Python 进程组父 exit 不带走
+
+### 不解决的限制
+- **首登 Gmail 仍需 headed 模式**: auto-spawn 用 CHROME_MODE=auto, 装了 xvfb 就走 xvfb 看不见 GUI. 首登仍要按 V0.16.17 cookbook 显式 `CHROME_MODE=headed bash scripts/start_chrome.sh https://mail.google.com/` 手登一次, 后续 user-data-dir 持久化
+- **同 user-data-dir Chrome 单实例锁**: V0.16.20 cookie 导入 spike 待评估
+
+### Compatibility
+- 245 passed + 2 skipped (235 + 10 chrome_launcher 新加), ruff 0, mypy strict 0 (21 files, 多 1 个 chrome_launcher.py)
+- 现有 V0.16.17 cookbook 流程 100% 仍可用 (用户先手启 Chrome 时 `ensure_chrome_running` 直接返回)
+- bump: pyproject.toml + `__init__.py` `0.16.18` → `0.16.19`
+
 ## [0.16.18] - 2026-05-05
 
 ### Add (Chromium 系 fork 支持: Brave / Edge / Vivaldi / Opera)

@@ -25,6 +25,22 @@ CDP 是 **Chromium 独有协议** → 项目仅支持 Chromium 系浏览器。`s
 
 **Firefox / Safari 架构上不支持**：协议不同（Firefox = Marionette/BiDi，Safari = Remote Web Inspector），且 Playwright 对它们只能 `launch_persistent_context()` 启**新进程** = 失去登录态接管。要支持必须放弃"无缝接管日常 profile"核心架构 → 与 patchright NO-GO 同根因。**WebDriver BiDi**（Playwright 1.59+ 试验性，W3C 跨浏览器协议）是未来路径但未成熟。
 
+#### V0.16.19 约束 4 软化：auto-spawn Chrome (cli + mcp_server)
+
+V0.16.18 之前用户必须先在终端跑 `bash scripts/start_chrome.sh`，否则 `connect_over_cdp` 报 ECONNREFUSED——这是 onboarding 摩擦最大的硬约束（V0.16.17 cookbook 4 步里第 1 步就是它）。
+
+**V0.16.19 软化**：新模块 `src/web_agent/chrome_launcher.py` 提供 `ensure_chrome_running(cdp_url)`，cli.py / mcp_server.py 在 connect 之前调用：
+- 9222 已活 → 零成本返回（与 V0.16.18 行为一致）
+- 9222 不可达 + `WEB_AGENT_AUTO_SPAWN_CHROME=true`（默认）→ 自动 `subprocess.Popen([bash, scripts/start_chrome.sh], start_new_session=True, stdio=DEVNULL)` + 30s 健康轮询直到可达 → 接管 → exit 时**不杀** Chrome（用户后续可继续用）
+- 9222 不可达 + `WEB_AGENT_AUTO_SPAWN_CHROME=false` → 抛 RuntimeError 引导手启（回退 V0.16.18 行为，给偏好显式控制的用户）
+
+**关键设计**：
+- `start_new_session=True`（POSIX setsid）让 Chrome 脱离 Python 进程组——父退出不带走 Chrome
+- `stdin=stdout=stderr=DEVNULL` 是 stdio MCP 模式的硬要求——任何 Chrome 启动 log 落到 stdout 都会破坏 JSON-RPC 协议
+- 模块级 `_check_chrome_alive` 名字保留在 `mcp_server.py`（delegate 实现到 chrome_launcher），向后兼容现有 monkeypatch 测试 fixture
+
+**约束 4 现状**：从"必须先启 Chrome"软化为"建议先启（更可控），不启也行（自动 spawn）"。**首登 Gmail 仍需 headed 模式手登一次**，auto-spawn 解决不了这个（V0.16.17 cookbook 仍是 source of truth）。
+
 ### 1.2 元素感知：Set-of-Mark (SoM) vs Accessibility Tree
 
 **选择**：SoM JS 注入 + Shadow DOM 穿透 (V0.12.0 W5-B)。

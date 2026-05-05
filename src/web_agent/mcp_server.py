@@ -27,12 +27,12 @@ import asyncio
 import logging
 import os
 import sys
-import urllib.error
-import urllib.request
 from pathlib import Path
 from typing import Any
 
 from mcp.server.fastmcp import Context, FastMCP
+
+from web_agent.chrome_launcher import ensure_chrome_running
 
 from web_agent.cli import run_task as cli_run_task
 from web_agent.memory import (
@@ -52,19 +52,14 @@ mcp = FastMCP("web-agent")
 
 
 def _check_chrome_alive(cdp_url: str, timeout: float = 2.0) -> None:
-    """检查 9222 端口可达, 不可达 raise RuntimeError. 仅 web_agent_run 需调.
+    """V0.16.19: 委托 chrome_launcher.ensure_chrome_running — 9222 不可达时自动 spawn Chrome.
 
-    阻塞 urllib 调用; async 调用方应包 asyncio.to_thread 释放事件循环.
+    阻塞 urllib + subprocess 调用; async 调用方应包 asyncio.to_thread 释放事件循环.
+    保留模块级符号 `_check_chrome_alive` 名是为了 test_mcp_server.py monkeypatch 兼容性.
+
+    env 开关 `WEB_AGENT_AUTO_SPAWN_CHROME=false` 回退到 V0.16.18 行为 (不可达直接抛, 不 auto-spawn).
     """
-    probe_url = f"{cdp_url.rstrip('/')}/json/version"
-    try:
-        with urllib.request.urlopen(probe_url, timeout=timeout):
-            return
-    except (urllib.error.URLError, TimeoutError, OSError) as e:
-        raise RuntimeError(
-            f"chrome_not_running: {cdp_url} 无响应 ({e!r}). "
-            "提示: 先在另一终端跑 `bash scripts/start_chrome.sh` 启 9222 调试端口的 Chrome."
-        )
+    ensure_chrome_running(cdp_url)
 
 
 @mcp.tool()

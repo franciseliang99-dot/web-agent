@@ -129,6 +129,8 @@ def patch_run_task_io_chain(monkeypatch):
 
     monkeypatch.setattr("web_agent.cli.load_dotenv", lambda: None)
     monkeypatch.setattr("web_agent.cli.async_playwright", _FakePlaywrightCtx)
+    # V0.16.19: stub auto-spawn 不真去 spawn Chrome
+    monkeypatch.setattr("web_agent.cli.ensure_chrome_running", lambda url: None)
 
     fake_page = SimpleNamespace(
         set_viewport_size=AsyncMock(),
