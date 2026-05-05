@@ -2,6 +2,73 @@
 
 All notable changes to web-agent. 版本号遵循 SemVer 简化形式（V<major>.<minor>.<patch>）。
 
+## [0.16.22] - 2026-05-05
+
+### Add (W5-C.2 spike regex 第三轮校准 + reaggregate 工具 + **真 verdict: 维持 DEFER**)
+
+V0.16.21 重跑显示 M3 decompose=0% 落矩阵间隙. subagent 抽样 6 长任务 jsonl 发现 LLM 实际用 3 种 subgoal 表达 ("子任务 N" / "Subgoal:" / "第N步"), V0.16.21 regex 只命中 "第N步" 1 种 → 测量层假阴性. V0.16.22 regex 第三轮校准 + reaggregate 现有 jsonl 后 — **真 verdict: 维持 DEFER (decompose subset compliance=50% / success=50%, 落矩阵 #2)**.
+
+#### Regex 第三轮校准
+- **`src/web_agent/loop.py` _SPIKE_M1_RE 加 2 条**: `子任务\s*[一二三四五六七八九十0-9]+` (LLM 复述 prompt "子任务 N" 字样, label 18/20 实测 10 次) + `\bsubgoal\b` (英文裸词 "Subgoal:" 模板, label 15)
+- **`src/web_agent/loop.py` _SPIKE_M2_RE 加 5 条**: `(?:目前|当前|现在)\S*?(?:子任务|subgoal)` 引用模式 + `子任务\s*[一二三四五六七八九十0-9]+\s*[:：]` 裸子任务标号持续 plan reference (label 20 实测 8 次) + `\bSubgoal\s*[:：]` 英文模板 + `已完成子任务\s*[一二三四五六七八九十0-9]+` + `currently\s+working\s+on\s+(?:subgoal|subtask)`
+- **`tests/test_loop_spike_w5c2.py` 加 9 case**: M1 中文/英文 subgoal/Subtask + M2 子任务标号/已完成/working on
+
+#### `scripts/reaggregate_w5c2.py` 新建 (~75 行)
+- 不重跑 spike (V0.16.21 jsonl thought 原文已存, 重跑要 80 min + LLM 调用), 只用当前 regex 重判 M1/M2/M5 + 重出 summary
+- 第一步备份 jsonl 到 `~/.cache/web-agent/spike-w5c2-v021-backup/` 保 V0.16.21 audit trail (subagent 推荐 α: 失去原始 = 失去 delta 复盘能力)
+- 复用 `scripts/run_w5c2_spike.py` 的 `print_summary()` (sys.path import scripts/)
+- 跑法: `uv run python scripts/reaggregate_w5c2.py`
+
+#### V0.16.22 reaggregate 数据 (vs V0.16.21)
+
+| 指标 | V0.16.21 | V0.16.22 | Δ |
+|---|---|---|---|
+| M1 per step | 9% | **32%** | +23pp |
+| M2 per step | 0% | **25%** | +25pp |
+| M3 all | 20% | 35% | +15pp |
+| **M3 decompose** | 0% | **50%** | +50pp |
+| M4 all | 0% | 15% | +15pp |
+| **M4 decompose** | 0% | **50%** | +50pp |
+| **compliance decompose** | 0% | **50%** | +50pp |
+| compliance all | 0% | 15% | +15pp |
+| M5 | 25% | 25% | - |
+| success rate | 65% | 65% | - (regex 不影响 success) |
+| success decompose | 50% | 50% | - |
+
+**V0.16.21 M2/M3/M4 全 0% 是 regex 假阴性导致的测量假性, augmentation 实际在长任务上有 50% compliance**.
+
+#### 真 verdict: 维持 DEFER (ARCHITECTURE §1.5 矩阵 #2)
+
+decompose subset (n=6, augmentation 实际目标群):
+- compliance 50% ∈ 30-80% ✓
+- success 50% ∈ 50-70% ✓
+- → **矩阵 #2: 维持 DEFER**
+
+**不立项 W5-C.2 plan-and-execute 对照 spike** (~3h):
+- augmentation 能让 50% 长任务前 3 步开局拆 plan (M3 decompose) + 50% 后续 follow plan (M4 decompose)
+- plan-and-execute 改进空间 ≤ 50%, 当前 success 50% 已 OK 水平
+- 触发条件 ③ (plan-and-execute 失败率低 >20%) 失去 motivation — augmentation 已工作
+- 触发条件 ① (用户反馈 augmentation 失败案例) 仍是未来 trigger, 不强主动跑
+
+**all 数据观察 (compliance all=15% / decompose=50%)**: `should_decompose()` 阈值精准 — augmentation 仅对长任务启动, 短任务不浪费 token. M1 短任务步骤普遍不命中是设计正确, 不是缺陷.
+
+#### W5-C.2 spike 闭环 (V0.16.16 → V0.16.22, 7 版本)
+- V0.16.16: subagent 调研 + DEFER 落档 + 3 触发条件
+- V0.16.20: spike instrumentation ship + 跑批 (4 根因 invalidate 数据)
+- V0.16.21: 4 根因修复 (Chrome respawn / 字数 / _judge / regex 第二轮) + 重跑 (regex 假阴性露出)
+- V0.16.22: regex 第三轮校准 + reaggregate + **真 verdict 维持 DEFER**
+
+augmentation 路线获得 50% compliance 数据底座, W5-C.2 立项 motivation 显著降低.
+
+### `docs/ARCHITECTURE.md` §1.5 加 V0.16.22 真 verdict 段
+- reaggregate 数据表 + DEFER 落格证据
+- 决策矩阵新观察: compliance all=15% / decompose=50% 揭示 should_decompose 阈值精准
+
+### Compatibility
+- 255 passed + 2 skipped (10 spike test function 不变, 加 9 case 在现有 function 内), ruff 0, mypy strict 0
+- 主 path 行为 100% 与 V0.16.21 一致 (默认 noop)
+- bump: pyproject.toml + `__init__.py` `0.16.21` → `0.16.22`
+
 ## [0.16.21] - 2026-05-05
 
 ### Fix (V0.16.20 W5-C.2 spike 跑批 4 根因修复 — 重跑前置, 数据可信度审核后)

@@ -85,15 +85,22 @@ def _maybe_inject_reflect_hint(trace: Trace, recent_pages: deque[str], fp: str) 
 _SPIKE_M1_RE = re.compile(
     r"子目标|步骤\s*\d|"
     r"第\s*[一二三四五六七八九十0-9]+\s*步|"  # V0.16.21: 中文/阿拉伯序数 (第一步/第2步)
+    r"子任务\s*[一二三四五六七八九十0-9]+|"  # V0.16.22: LLM 复述 prompt "子任务 N" 字样 (label 18/20)
+    r"\bsubgoal\b|"  # V0.16.22: 英文裸词 (Subgoal:) — label 15 模板回应
     r"(?:^|[^\w])(?:1\.|2\.|3\.|①|②|③|④|⑤)|"
     r"\b(?:first|then|next|finally|step\s*\d)\b",
     re.IGNORECASE,
 )
 _SPIKE_M2_RE = re.compile(
     r"(?:目前|当前|现在)(?:在|进行到|进入到?)\s*"  # V0.16.21: 进行到/进入也算 plan reference
-    r"(?:第\s*[一二三四五六七八九十0-9]+|subgoal|步骤)|"  # V0.16.21: 中文序数
+    r"(?:第\s*[一二三四五六七八九十0-9]+|"  # V0.16.21: 中文序数
+    r"子任务\s*[一二三四五六七八九十0-9]+|"  # V0.16.22: 当前在子任务 N
+    r"subgoal|步骤)|"
+    r"子任务\s*[一二三四五六七八九十0-9]+\s*[:：]|"  # V0.16.22b: 裸 "子任务 N:" 持续标号 (subagent 实证 label 20 用 8 次)
+    r"\bSubgoal\s*[:：]|"  # V0.16.22b: 英文 "Subgoal:" 模板回应 (label 15)
     r"按计划|根据(?:上面|前面)拆|"
-    r"\bcurrently\s+(?:on|at)\s+(?:subgoal|step)|"
+    r"已完成子任务\s*[一二三四五六七八九十0-9]+|"  # V0.16.22: 已完成子任务 1, 进行子任务 2
+    r"\bcurrently\s+(?:on|at|working\s+on)\s+(?:subgoal|step|subtask)|"  # V0.16.22: working on
     r"\baccording\s+to\s+(?:the\s+)?plan|\bas\s+planned",
     re.IGNORECASE,
 )

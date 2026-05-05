@@ -20,9 +20,10 @@ from web_agent.trace import Step, Trace
 
 
 def test_M1_chinese_subgoal_marker_hits():
-    """中文 subgoal 标记词 (子目标 / 步骤 N / 第 N 步 / 序号前缀) 命中.
+    """中文 subgoal 标记词 (子目标 / 步骤 N / 第 N 步 / 序号前缀 / 子任务 / Subgoal) 命中.
 
     V0.16.21: 加中文序数 case (第一步/第二步/第三步) — V0.16.20 漏判 task 04 实际样本.
+    V0.16.22: 加 "子任务 N" + "Subgoal:" — V0.16.21 漏判 label 15/18/20 实际样本.
     """
     cases = [
         "目前在子目标 2",
@@ -33,6 +34,10 @@ def test_M1_chinese_subgoal_marker_hits():
         "第一步: 搜索 Python",  # V0.16.21: 中文序数
         "第二步要求点击 Guido 链接",  # V0.16.21
         "第三步是提取 Nationality",  # V0.16.21
+        "子任务 1: 搜索 Python",  # V0.16.22: LLM 复述 prompt 字样
+        "执行子任务 3 的提取动作",  # V0.16.22
+        "Subgoal: navigate to issues page",  # V0.16.22: 英文裸词
+        "Now starting subgoal 2",  # V0.16.22
     ]
     for thought in cases:
         assert _SPIKE_M1_RE.search(thought), f"M1 should match: {thought!r}"
@@ -67,6 +72,7 @@ def test_M2_plan_referenced_chinese():
     """中文 plan 引用 (目前/当前在第 N 步, 按计划) 命中.
 
     V0.16.21: 中文序数 case (第一/第二) + 现在 prefix.
+    V0.16.22: 加 "当前在子任务 N" + "已完成子任务 N".
     """
     cases = [
         "目前在第 2 步",
@@ -76,18 +82,28 @@ def test_M2_plan_referenced_chinese():
         "根据上面拆出的 4 个 subgoal, 先做第一个",
         "目前在第一步, 还差 3 个 subgoal",  # V0.16.21: 中文序数
         "当前进行到第二阶段",  # V0.16.21
+        "当前在子任务 2, 准备点击链接",  # V0.16.22: 子任务 plan reference
+        "已完成子任务 1, 进入下一步",  # V0.16.22
+        "子任务 1: 搜索 Python (programming language)",  # V0.16.22b: 裸标号 (持续 plan reference)
+        "子任务 3: 提取 nationality 字段",  # V0.16.22b
+        "Subgoal: navigate to issues tab",  # V0.16.22b: 英文 Subgoal: 模板
     ]
     for thought in cases:
         assert _SPIKE_M2_RE.search(thought), f"M2 should match: {thought!r}"
 
 
 def test_M2_plan_referenced_english():
-    """英文 plan 引用 (currently on/at subgoal, according to the plan, as planned) 命中."""
+    """英文 plan 引用 (currently on/at subgoal, according to the plan, as planned) 命中.
+
+    V0.16.22: 加 "currently working on subgoal" / "currently working on subtask".
+    """
     cases = [
         "Currently on subgoal 3",
         "Currently at step 2 of the plan",
         "According to the plan, click submit next",
         "Continuing as planned, scroll to load more",
+        "Currently working on subgoal 2",  # V0.16.22
+        "Currently working on subtask 3 of the plan",  # V0.16.22
     ]
     for thought in cases:
         assert _SPIKE_M2_RE.search(thought), f"M2 should match: {thought!r}"
