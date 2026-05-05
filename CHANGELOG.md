@@ -2,6 +2,36 @@
 
 All notable changes to web-agent. 版本号遵循 SemVer 简化形式（V<major>.<minor>.<patch>）。
 
+## [0.16.29] - 2026-05-05
+
+### Add (第 2 篇博客 ship: patchright NO-GO + 反检测决策树故事)
+
+V0.16.28 α 路径微优化后, 用户选 C (第 2 篇博客). 主题: 反检测决策树 — V0.16.14 patchright spike NO-GO + V0.16.15 curl_cffi NO-GO + 住宅代理 GO. 中英双版 + picture-gen 头图 + mermaid 决策树.
+
+#### 文件
+- **`docs/blog-drafts/2026-05-patchright-nogo-final.md` 新建** (~1500 字中文): 标题 "为什么我跑了 spike 后把 patchright 永久 NO-GO 了 — 反检测决策树的故事". 8 段 (背景 / spike 设计 / 实测数据 A=C 19/32 / 根因 launch vs CDP 接管 / 否决理由 + flowchart / curl_cffi 关联 NO-GO / 决策树 / 教训 + repo CTA)
+- **`docs/blog-drafts/2026-05-patchright-nogo-final-en.md` 新建** (~1500 字英文翻译): 标题 (HN-friendly) "Why I Permanently NO-GO'd Patchright After a Spike (And the Anti-Detection Decision Tree)". 共享 hero + mermaid (英化标签)
+- **`docs/blog-drafts/assets/hero-patchright.jpg` 新建 80KB**: picture-gen 主题"3 paths shown side by side - patchright (X), curl_cffi (X), residential proxy (✓), Chrome at center", 复用博客 1 蓝橙双色调风格
+
+#### 配图 (mermaid 内嵌)
+- **xychart-beta sannysoft.com PASS scores bar chart**: A 19 / B 21 / C 19, 视觉化 A==C
+- **flowchart 否决理由 (§4)**: patchright upgrade decision branches (launch_persistent_context vs connect_over_cdp), 都收敛到永久 NO-GO
+- **flowchart 反检测决策树 (§6)**: 4 检测层 (JS / CDP / TLS / IP) × 4 工具 (stealth / patchright / curl_cffi / 住宅代理) 选择映射
+
+#### Why
+- 博客 1 (W5-C.2 spike) 主题是"测量层 regex 假阴性", 偏 LLM 工程; 博客 2 (patchright NO-GO) 主题是"反检测分层架构选择", 偏 web 自动化工程 — 两个不同 niche audience 双覆盖
+- patchright spike 数据 (A==C 19/32 完全相同) + 根因 (launch vs takeover 层) 故事完整, 适合 dev.to 技术 deep-dive
+- 反检测决策树作为博客 2 卖点 — 让"也在做 web 自动化项目用 connect_over_cdp" 的开发者直接采纳 NO-GO 结论, 省 1-2h spike 时间, 比博客 1 的"省 27h" 数字小但 audience 大 (web 自动化广 vs LLM 工程窄)
+
+#### 不包含 (用户做)
+- **博客发布**: V0.16.29 仅 ship 中英 draft 到 GitHub (audit trail). 用户接受 α 路径 (静态收益), 不主动分发. 但博客 2 内容若用户后续决定 publish 到 dev.to, web-agent dogfooding 路径已在 V0.16.27 验证 — 直接复用
+- **修博客 1 dev.to 文章加 cross-link**: 让 dev.to 文章 1 末尾链接到博客 2 dev.to URL (如果 publish), 互引流. 当前博客 2 未 publish 暂不修
+
+### Compatibility
+- 主代码零改动, 行为 100% 与 V0.16.28 一致
+- 255 passed + 2 skipped, ruff 0, mypy strict 0
+- bump: pyproject.toml + `__init__.py` `0.16.28` → `0.16.29`
+
 ## [0.16.28] - 2026-05-05
 
 ### Add (开源推广 α 路径微优化: README Featured Blog + Discussions + Release)
