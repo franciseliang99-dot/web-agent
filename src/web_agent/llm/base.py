@@ -14,7 +14,7 @@ from __future__ import annotations
 from typing import Protocol, runtime_checkable
 
 from web_agent.trace import Trace
-from web_agent.types import Action, Mark  # Action re-export shim — 旧 `from web_agent.llm.base import Action` 仍可用
+from web_agent.types import Action as Action, Mark as Mark  # explicit re-export shim — 旧 `from web_agent.llm.base import Action` 仍可用
 
 
 @runtime_checkable

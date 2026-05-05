@@ -19,6 +19,7 @@ import sqlite3
 import sys
 from datetime import datetime
 from pathlib import Path
+from typing import Any
 
 DEFAULT_DB = Path("data/trace.db")
 DEFAULT_OUT = Path("data/replays")
@@ -40,7 +41,7 @@ def _connect(db_path: Path) -> sqlite3.Connection:
     return conn
 
 
-def load_task(task_id: str | None, db_path: Path = DEFAULT_DB) -> dict:
+def load_task(task_id: str | None, db_path: Path = DEFAULT_DB) -> dict[str, Any]:
     """加载指定 task (None = 最新)。返回含 steps 列表的 dict。
 
     Raises:
@@ -92,10 +93,10 @@ def load_task(task_id: str | None, db_path: Path = DEFAULT_DB) -> dict:
     }
 
 
-def load_all_tasks_meta(db_path: Path = DEFAULT_DB) -> list[dict]:
+def load_all_tasks_meta(db_path: Path = DEFAULT_DB) -> list[dict[str, Any]]:
     """W4-1.1: 索引页用; 仅取 tasks + 子查询 step_count, 不加载 steps 详情省 RAM。
 
-    返回 list[dict], 按 started_at DESC (最新优先, 与 latest task 选择一致)。
+    返回 list[dict[str, Any]], 按 started_at DESC (最新优先, 与 latest task 选择一致)。
 
     Raises:
         SystemExit: db 不存在 / 无 task。
@@ -192,7 +193,7 @@ _CSS = """
 """
 
 
-def _render_step(task_id: str, step: dict) -> str:
+def _render_step(task_id: str, step: dict[str, Any]) -> str:
     sclass = _STEP_CLASS.get(step["action_type"], "")
     args_pretty = json.dumps(step["action_args"], ensure_ascii=False, indent=2)
     return (
@@ -210,7 +211,7 @@ def _render_step(task_id: str, step: dict) -> str:
     )
 
 
-def render_index_html(metas: list[dict]) -> str:
+def render_index_html(metas: list[dict[str, Any]]) -> str:
     """W4-1.1: 渲染所有 task 的索引页, 每行链接到 <task_id>.html 详情页。"""
     rows_html = []
     for m in metas:
@@ -244,7 +245,7 @@ def render_index_html(metas: list[dict]) -> str:
     )
 
 
-def render_html(task: dict) -> str:
+def render_html(task: dict[str, Any]) -> str:
     """把 load_task() 的 dict 渲染成完整单文件 HTML。"""
     steps_html = "".join(_render_step(task["task_id"], s) for s in task["steps"])
     return (
@@ -269,7 +270,7 @@ def render_to_file(
     task_id: str | None,
     out_dir: Path = DEFAULT_OUT,
     db_path: Path = DEFAULT_DB,
-) -> dict:
+) -> dict[str, Any]:
     """渲染单个 task 到 HTML 文件 (V0.16.1 mcp_server 抽出, main() 与 web_agent_get_replay tool 共用).
 
     Returns: {"task_id", "html_path", "step_count", "result"} dict, 给 MCP tool 返结构化数据

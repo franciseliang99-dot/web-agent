@@ -8,6 +8,7 @@ import time
 from collections import deque
 from dataclasses import dataclass, field
 from pathlib import Path
+from typing import Any
 
 
 @dataclass
@@ -16,10 +17,10 @@ class Step:
     ts: float
     thought: str
     action_type: str  # click / type / scroll / extract / done
-    action_args: dict
+    action_args: dict[str, Any]
     observation: str = ""
 
-    def for_llm(self) -> dict:
+    def for_llm(self) -> dict[str, Any]:
         """给 LLM 看的精简版（不带截图、observation 截断）。"""
         return {
             "step": self.step,
@@ -33,12 +34,12 @@ class Step:
 class Trace:
     task_id: str
     goal: str
-    steps: deque = field(default_factory=lambda: deque(maxlen=20))
+    steps: deque[Step] = field(default_factory=lambda: deque(maxlen=20))
 
     def append(self, s: Step) -> None:
         self.steps.append(s)
 
-    def for_llm(self) -> list[dict]:
+    def for_llm(self) -> list[dict[str, Any]]:
         return [s.for_llm() for s in self.steps]
 
 

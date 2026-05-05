@@ -16,13 +16,13 @@ from __future__ import annotations
 
 import json
 import os
-from typing import cast
+from typing import Any, cast
 
 from openai import AsyncOpenAI
 
 from web_agent.llm._schema import SYSTEM_PROMPT, build_user_text, to_openai_tools
 from web_agent.trace import Trace
-from web_agent.types import Action, ActionArgs, Mark
+from web_agent.types import Action, Mark
 
 DEFAULT_MODEL = "gpt-5.5"  # 2026-04-24 release，vision-capable；用户可 override
 
@@ -43,7 +43,7 @@ class OpenAIClient:
             raise RuntimeError(
                 "OPENAI_API_KEY 未设置 — 请填 .env 或 export 环境变量"
             )
-        kwargs: dict = {"api_key": api_key, "max_retries": 4, "timeout": 120.0}
+        kwargs: dict[str, Any] = {"api_key": api_key, "max_retries": 4, "timeout": 120.0}
         base_url = base_url or os.environ.get("OPENAI_BASE_URL")
         if base_url:
             kwargs["base_url"] = base_url
@@ -60,7 +60,7 @@ class OpenAIClient:
         marks: list[Mark],
         trace: Trace,
     ) -> Action:
-        user_content: list[dict] = [
+        user_content: list[dict[str, Any]] = [
             {
                 "type": "image_url",
                 "image_url": {
@@ -71,7 +71,7 @@ class OpenAIClient:
             {"type": "text", "text": build_user_text(goal, marks, trace)},
         ]
 
-        kwargs: dict = {
+        kwargs: dict[str, Any] = {
             "model": self.model,
             "messages": [
                 {"role": "system", "content": SYSTEM_PROMPT},
@@ -101,6 +101,6 @@ class OpenAIClient:
                 f"reasoning/content 预览: {preview!r}"
             )
         call = msg.tool_calls[0]
-        args = json.loads(call.function.arguments)
+        args = cast(dict[str, Any], json.loads(call.function.arguments))
         thought = args.pop("thought", "")
-        return Action(type=call.function.name, args=cast(ActionArgs, args), thought=thought)
+        return Action(type=call.function.name, args=args, thought=thought)

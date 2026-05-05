@@ -14,7 +14,7 @@ from __future__ import annotations
 
 import os
 
-from web_agent.llm.base import Action, LLMClient
+from web_agent.llm.base import Action as Action, LLMClient as LLMClient
 
 
 def provider_from_model(model: str) -> str:

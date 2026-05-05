@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "web-agent"
-version = "0.16.11"
+version = "0.16.12"
 description = "MultiOn-style 高度拟人 AI web agent (Python + Playwright + VLM/SoM + stealth, multi-LLM)"
 readme = "README.md"
 requires-python = ">=3.12"
@@ -32,6 +32,7 @@ packages = ["src/web_agent"]
 [dependency-groups]
 dev = [
     "mcp[cli]>=1.10,<2",
+    "mypy>=1.13",
     "pytest>=8.0",
     "pytest-asyncio>=0.24",
     "pytest-recording>=0.13.4",
@@ -45,3 +46,17 @@ testpaths = ["tests"]
 [tool.ruff]
 line-length = 110
 target-version = "py312"
+
+[tool.mypy]
+python_version = "3.12"
+strict = true
+files = ["src/web_agent"]
+exclude = ["tests/", "demos/"]
+
+[[tool.mypy.overrides]]
+module = ["playwright_stealth", "playwright_stealth.*"]
+ignore_missing_imports = true
+
+[[tool.mypy.overrides]]
+module = ["mcp", "mcp.*"]
+ignore_missing_imports = true

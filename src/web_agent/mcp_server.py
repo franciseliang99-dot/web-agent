@@ -30,6 +30,7 @@ import sys
 import urllib.error
 import urllib.request
 from pathlib import Path
+from typing import Any
 
 from mcp.server.fastmcp import Context, FastMCP
 
@@ -71,7 +72,7 @@ async def web_agent_run(
     goal: str,
     url: str = "",
     max_steps: int = 20,
-    ctx: Context | None = None,
+    ctx: Context[Any, Any] | None = None,
 ) -> str:
     """跑一个 web-agent task: 用 ReAct loop 在 Chrome 里完成 goal.
 
@@ -99,7 +100,7 @@ async def web_agent_run(
         )
 
 
-def _render_replay(task_id: str) -> dict:
+def _render_replay(task_id: str) -> dict[str, Any]:
     """渲染 replay 共享实现: tool/resource 都走它. SystemExit 转 RuntimeError 防 server 退出.
 
     replay.load_task 用 sys.exit() 报错 (CLI 行为); FastMCP 不 catch BaseException,
@@ -111,7 +112,7 @@ def _render_replay(task_id: str) -> dict:
         raise RuntimeError(f"replay 失败: {e}") from e
 
 
-def _query_memory(domain: str, limit: int) -> list[dict]:
+def _query_memory(domain: str, limit: int) -> list[dict[str, Any]]:
     """查询长期记忆共享实现: tool/resource 都走它. 空 domain → []; URL 形式自动 normalize."""
     if not domain:
         return []
@@ -126,7 +127,7 @@ def _query_memory(domain: str, limit: int) -> list[dict]:
 
 
 @mcp.tool()
-async def web_agent_get_replay(task_id: str) -> dict:
+async def web_agent_get_replay(task_id: str) -> dict[str, Any]:
     """渲染指定 task 的 replay HTML, 返结构化路径.
 
     Args:
@@ -162,7 +163,7 @@ async def replay_resource(task_id: str) -> str:
     description="按 domain 拉历史 task outcome (ts/goal/result/success), 默认 5 条.",
     mime_type="application/json",
 )
-async def memory_resource(domain: str) -> list[dict]:
+async def memory_resource(domain: str) -> list[dict[str, Any]]:
     """V0.16.6 read-only resource: 客户端订阅指定 domain 的历史 task entries (JSON list).
 
     与 `web_agent_query_memory` tool 的差异: tool 接 limit 参数 + 主动调用语义,
@@ -172,7 +173,7 @@ async def memory_resource(domain: str) -> list[dict]:
 
 
 @mcp.tool()
-async def web_agent_query_memory(domain: str, limit: int = 5) -> list[dict]:
+async def web_agent_query_memory(domain: str, limit: int = 5) -> list[dict[str, Any]]:
     """查询长期记忆: 按 domain 拉历史 task outcome.
 
     Args:

@@ -38,7 +38,7 @@ async def apply_stealth(page: Page) -> None:
     如果当前安装版本 API 不匹配，warn 后跳过——主流程不挂。
     """
     try:
-        from playwright_stealth import Stealth  # type: ignore[import-untyped]
+        from playwright_stealth import Stealth
 
         stealth = Stealth()
         if hasattr(stealth, "apply_stealth_async"):

@@ -17,6 +17,7 @@ import os
 import shutil
 import subprocess
 import sys
+from typing import Any
 
 log = logging.getLogger(__name__)
 
@@ -48,7 +49,7 @@ def _reset_cache_for_tests() -> None:
     _BACKEND_CACHE = None
 
 
-_RUN_KW = {
+_RUN_KW: dict[str, Any] = {
     "timeout": 3,
     "check": False,
     "stdout": subprocess.DEVNULL,

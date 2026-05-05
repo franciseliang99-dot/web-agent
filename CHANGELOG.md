@@ -2,6 +2,34 @@
 
 All notable changes to web-agent. 版本号遵循 SemVer 简化形式（V<major>.<minor>.<patch>）。
 
+## [0.16.12] - 2026-05-04
+
+### Fix (mypy strict 阶段 2 — 47 errors → 0, 全 src/ 编译期类型一致)
+- **`pyproject.toml` 加 `[tool.mypy]` strict 段** + 2 个 override (playwright_stealth / mcp[cli] 动态 SDK ignore_missing_imports). dev group 加 `mypy>=1.13`
+- **`Action.args: ActionArgs union TypedDict` 回退到 `dict[str, Any]`**: V0.16.11 设计 Action.type 是 str 不是 Literal, mypy 无法在 `if action.type == "click"` branch 内 narrow union TypedDict 到 ClickArgs (loop.py 5 个 branch 全部报"object 不可索引"). 真 discriminated union 需把 Action 拆 5 个 dataclass + Literal type, 跨多文件大重构留 V0.17 顺手做. ActionArgs 5 个子类型 + union 仍保留在 `types.py` 作 schema 文档
+- **批量修补 47 errors → 0**:
+  - `dict` no type args (15 处): trace.py 4 / replay.py 6 / mcp_server.py 5 → 全部 `dict[str, Any]` (内部+签名)
+  - `deque` no type args (trace.py:36): `deque[Step]`
+  - `Context` no type args (mcp_server.py:74): `Context[Any, Any] | None`
+  - `kwargs: dict` 注解 (anthropic.py:36 + openai.py:46/63/74): `dict[str, Any]`
+  - `_RUN_KW: dict[str, Any]` 注解 (notify.py:51) — bool/DEVNULL 推断 dict[str, int] 与 subprocess.run kwargs spread 冲突
+  - `perceiver.py:147` `return cast(list[str], dismissed)` — page.evaluate 返 Any
+  - `loop.py:85` `_handle_captcha(conn: sqlite3.Connection)` 加类型注解 (主 loop 函数, 8 处 logger 调用全在函数体内)
+  - `llm/__init__.py:17` + `llm/base.py:18` 显式 re-export: `from web_agent.types import Action as Action, Mark as Mark` (PEP 484 explicit re-export)
+  - `browser.py:41` 删 `# type: ignore[import-untyped]` (override 已 ignore)
+  - `anthropic.py:63` messages.create 的 `system` / `tools` / `tool_choice` / `messages` 4 个 kwarg `cast(Any, ...)` — SDK TypedDict 严格 vs 裸 dict 字面量, 运行时 anthropic 接受
+- **bump**: pyproject.toml + `__init__.py` `0.16.11` → `0.16.12`
+
+### Why
+- V0.16.11 阶段 1 TypedDict 化是 strict 配置硬前提; 本版本开 strict 后冒 47 errors (低于 plan 估算 60-100, dataclass 字段类型注解覆盖率 ~100% + 之前已有部分 type hint 习惯)
+- Protocol 一致性 / dataclass 字段宽松 / None 流向 是 mypy 在 web-agent 上的 3 大价值——LLMClient Protocol + 3 provider 实现, dict 字段无精度, multi-LLM 项目类型漂移
+- `cast(Any, ...)` 4 处针对 SDK 严格 TypedDict — anthropic 1.x messages.create 期望 `TextBlockParam` / `ToolParam` 等具体 TypedDict, 与社区惯例的裸 dict 字面量不兼容; 运行时 SDK 接受任意 Mapping, 编译期严格不放行. 等价 `# type: ignore[call-overload]` 但 cast(Any) 比 ignore 更精确
+
+### Compatibility
+- 235 passed + 2 skipped 与 V0.16.11 一致, 公开 API / 行为零破坏
+- ruff: All checks passed!; mypy strict: 0 issues / 20 source files
+- 新增 dev dep: mypy>=1.13 (uv lock 同步更新)
+
 ## [0.16.11] - 2026-05-04
 
 ### Refactor (mypy strict 准备 — 阶段 1: TypedDict 化 dict 字段, V0.16.12 加配置)

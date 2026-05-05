@@ -5,15 +5,18 @@
 
 本文件不 import 任何 web_agent.* 模块，是依赖图的最叶子节点。
 
-V0.16.11: `Mark.bbox` 升 BBox TypedDict (4 个 float key); `Action.args` 升 ActionArgs union TypedDict
-(5 个 action type: click / type / scroll / extract / done) — 为 V0.16.12 mypy strict 铺路.
+V0.16.11: `Mark.bbox` 升 BBox TypedDict (4 个 float key) — actuator.py:52-57 4 处算子用法被 mypy 守护.
+V0.16.12: `Action.args` 暂保 `dict[str, Any]` (而非 ActionArgs union TypedDict) — Action.type 是 str 不是 Literal,
+mypy 无法在 `if action.type == "click"` branch 内 narrow union TypedDict 到 ClickArgs;
+真要 discriminated union 需把 Action 拆 5 个 dataclass + Literal type 字段, 跨多文件大重构,
+留 V0.17 (W6 reflect 阶段) 顺手做. 本版本 ActionArgs 5 个 TypedDict 仅作 schema 文档保留.
 LLM 返回 `args` 后, `thought` 已被 args.pop 弹出独立放 `Action.thought`, 故 ActionArgs 不含 thought.
 """
 
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import NotRequired, TypedDict
+from typing import Any, NotRequired, TypedDict
 
 
 class BBox(TypedDict):
@@ -79,5 +82,5 @@ class Action:
     """LLM 返回的下一步行动（5 种 type: click / type / scroll / extract / done）。"""
 
     type: str
-    args: ActionArgs
+    args: dict[str, Any]
     thought: str

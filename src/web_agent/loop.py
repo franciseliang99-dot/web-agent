@@ -7,6 +7,7 @@ import base64
 import json
 import logging
 import os
+import sqlite3
 import time
 import uuid
 from collections import deque
@@ -86,7 +87,7 @@ async def _handle_captcha(
     page: Page,
     step_i: int,
     trace: Trace,
-    conn,
+    conn: sqlite3.Connection,
     task_id: str,
     max_steps: int = 0,
     progress_cb: ProgressCallback | None = None,

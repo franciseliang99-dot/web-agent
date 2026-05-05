@@ -144,7 +144,7 @@ async def maybe_auto_dismiss(page: Page) -> list[str]:
         dismissed = await page.evaluate(_AUTO_DISMISS_JS)
         if dismissed:
             await page.wait_for_timeout(300)  # 等弹窗关闭动画
-        return dismissed
+        return cast(list[str], dismissed)
     except Exception as e:
         logger.warning("auto-dismiss failed: %r", e)
         return []
