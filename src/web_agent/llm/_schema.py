@@ -12,8 +12,9 @@ from __future__ import annotations
 import json
 from typing import Any
 
-from web_agent.perceiver import Mark, marks_to_text
+from web_agent.perceiver import marks_to_text
 from web_agent.trace import Trace
+from web_agent.types import Mark
 
 SYSTEM_PROMPT = """你是一个高度拟人的浏览器自动化 agent。每步给你当前页面的标注截图（每个可交互元素都有彩色边框 + 数字 ID）和元素清单，请按以下规则输出下一步操作：
 

@@ -5,23 +5,12 @@ from __future__ import annotations
 import base64
 import logging
 import os
-from dataclasses import dataclass
 
 from playwright.async_api import Page
 
+from web_agent.types import Mark  # V0.16.9 上提到 web_agent.types — re-export 保持旧 import 路径
+
 logger = logging.getLogger(__name__)
-
-
-@dataclass
-class Mark:
-    id: int
-    tag: str
-    role: str
-    text: str
-    bbox: dict  # {x, y, w, h}（相对页面坐标，含 scroll）
-    input_type: str = ""  # input.type（password/tel/text/email/...），仅 input 标签有
-    name: str = ""  # input.name 或 input.id（用于敏感字段名匹配 amount/cvv/...）
-    href: str = ""  # a.href（绝对 URL），仅 a 标签有
 
 
 _SOM_INJECT_JS = """

@@ -2,6 +2,28 @@
 
 All notable changes to web-agent. 版本号遵循 SemVer 简化形式（V<major>.<minor>.<patch>）。
 
+## [0.16.9] - 2026-05-04
+
+### Refactor (P1 解耦审计 — 依赖方向反向修复 + 文档同步)
+- **新增 `src/web_agent/types.py` 叶子 domain 模块**: `Mark` (从 `perceiver.py`) + `Action` (从 `llm/base.py`) 上提共享, 不 import 任何 `web_agent.*` 模块. 三处反向 import 修正:
+  - `safety.py:18-19`: `from web_agent.llm.base import Action` + `from web_agent.perceiver import Mark` → `from web_agent.types import Action, Mark` (domain 不再反向依赖 port + 业务)
+  - `llm/base.py:15`: `from web_agent.perceiver import Mark` → `from web_agent.types import Mark` (port 不再反向依赖业务)
+  - `perceiver.py` / `llm/base.py` 保留 re-export shim — 旧 `from web_agent.perceiver import Mark` / `from web_agent.llm.base import Action` 全部仍可用
+- **canonical import 迁移**: `actuator.py` / `loop.py` / `llm/anthropic.py` / `llm/openai.py` / `llm/_schema.py` 5 个 src/ 文件改用 `from web_agent.types import ...`; tests/ 26 文件保持旧路径不动 (验证 shim 工作 + 零 test churn)
+- **`docs/ARCHITECTURE.md` §2 stale 修正**: `llm/_protocol.py` → `llm/base.py` (V0.13.x 改名后未同步), §2 表加 `types.py` 行, 模块数 14 → 16 (含 `planner_hierarchy.py` 之前漏数), 依赖图加 "types.py 是最叶子 domain" 说明
+- **`README.md` 路线图**: V0.16.2 / V0.16.3 ⏳ → ✅ (V0.16.4 progress wire / V0.16.6 Resources 已 ship), 替换"工时估剩 1 人天"为 V0.16.0-V0.16.9 完成清单 + 后续可选项 (Elicitation / HTTP transport)
+- **bump**: pyproject.toml + `__init__.py` `0.16.8` → `0.16.9`
+
+### Why
+- CLAUDE.md「解耦优先」原则: domain 必须叶子, 不能反向依赖 port / 业务. V0.6.0 (W3-A safety) 引入 `safety.py` 时把 `Mark`/`Action` import 反向连了, 一直没修; V0.0.1 时 `llm/base.py` (port) 也同样反向引 `perceiver.Mark`
+- project-auditor subagent 6 维度审计 P1 标红: 3 处反向引用同根因 → `Mark`/`Action` 是共享 dataclass 但住在错的层
+- ARCHITECTURE.md §2 写 `_protocol.py`, 实际文件是 `base.py` (V0.13.x rename), 接手人按文档找会扑空
+- README 路线图 stale 4 个版本, 给读者错误的"进行中"信号
+
+### Compatibility
+- 公开 API 零破坏: `from web_agent.perceiver import Mark` / `from web_agent.llm.base import Action` / `from web_agent.llm import Action` 全部保留 (shim)
+- 235 passed + 2 skipped 与 V0.16.8 一致, 零 SQLite/pickle schema 改动 (Mark/Action 都不持久化, trace 表存 TEXT)
+
 ## [0.16.8] - 2026-05-04
 
 ### Docs (ARCHITECTURE.md §5 MCP server 章节 + 附录更新)

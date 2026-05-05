@@ -20,9 +20,8 @@ import os
 from openai import AsyncOpenAI
 
 from web_agent.llm._schema import SYSTEM_PROMPT, build_user_text, to_openai_tools
-from web_agent.llm.base import Action
-from web_agent.perceiver import Mark
 from web_agent.trace import Trace
+from web_agent.types import Action, Mark
 
 DEFAULT_MODEL = "gpt-5.5"  # 2026-04-24 release，vision-capable；用户可 override
 

@@ -21,7 +21,7 @@ from weakref import WeakKeyDictionary
 
 from playwright.async_api import Page
 
-from web_agent.perceiver import Mark
+from web_agent.types import Mark
 
 # 上次鼠标视口坐标（per-page，避免 W3 multi-tab 串扰）。Page 关闭后自动 GC。
 _last_mouse_pos: WeakKeyDictionary[Page, tuple[float, float]] = WeakKeyDictionary()

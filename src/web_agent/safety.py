@@ -6,7 +6,9 @@
 - 全开 — `WEB_AGENT_AUTO_APPROVE=*` (dev 用，生产慎)
 - 触发即 abort — loop 强制中止，不让 LLM 继续 retry/换策略（避免重撞）
 
-依赖方向（按 CLAUDE.md 解耦）：domain (Mark, Action) → safety.py (本文件，纯函数) ← loop.py (业务层调用)
+依赖方向（按 CLAUDE.md 解耦）：domain (web_agent.types: Mark, Action) ← safety.py (本文件，纯函数) ← loop.py (业务层调用)
+
+V0.16.9: 改从 `web_agent.types` import Mark/Action，消除 domain 反向依赖 port (llm.base) 和 业务层 (perceiver)。
 """
 
 from __future__ import annotations
@@ -15,8 +17,7 @@ import os
 import re
 from dataclasses import dataclass
 
-from web_agent.llm.base import Action
-from web_agent.perceiver import Mark
+from web_agent.types import Action, Mark
 
 
 @dataclass

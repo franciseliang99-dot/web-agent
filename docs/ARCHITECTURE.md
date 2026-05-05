@@ -55,16 +55,17 @@
 
 ## 2. 模块边界
 
-`src/web_agent/` 14 个模块，依赖方向严格 **domain ← ports ← 业务层 ← 组合根**：
+`src/web_agent/` 16 个模块，依赖方向严格 **domain ← ports ← 业务层 ← 组合根**：
 
 | 模块 | 职责（一句话） | 层级 |
 |---|---|---|
 | `__init__.py` | `__version__` 单常量 | domain |
+| `types.py` | 共享 dataclass：`Mark` (SoM 元素) + `Action` (LLM 决策)，叶子 | domain |
 | `trace.py` | `Step` / `Trace` dataclass + SQLite 持久化 | domain |
 | `safety.py` | W3-A 授权白名单（send/pay/delete/敏感字段拦截规则）| domain |
 | `memory.py` | W5-D 跨 session 长期记忆（domain ↔ past goals/results） | domain |
 | `llm/_schema.py` | SYSTEM_PROMPT + 5 个 tool schema + provider 适配函数 | port |
-| `llm/_protocol.py` | `LLMClient` Protocol（`plan()` 唯一抽象边界） | port |
+| `llm/base.py` | `LLMClient` Protocol（`plan()` 唯一抽象边界）；`Action` re-export shim | port |
 | `llm/anthropic.py` | Claude SDK 实现 + prompt caching | adapter |
 | `llm/openai.py` | OpenAI / Kimi / OpenRouter 兼容（base_url 嗅探） | adapter |
 | `browser.py` | `connect()` CDP 三元组 (browser/ctx/page) + `apply_stealth()` | adapter |
@@ -81,9 +82,10 @@
 
 ```
 cli.py ───┬──→ browser/perceiver/actuator/captcha/notify/safety/memory/planner_hierarchy
-          ├──→ loop.py ──→ llm._protocol.LLMClient (Protocol, 不导入具体实现)
+          ├──→ loop.py ──→ llm.base.LLMClient (Protocol, 不导入具体实现)
           └──→ llm.anthropic / llm.openai (具体类只在组合根实例化)
 
+types.py 是最叶子 domain (Mark + Action), 不 import 任何 web_agent.* 模块, 被 perceiver / safety / llm.base / loop 共享
 trace.py 只被业务层用; safety.py / memory.py / __init__.py 是叶子 domain
 llm/_schema.py 不导 SDK, 纯 dataclass + 函数, 让 anthropic / openai 各自适配
 ```

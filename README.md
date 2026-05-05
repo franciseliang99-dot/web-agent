@@ -95,13 +95,19 @@ uv run web-agent-memory wikipedia.org --db data/memory.db
 - W5-D.2 memory inject 到 planner 上下文 ✅ (V0.14.0)
 - W5-C 分层规划 ✅ (V0.15.0, prompt augmentation 路线; 真 plan-and-execute 留 W5-C.2)
 
-**进行中**:
-- **MCP server**: 暴露 web-agent 为 MCP server (Claude Desktop / 任意 MCP client 通过 tool 调用 `web_agent_run(goal, url)`)
-  - V0.16.0 ✅ 第 1 步硬前提: 25 处 print → logger.info(stderr), 业务零改动 220 tests 全过
-  - V0.16.1 ✅ `mcp_server.py` 用官方 `mcp[cli]>=1.10` SDK 暴露 3 tools + asyncio.Lock 串行化 + Chrome 9222 健康检查 + 10 case test
-  - V0.16.2 ⏳ progress_cb 真 wire 到 cli.run_task → loop 主循环 + captcha poll 心跳 + Resources (`resources://web_agent/replay/<id>` + `memory/<domain>` 只读视图)
-  - V0.16.3 ⏳ (可选) Elicitation 替代 WEB_AGENT_AUTO_APPROVE / HTTP transport
-  - 工时估剩 1 人天
+**MCP server** ✅ (V0.16.0 ~ V0.16.9 累计 10 commit, 已完整 ship):
+- 暴露 web-agent 为 MCP server (Claude Desktop / 任意 MCP client 通过 tool 调用 `web_agent_run(goal, url)`)
+- V0.16.0 ✅ 25 处 print → logger.info(stderr), 业务零改动 220 tests 全过
+- V0.16.1 ✅ `mcp_server.py` 用官方 `mcp[cli]>=1.10` SDK 暴露 3 tools + asyncio.Lock 串行化 + Chrome 9222 健康检查 + 10 case test
+- V0.16.4 ✅ progress_cb 真 wire mcp ctx → cli → loop 主循环 + captcha poll 心跳
+- V0.16.6 ✅ Resources (`webagent://replay/<id>` HTML + `webagent://memory/<domain>` JSON 只读视图)
+- V0.16.7 ✅ V0.16.6 Resources `/simplify` pass
+- V0.16.8 ✅ ARCHITECTURE.md §5 MCP server 6 小节完整文档化
+- V0.16.9 ✅ P1 解耦: `Mark`/`Action` 上提到 `web_agent.types`, 消除 safety/llm.base 反向依赖
+
+**后续可选** (不阻塞主流程):
+- Elicitation 替代 `WEB_AGENT_AUTO_APPROVE` (人在回路批准)
+- HTTP transport (替代 stdio, 便于远程 MCP client)
 
 跑 MCP server (Claude Desktop config 加 entry):
 ```json

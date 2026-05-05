@@ -23,11 +23,12 @@ logger = logging.getLogger(__name__)
 
 from web_agent.actuator import human_like_click, human_like_type, scroll, think
 from web_agent.captcha import detect as captcha_detect
-from web_agent.llm import Action, LLMClient
+from web_agent.llm import LLMClient
 from web_agent.notify import notify
-from web_agent.perceiver import Mark, perceive
+from web_agent.perceiver import perceive
 from web_agent.safety import check as safety_check
 from web_agent.trace import Step, Trace, end_task, init_db, start_task, write_step
+from web_agent.types import Action, Mark
 
 
 def _find_mark(marks: list[Mark], mark_id: int) -> Mark | None:

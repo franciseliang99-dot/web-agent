@@ -1,28 +1,20 @@
-"""LLMClient Protocol + Action — 跨 provider 的 plan() 接口（domain 层 / ports）。
+"""LLMClient Protocol — 跨 provider 的 plan() 接口（ports 层）。
 
 依赖方向（按用户 CLAUDE.md「解耦优先」）：
-    domain (perceiver.Mark, trace.Trace) ← ports (本文件) ← 业务层 (loop.py) ← 组合根 (cli.py)
+    domain (web_agent.types: Mark, Action; trace.Trace) ← ports (本文件) ← 业务层 (loop.py) ← 组合根 (cli.py)
 
 各 provider 的具体 client（anthropic.py / openai.py / ...）实现本 Protocol，
 仅在 llm/__init__.py 的 make_client factory 里实例化，外部代码只依赖 LLMClient 类型。
+
+V0.16.9: `Action` 上提到 `web_agent.types` 共享 domain 模块；本文件保留 re-export 兼容旧 import 路径。
 """
 
 from __future__ import annotations
 
-from dataclasses import dataclass
 from typing import Protocol, runtime_checkable
 
-from web_agent.perceiver import Mark
 from web_agent.trace import Trace
-
-
-@dataclass
-class Action:
-    """LLM 返回的下一步行动（5 种 type: click / type / scroll / extract / done）。"""
-
-    type: str
-    args: dict
-    thought: str
+from web_agent.types import Action, Mark  # Action re-export shim — 旧 `from web_agent.llm.base import Action` 仍可用
 
 
 @runtime_checkable

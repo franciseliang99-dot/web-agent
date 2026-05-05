@@ -10,9 +10,8 @@ import os
 from anthropic import AsyncAnthropic
 
 from web_agent.llm._schema import SYSTEM_PROMPT, build_user_text, to_anthropic_tools
-from web_agent.llm.base import Action
-from web_agent.perceiver import Mark
 from web_agent.trace import Trace
+from web_agent.types import Action, Mark
 
 DEFAULT_MODEL = "claude-sonnet-4-6"
 
