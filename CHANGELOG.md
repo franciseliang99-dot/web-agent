@@ -2,6 +2,27 @@
 
 All notable changes to web-agent. 版本号遵循 SemVer 简化形式（V<major>.<minor>.<patch>）。
 
+## [0.16.13] - 2026-05-04
+
+### Add (mypy strict 阶段 3 — CI gate + 文档同步)
+- **`.github/workflows/ci.yml`** (新建, 38 行): GitHub Actions push + PR 触发 3 层 release gate:
+  1. `uv run ruff check src/ tests/` (V0.16.10 起 0 errors)
+  2. `uv run mypy src/web_agent` (V0.16.12 起 strict 0 errors)
+  3. `uv run pytest -q` (235 passed + 2 skipped)
+  - matrix 单点 ubuntu-latest + py3.12; uv 自带 cache; `uv sync --all-extras` 装 openai 让 mypy 看全 LLM provider 类型 (anthropic + openai 都覆盖)
+- **`docs/ARCHITECTURE.md` 附录 B 硬约束** 升级: "测试 235 全绿是 release gate" → "三层 release gate (ruff + mypy strict + pytest), GitHub Actions push + PR 自动跑"; 加本地一并跑命令样例
+- **`README.md` 当前状态行** 升级: "48+ commits, 235 tests passing" → "51+ commits, 235 tests passing, 3 层 release gate (ruff 0 + mypy strict 0 + pytest 235 全绿), GitHub Actions CI 自动跑"; 加 V0.16.9-V0.16.13 五连发摘要 (P1 解耦 + ruff 0 + TypedDict + mypy strict + CI gate)
+- **bump**: pyproject.toml + `__init__.py` `0.16.12` → `0.16.13`
+
+### Why
+- V0.16.12 mypy strict 通过后无 CI 闸 = 任何后续 commit 都可能引入 type 回归 (drift). CI 闸是把"235 全绿"的隐性约定变成机制化保障
+- 不加 pre-commit hook (`.pre-commit-config.yaml`): 侵入用户本地 git workflow, 不强加; CI 闸足够拦回归. 用户想要本地快速 fail-fast 可手动加
+- `uv sync --all-extras`: 不装 openai 时 mypy 找不到 stub 报 import-not-found (V0.16.12 实测过), CI 必须装 extra 让 mypy 看全
+
+### Compatibility
+- 235 passed + 2 skipped 与 V0.16.12 一致, 公开 API / 行为零破坏
+- 无运行时变化, 仅新增 CI 配置 + 文档
+
 ## [0.16.12] - 2026-05-04
 
 ### Fix (mypy strict 阶段 2 — 47 errors → 0, 全 src/ 编译期类型一致)

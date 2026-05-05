@@ -6,7 +6,7 @@ MultiOn 风格的「高度模仿人操作网页」AI web agent。
 
 ## 当前状态
 
-V0.16.8 (2026-05-04) — 48+ commits, 235 tests passing + 2 smoke skips. **MCP server 完整能力 + 文档化**: 3 tools + 2 resources + progress 真接通 + asyncio.Lock 串行 + 9222 健康检查; ARCHITECTURE.md §5 MCP server 6 小节 (tools/resources 切分 / progress 三轨 / 锁 / 健康检查 / SystemExit 转译 / stdout 不污染)
+V0.16.13 (2026-05-04) — 51+ commits, 235 tests passing + 2 smoke skips, **3 层 release gate (ruff 0 + mypy strict 0 + pytest 235 全绿)**, GitHub Actions CI 自动跑. **MCP server 完整能力 + 文档化**: 3 tools + 2 resources + progress 真接通 + asyncio.Lock 串行 + 9222 健康检查; ARCHITECTURE.md §5 MCP server 6 小节 (tools/resources 切分 / progress 三轨 / 锁 / 健康检查 / SystemExit 转译 / stdout 不污染). V0.16.9-V0.16.13 五连发: P1 解耦 + ruff 0 + TypedDict + mypy strict + CI gate
 
 **W milestone 进度**:
 - W1 ✅ Wikipedia 搜词条 + 提取首段 (骨架 + 多 LLM 支持)

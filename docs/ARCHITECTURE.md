@@ -264,7 +264,11 @@ stdio transport 模式下 stdout 是 JSON-RPC 通道，**任何 `print()` 污染
 
 ## 附录 B：尚未在文档中体现的硬约束
 
-- 测试 235 全绿是 release gate（V0.16.7：220 主 + 15 mcp + 2 smoke skip）；任何 commit pre-commit hook 要走 ruff + pytest
+- **三层 release gate** (V0.16.13 GitHub Actions `.github/workflows/ci.yml` push + PR 触发):
+  - `uv run ruff check src/ tests/` → 0 errors（V0.16.10 起 17 → 0）
+  - `uv run mypy src/web_agent` → 0 errors / strict mode（V0.16.12 起 47 → 0）
+  - `uv run pytest -q` → 235 passed + 2 skipped（V0.16.7：220 主 + 15 mcp + 2 smoke skip）
+- 任何上 main 的 commit 三关都要绿；本地可 `uv sync --all-extras && uv run ruff check src/ tests/ && uv run mypy src/web_agent && uv run pytest -q` 一并跑
 - `data/*.db` / `data/screenshots/` / `data/replays/` 全 gitignored（存私密 trace + 截图）
 - `.env` / API key / 真实邮箱地址永远不进 commit
 - 拟人 actuator 默认开启（`scripts/start_chrome.sh` 配 xvfb 才完整生效），CI/headless 默认退化但保留 API
