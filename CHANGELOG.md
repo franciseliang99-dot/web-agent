@@ -2,6 +2,39 @@
 
 All notable changes to web-agent. 版本号遵循 SemVer 简化形式（V<major>.<minor>.<patch>）。
 
+## [0.16.17] - 2026-05-04
+
+### Verify (W3-C Gmail compose 真账号 E2E 实测通过)
+- **用户本地端到端验收完成**: 9222 Chrome (登录态持久化在 `~/.config/web-agent-chrome` user-data-dir) → `WEB_AGENT_TEST_RECIPIENT=franciseliang99@gmail.com` + `WEB_AGENT_AUTO_APPROVE='*'` → `uv run python demos/gmail_compose.py` → LLM 完整 ReAct loop (perceive Gmail UI → click Compose → 填 To/Subject/Body → click Send) → safety.check() 拦 send-or-pay 规则 → AUTO_APPROVE 全开放行 → actuator 真点 Send → **邮件真发到 inbox 收到**
+- 完整链路验证: W3-A (safety 拦截) + W3-B (read-only 不在本次跑但 compose 流程需要 perceive) + W3-C (compose 写操作)
+- **Audit gap 6/6 后又一收尾**: V0.12.0~V0.15.1 落了 6 个模块单测, V0.16.17 落了 W3-C 真账号 E2E (区别: 单测 mock 所有 IO, E2E 跑真 Chrome + 真 LLM + 真 Gmail + 真发邮件)
+- README L129 已知缺口删 "Gmail 真账号端到端验收" + L14 W3 行加 "V0.16.17 真账号 E2E 实测通过" 注脚
+- bump: pyproject.toml + `__init__.py` `0.16.16` → `0.16.17`
+
+### Why
+- V0.7.0 W3-C 落地以来, Gmail compose demo 代码完整但**从没有真账号验收过** — 一直是已知缺口. 用户 V0.16.17 亲自跑通 = 项目从此可宣称"W3-C 真在用户端工作 (不是只 mock 测过)"
+- 跑法 cookbook 写到 ARCHITECTURE / README 后, 任何接手人/未来 W6 阶段需要重测时直接复制粘贴, 不用重新调研
+- 与 V0.16.14 patchright spike + V0.16.15 curl_cffi 落档 + V0.16.16 W5-C.2 DEFER 同模式: 把"模糊待办"转化为"已验证 / 永久 NO-GO / DEFER+触发条件"明确决断
+
+### 跑法记录 (用户验收路径)
+```bash
+# 终端 A (首登 Gmail 仅一次, 后续 user-data-dir 持久化)
+CHROME_MODE=headed bash scripts/start_chrome.sh https://mail.google.com/
+# 在弹出窗口里手登 Gmail
+
+# 终端 A 切回 (后续随便走 auto/xvfb/headless)
+bash scripts/start_chrome.sh
+
+# 终端 B (核心)
+WEB_AGENT_TEST_RECIPIENT=franciseliang99@gmail.com WEB_AGENT_AUTO_APPROVE='*' uv run python demos/gmail_compose.py
+
+# 验证: 刷 inbox 看新邮件 "web-agent W3-C test 2026-05-04T..."
+```
+
+### Compatibility
+- 235 passed + 2 skipped 与 V0.16.16 一致, 仅 markdown 文档改动
+- 公开 API / 代码 / sh 全零改动
+
 ## [0.16.16] - 2026-05-04
 
 ### Doc (W5-C.2 真 plan-and-execute DEFER 落档 + 触发条件明确)
