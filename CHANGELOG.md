@@ -2,6 +2,59 @@
 
 All notable changes to web-agent. 版本号遵循 SemVer 简化形式（V<major>.<minor>.<patch>）。
 
+## [0.16.30] - 2026-05-05
+
+### Add (博客 2 publish 到 dev.to + V0.16.27 双向对照 verify + README Featured Blogs 升级)
+
+V0.16.29 ship 博客 2 draft 后, 用户决定 publish 到 dev.to. 本版 = web-agent dogfooding 第 2 次 (这次直接 Publish 不是 Save Draft) + V0.16.27 双向对照 verify 落档.
+
+#### 博客 2 已 publish (web-agent dogfooding 第 2 次)
+- **dev.to URL**: https://dev.to/francise_liang_e4544eadb9/why-i-permanently-no-god-patchright-after-a-spike-and-the-anti-detection-decision-tree-3m11
+- **跑法**: `WEB_AGENT_AUTO_APPROVE='*' uv run web-agent "..." --url https://dev.to/new --max-steps 30 --max-wallclock-s 600`
+- **执行轨迹**: 9 step / 总用时 3.4 min (203s)
+  - step 0-1: click [7] 标题 + type "Why I Permanently NO-GO'd Patchright After a Spike (And the Anti-Detection Decision Tree)"
+  - step 2-4: click [9] tags + type "ai, llm, webagent, playwright" + 选 dropdown [16] (中段多 1 step)
+  - step 5-6: click [31] body + 一次性 type 整段 markdown
+  - step 7: **click [33] Publish** (LLM 主动按 goal 反向约束 click Publish 不是 Save Draft)
+  - step 8: extract 确认 "Edit/Manage/Stats 按钮 + 无 Unpublished Post pink banner" → 已 publish
+  - step 9: done `PUBLISHED:patchright NO-GO 已公开发布`
+- **关键证据**: LLM thought "Publish 按钮对应元素编号 33，位于 Save Draft 左边，颜色更深更突出" — **主动按 goal 约束 click Publish**
+
+#### V0.16.27 + V0.16.30 双向对照 verify (web-agent safety controlled by env)
+
+V0.16.27 (Save Draft, 主动避开 Publish) + V0.16.30 (Publish, 主动 click Publish) 形成双向对照, 证明 web-agent 的 W3-A safety 是 **controlled by env (auto_approve) + goal 约束**, 不是 hardcoded:
+
+| 版本 | env | goal 约束 | LLM 行为 |
+|---|---|---|---|
+| V0.16.27 | `AUTO_APPROVE='*'` | "click Save Draft 不是 Publish" | 主动避开 [Publish], click [Save Draft] |
+| V0.16.30 | `AUTO_APPROVE='*'` | "click Publish 不是 Save Draft" | 主动按 goal click [Publish] |
+
+#### Real-account E2E 累积 (4 次全成功, 覆盖 send/draft/publish 3 类敏感动作)
+
+| 版本 | 平台 | 任务 | 步数 | 用时 | LLM 行为 |
+|---|---|---|---|---|---|
+| V0.16.17 | Gmail | compose + send | ~10 | ~3 min | safety auto_approve='send-or-pay' 放行 Send |
+| V0.16.27 中文版 | dev.to | save draft | 9 | 2.5 min | 主动避开 Publish, click Save Draft |
+| V0.16.27 英文版 | dev.to | save draft | 9 | 3.4 min | 同上 |
+| V0.16.30 | dev.to | **publish (公开)** | 9 | 3.4 min | **主动 click Publish (按 goal 反向约束)** |
+
+#### README Featured Blogs 升级 (1 → 2 篇)
+- **`README.md`** 把 "Featured Blog" 单数改 "Featured Blogs" 复数, 加博客 2 链接 + 7 min read estimate + V0.16.30 dogfooding tag
+- 双向引流: GitHub 访客 → dev.to 文章 1/2 互推 (减少 bounce)
+
+### Why
+- 博客 2 publish (vs V0.16.29 仅 ship draft) = 知名度 α 路径下的内容资产 ship, 不算分发 (dev.to feed 自然推送 + GitHub topics 长尾, 不需要 HN/Reddit 主动投放)
+- web-agent dogfooding 第 2 次 (直接 publish) **完整 safety 双向证据** — 比 V0.16.27 单向 (仅 Save Draft) 更强, 是项目最强的真账号 E2E demo
+
+### 不包含 (用户做)
+- **修博客 1 dev.to 加 cross-link 到博客 2**: 互引流, 用户手动 1 分钟 OR web-agent dogfooding 第 3 次 (edit existing article 流程未验证, 6-10 step web-agent task)
+- **GitHub Release v0.16.30**: 用户手动 OR 等下次 milestone
+
+### Compatibility
+- 主代码零改动, 行为 100% 与 V0.16.29 一致
+- 255 passed + 2 skipped, ruff 0, mypy strict 0
+- bump: pyproject.toml + `__init__.py` `0.16.29` → `0.16.30`
+
 ## [0.16.29] - 2026-05-05
 
 ### Add (第 2 篇博客 ship: patchright NO-GO + 反检测决策树故事)

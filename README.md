@@ -7,11 +7,13 @@
 [![mypy strict](https://img.shields.io/badge/mypy-strict_0_errors-blue.svg)](pyproject.toml)
 [![CHANGELOG](https://img.shields.io/badge/CHANGELOG-V0.16.28-orange.svg)](CHANGELOG.md)
 
-## 📝 Featured Blog
+## 📝 Featured Blogs
 
-**[50% Compliance, Not 0%: How a Logging Spike Almost Triggered the Wrong Architecture Rewrite](https://dev.to/francise_liang_e4544eadb9/50-compliance-not-0-how-a-logging-spike-almost-triggered-the-wrong-architecture-rewrite-1lna)** — dev.to · 8 min read
+1. **[50% Compliance, Not 0%: How a Logging Spike Almost Triggered the Wrong Architecture Rewrite](https://dev.to/francise_liang_e4544eadb9/50-compliance-not-0-how-a-logging-spike-almost-triggered-the-wrong-architecture-rewrite-1lna)** — dev.to · 8 min read
+   W5-C.2 spike 7 版本闭环: 测量层 regex 假阴性差点引发错误架构重写, 真账号 dev.to dogfooding 实测 (V0.16.27).
 
-W5-C.2 spike 7 版本闭环故事: 测量层 regex 假阴性差点引发错误架构重写, 真账号 dev.to dogfooding 实测 (V0.16.27).
+2. **[Why I Permanently NO-GO'd Patchright After a Spike (And the Anti-Detection Decision Tree)](https://dev.to/francise_liang_e4544eadb9/why-i-permanently-no-god-patchright-after-a-spike-and-the-anti-detection-decision-tree-3m11)** — dev.to · 7 min read
+   反检测决策树: V0.16.14 patchright spike NO-GO + V0.16.15 curl_cffi NO-GO + 住宅代理 GO 完整决策路径, web-agent 第 2 次 dogfooding 直接 publish (V0.16.30).
 
 ---
 
