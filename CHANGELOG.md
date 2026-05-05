@@ -2,6 +2,48 @@
 
 All notable changes to web-agent. 版本号遵循 SemVer 简化形式（V<major>.<minor>.<patch>）。
 
+## [0.16.23] - 2026-05-05
+
+### Add (开源准备: LICENSE + README 大改 + pyproject.toml 元数据)
+
+V0.16.0-22 的工程闭环 (W1-W5 + MCP server + 反检测决策树 + W5-C.2 spike 7 版本闭环) 已成熟到可推动开源知名度. 本版 = repo 元数据补齐 + README 故事化重写, 不动主代码.
+
+- **`LICENSE` 新建 (MIT)**: copyright 2026 francise. MIT 选定理由: 个人项目最低门槛 + 鼓励 fork + AS IS 完全免责; 不选 Apache (专利条款个人项目过度) / GPL/AGPL (劝退社区贡献者)
+- **`README.md` 大改 (前 31 行重写, L43-67 上手流程改 V0.16.19+ 1 步, 第二段插"项目特色" + "4 种集成方式" 表)**:
+  - **顶部 5 个 badges**: License: MIT / Python 3.12+ / tests 255 / mypy strict 0 / CHANGELOG V0.16.23
+  - **Elevator pitch 1 段**: "MultiOn 风格的高度拟人 Web Agent — Python + Playwright + VLM/SoM + stealth, BYO LLM. 接管你已登录的 Chrome..."
+  - **"项目特色" 段** (新): 决策驱动 spike 闭环 (patchright/curl_cffi/W5-C.2 三个落档故事) / 可观测 / 三层 release gate / MCP server
+  - **"4 种集成方式" 表** (新): MCP stdio / CLI / Python import / demos
+  - **stale 段修复**: L9 V0.16.13 → V0.16.23, L43-67 终端 A/B 双终端流程 → V0.16.19+ auto-spawn 1 步, L276 测试数 219 → 255, L281 ARCHITECTURE V0.15.2 → V0.16.22
+- **`pyproject.toml` `[project]` 加元数据**:
+  - `license = "MIT"` + `license-files = ["LICENSE"]` (PyPI 兼容)
+  - `keywords` (9 个): web-agent / playwright / browser-automation / mcp / claude / anthropic / set-of-mark / stealth / multion (GitHub 搜索 + PyPI 分类用)
+  - `classifiers` (9 个): Development Status 4 - Beta / Intended Audience Developers / Linux + macOS / Python 3.12 / Internet HTTP Browsers / Libraries Python Modules / Typing Typed
+
+### Why
+- V0.16.0-22 工程闭环 (W1-W5 / MCP server / 反检测决策树 / W5-C.2 spike) 已经做到 production-ready, 知名度路径自然下一步
+- web-agent 领域 (browser-use 30k stars / Skyvern 12k / Stagehand 8k) 全部开源, 个人项目闭源**没有先例**
+- 5 个 badges + "项目特色" 段让 GitHub 访客 5 秒内 grok 项目卖点, 不必读 ARCHITECTURE 全文
+- LICENSE 选 MIT: 个人项目最低门槛 + 鼓励 fork + AS IS 免责 (滥用法律责任在 fork 者)
+- README stale 段 (V0.16.13 状态行 + 终端 A/B 上手流程) 长期与 .env.example / ARCHITECTURE / pyproject.toml 不一致, 第一次推 GitHub trending 前必须修
+
+### 不包含 (留下一步)
+- **GitHub repo metadata** (topics / description / homepage): 用户跑 `gh repo edit --add-topic ...` 命令配置, 不进 commit
+- **博客发布**: V0.16.23 commit 仅含 LICENSE + README + pyproject 元数据. 第一篇博客 (W5-C.2 spike 7 版本闭环 / 反检测决策树二选一) 大纲在 commit 后单独给
+
+### 不会暴露的 (开源安全)
+- `.env` (gitignore, ANTHROPIC_API_KEY 等真 key)
+- `~/.config/web-agent-chrome/` (本地 Chrome user-data-dir, Gmail/GitHub 真账号 cookies)
+- `~/.cache/web-agent/spike-w5c2/` (跑批个人数据)
+- `data/trace.db` / `data/memory.db` / `data/screenshots/` / `data/replays/` (gitignore)
+
+会公开的代码 + 决策方法论 (ARCHITECTURE 各种 NO-GO/DEFER) **本身是资产** — 展示 spike 决断能力, 是个人品牌而非"泄露技术细节".
+
+### Compatibility
+- 255 passed + 2 skipped, ruff 0, mypy strict 0 (元数据改动不影响测试)
+- 主代码零改动, 行为 100% 与 V0.16.22 一致
+- bump: pyproject.toml + `__init__.py` `0.16.22` → `0.16.23`
+
 ## [0.16.22] - 2026-05-05
 
 ### Add (W5-C.2 spike regex 第三轮校准 + reaggregate 工具 + **真 verdict: 维持 DEFER**)
