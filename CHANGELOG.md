@@ -2,6 +2,24 @@
 
 All notable changes to web-agent. 版本号遵循 SemVer 简化形式（V<major>.<minor>.<patch>）。
 
+## [0.16.10] - 2026-05-04
+
+### Fix (P2 ruff lint 收尾 — 17 errors → 0)
+- **E402 (13 个 → 0)**: `src/web_agent/loop.py:22` + `src/web_agent/cli.py:15` 的 `logger = logging.getLogger(__name__)` 误置于 stdlib import 与 project import 之间，致 ruff 把 `from web_agent.* import ...` 标 "module-level import not at top". 修复: logger 赋值下移至所有 import 之后. loop.py 顺手把 `ProgressCallback` 类型别名也下移到 import 段之后, 让 import 段纯净. 模块顶层无 logger 调用 (loop.py logger.* 全在 line 107+, cli.py 全在 line 61+), 行为零变更
+- **F401 (4 个 → 0)**: `uv run ruff check --fix tests/` 自动修, diff 校验真未使用:
+  - `tests/test_browser.py:10`: 删 `MagicMock` (body 只用 `AsyncMock`)
+  - `tests/test_cli.py:15`: 删 `from web_agent import cli` (monkeypatch 走 `"web_agent.cli.xxx"` 字符串路径不依赖此绑定)
+  - `tests/test_memory.py:5,7`: 删 `sqlite3` + `pathlib.Path` (后者 `tmp_path` fixture 已是 pytest 提供的 Path 对象)
+- **bump**: pyproject.toml + `__init__.py` `0.16.9` → `0.16.10`
+
+### Why
+- V0.16.9 P1 解耦审计后剩 P2 ruff 红点 17 个; 干净化 release gate 后续才能上 ruff CI 闸 (V0.17 可选 pre-commit hook)
+- E402 根因 V0.6.x 引入 logger 时位置选错, 一直没修; 本次顺路收
+
+### Compatibility
+- 235 passed + 2 skipped 与 V0.16.9 一致, 公开 API / 行为零破坏
+- `uv run ruff check src/ tests/` → "All checks passed!"
+
 ## [0.16.9] - 2026-05-04
 
 ### Refactor (P1 解耦审计 — 依赖方向反向修复 + 文档同步)

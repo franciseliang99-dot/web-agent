@@ -12,8 +12,6 @@ from pathlib import Path
 from dotenv import load_dotenv
 from playwright.async_api import async_playwright
 
-logger = logging.getLogger(__name__)
-
 from web_agent.browser import apply_stealth, connect
 from web_agent.llm import make_client
 from web_agent.loop import ProgressCallback, run_react_loop
@@ -30,6 +28,8 @@ from web_agent.planner_hierarchy import (
     merge_into_memories,
     should_decompose,
 )
+
+logger = logging.getLogger(__name__)
 
 
 async def run_task(

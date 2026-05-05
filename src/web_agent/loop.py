@@ -15,12 +15,6 @@ from typing import Awaitable, Callable
 
 from playwright.async_api import Page
 
-# V0.16.1 progress callback: (step_i, max_steps, message=None) → 注 mcp ctx.report_progress
-# 形参可选, 不传则 loop 行为 100% 同 V0.16.0; 传则主循环每步 + captcha poll 心跳触发
-ProgressCallback = Callable[[int, int, str | None], Awaitable[None]]
-
-logger = logging.getLogger(__name__)
-
 from web_agent.actuator import human_like_click, human_like_type, scroll, think
 from web_agent.captcha import detect as captcha_detect
 from web_agent.llm import LLMClient
@@ -29,6 +23,12 @@ from web_agent.perceiver import perceive
 from web_agent.safety import check as safety_check
 from web_agent.trace import Step, Trace, end_task, init_db, start_task, write_step
 from web_agent.types import Action, Mark
+
+# V0.16.1 progress callback: (step_i, max_steps, message=None) → 注 mcp ctx.report_progress
+# 形参可选, 不传则 loop 行为 100% 同 V0.16.0; 传则主循环每步 + captcha poll 心跳触发
+ProgressCallback = Callable[[int, int, str | None], Awaitable[None]]
+
+logger = logging.getLogger(__name__)
 
 
 def _find_mark(marks: list[Mark], mark_id: int) -> Mark | None:

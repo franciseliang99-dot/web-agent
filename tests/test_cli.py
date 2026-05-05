@@ -12,7 +12,6 @@ from unittest.mock import AsyncMock
 
 import pytest
 
-from web_agent import cli
 from web_agent.cli import main, run_task
 
 
