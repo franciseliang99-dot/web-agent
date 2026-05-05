@@ -16,12 +16,13 @@ from __future__ import annotations
 
 import json
 import os
+from typing import cast
 
 from openai import AsyncOpenAI
 
 from web_agent.llm._schema import SYSTEM_PROMPT, build_user_text, to_openai_tools
 from web_agent.trace import Trace
-from web_agent.types import Action, Mark
+from web_agent.types import Action, ActionArgs, Mark
 
 DEFAULT_MODEL = "gpt-5.5"  # 2026-04-24 release，vision-capable；用户可 override
 
@@ -102,4 +103,4 @@ class OpenAIClient:
         call = msg.tool_calls[0]
         args = json.loads(call.function.arguments)
         thought = args.pop("thought", "")
-        return Action(type=call.function.name, args=args, thought=thought)
+        return Action(type=call.function.name, args=cast(ActionArgs, args), thought=thought)

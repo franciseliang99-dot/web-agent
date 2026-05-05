@@ -5,10 +5,11 @@ from __future__ import annotations
 import base64
 import logging
 import os
+from typing import cast
 
 from playwright.async_api import Page
 
-from web_agent.types import Mark  # V0.16.9 上提到 web_agent.types — re-export 保持旧 import 路径
+from web_agent.types import BBox, Mark  # V0.16.9 上提到 web_agent.types — re-export 保持旧 import 路径
 
 logger = logging.getLogger(__name__)
 
@@ -163,7 +164,8 @@ async def perceive(page: Page) -> tuple[list[Mark], str]:
     raw = await page.evaluate(_SOM_INJECT_JS, {"shadow": shadow_on})
     marks = [
         Mark(
-            id=m["id"], tag=m["tag"], role=m["role"], text=m["text"], bbox=m["bbox"],
+            id=m["id"], tag=m["tag"], role=m["role"], text=m["text"],
+            bbox=cast(BBox, m["bbox"]),  # JS evaluate 返回 dict[str, Any]; SoM JS 保证 x/y/w/h float
             input_type=m.get("input_type", ""), name=m.get("name", ""), href=m.get("href", ""),
         )
         for m in raw

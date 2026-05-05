@@ -6,12 +6,13 @@
 from __future__ import annotations
 
 import os
+from typing import cast
 
 from anthropic import AsyncAnthropic
 
 from web_agent.llm._schema import SYSTEM_PROMPT, build_user_text, to_anthropic_tools
 from web_agent.trace import Trace
-from web_agent.types import Action, Mark
+from web_agent.types import Action, ActionArgs, Mark
 
 DEFAULT_MODEL = "claude-sonnet-4-6"
 
@@ -78,6 +79,6 @@ class AnthropicClient:
             if block.type == "tool_use":
                 args = dict(block.input)
                 thought = args.pop("thought", "")
-                return Action(type=block.name, args=args, thought=thought)
+                return Action(type=block.name, args=cast(ActionArgs, args), thought=thought)
 
         raise RuntimeError(f"Anthropic 没返回 tool_use: {resp.content!r}")

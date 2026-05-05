@@ -2,6 +2,30 @@
 
 All notable changes to web-agent. 版本号遵循 SemVer 简化形式（V<major>.<minor>.<patch>）。
 
+## [0.16.11] - 2026-05-04
+
+### Refactor (mypy strict 准备 — 阶段 1: TypedDict 化 dict 字段, V0.16.12 加配置)
+- **`Mark.bbox: dict` → `BBox` TypedDict** (`types.py`): 4 个 float key (x/y/w/h) — perceiver JS evaluate 注入返回 `DOMRect.left/top/width/height` 是 float, 与 `actuator.py:52-57` 4 处算子用法 (`mark.bbox["x"] + mark.bbox["w"] / 2`) 完全对齐. `perceiver.py:166` 加 `cast(BBox, m["bbox"])` (page.evaluate 返回 dict[str, Any])
+- **`Action.args: dict` → `ActionArgs` Union TypedDict** (`types.py`): 5 个 action type 的 args schema 各自精确化:
+  - `ClickArgs`: `{mark_id: int}`
+  - `TypeArgs`: `{text: str, submit: NotRequired[bool]}` (OpenAI strict mode 强制 required, 中性 schema 是 optional)
+  - `ScrollArgs`: `{dy: int}`
+  - `ExtractArgs`: `{query: str, answer: str}`
+  - `DoneArgs`: `{result: str}`
+  - `thought` 已被 `args.pop("thought")` 弹到独立 `Action.thought` 字段, 故 ActionArgs 不含 thought
+- **构造点 cast** (`llm/anthropic.py:81` + `llm/openai.py:105`): SDK 返回 `dict[str, Any]` → `cast(ActionArgs, args)` 显式类型边界. 运行时 noop, mypy 编译期才生效
+- **运行时零变更**: TypedDict 在 runtime 就是 dict, `loop.py` 5 个 branch 的 `action.args.get("xxx")` 全部兼容; `actuator.py` 4 处 `mark.bbox["x"]` 兼容
+- **bump**: pyproject.toml + `__init__.py` `0.16.10` → `0.16.11`
+
+### Why
+- V0.16.12 要开 mypy strict, `dict` 字段在 strict 下零精度 — 不知道 `bbox["pos"]` 是不是合法 key, 不知道 `args["mark_id"]` 是 int 还是 str. TypedDict 化是 strict 闭环硬前提
+- 5 个 action type 的 args 形状已稳定 (V0.0.x 设计至今未变, schema 锁在 `_schema.py:34`), Union TypedDict 最贴合实际语义而非 generic dataclass
+- LLM SDK 回 args 是 `dict[str, Any]` (Anthropic block.input + OpenAI json.loads), 必须 cast 才能进 TypedDict 类型边界
+
+### Compatibility
+- 235 passed + 2 skipped 与 V0.16.10 一致, 公开 API / 行为零破坏
+- 公开 import: `from web_agent.types import BBox, ActionArgs, ClickArgs, TypeArgs, ScrollArgs, ExtractArgs, DoneArgs` 全新增, Mark/Action 签名向后兼容 (字段类型收紧但运行时 dict 兼容)
+
 ## [0.16.10] - 2026-05-04
 
 ### Fix (P2 ruff lint 收尾 — 17 errors → 0)
