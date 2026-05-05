@@ -2,6 +2,82 @@
 
 All notable changes to web-agent. 版本号遵循 SemVer 简化形式（V<major>.<minor>.<patch>）。
 
+## [0.16.31] - 2026-05-05
+
+### Spike (web-agent edit existing article 能力边界 NO-GO + V0.17+ actuator TODO)
+
+V0.16.30 dogfooding 第 3 次目标: 用 web-agent edit 博客 1 dev.to 文章在末尾追加 cross-link 到博客 2. 跑 7 step 后 LOOP_DETECTED anti-loop 硬 abort. **明确暴露 web-agent 能力边界 — actuator 缺 keyboard shortcut / paste / textarea range API**.
+
+#### 执行轨迹 (FAIL but LOOP_DETECTED 起作用 = 正面信号)
+- step 0: click [13] Edit ✓ 进入编辑模式
+- step 1: click [31] body textarea ✓ 聚焦
+- step 2-6: 反复 click [31] 试定位光标到末尾, **失败** — actuator 无 keyboard shortcut (Ctrl+End) / 无 paste / 无 textarea range API
+- step 7: V0.5.0 anti-loop (3 次同 action) 硬 abort, 防 LLM 盲目 type 全文覆盖原文 → **保护用户数据完整性**
+
+LLM thought 自述 "工具限制（无键盘快捷键如 Ctrl+End），我需要尝试另一种策略" — **意识到能力边界**, 但 anti-loop 触发前没机会提议 fail-safe 路径 (虽然 goal 明确说"无法定位末尾→ done FAILED")
+
+#### web-agent 能力边界 spike 数据 (V0.16.27 vs V0.16.30 vs V0.16.31)
+
+| 任务 | 能力 | spike 版本 | 步数 | 结果 |
+|---|---|---|---|---|
+| Create new article (form fill) | ✅ 可行 | V0.16.27 中文版 | 9 | SAVED |
+| Create new article (form fill) | ✅ 可行 | V0.16.27 英文版 | 9 | SAVED |
+| Create new article + Publish | ✅ 可行 | V0.16.30 | 9 | PUBLISHED |
+| **Edit existing article (append textarea)** | **❌ NO-GO 当前架构** | V0.16.31 | 7 (anti-loop abort) | LOOP_DETECTED |
+
+#### 根因
+web-agent actuator 5 actions (click / type / scroll / extract / done) 不含:
+- `keyboard_shortcut` (Ctrl+End / Ctrl+A / Ctrl+V) — 跳到 textarea 末尾的标准方法
+- `paste` (page.evaluate('navigator.clipboard.writeText') + Ctrl+V) — 绕过拟人键入直接灌内容
+- `textarea_set_value` (page.evaluate(... .value = newContent)) — 直接 DOM API 设值
+
+#### V0.17+ TODO
+若未来要支持"edit existing article" 类任务, 需扩 actuator API:
+- 加 `keyboard_shortcut` action: `args={"key": "End", "modifiers": ["Control"]}`, actuator 调 `page.keyboard.press("Control+End")`
+- 加 `paste` action: `args={"text": "..."}`, actuator 调 `page.evaluate(navigator.clipboard.writeText)` + `page.keyboard.press("Control+v")` 或直接 textarea.value setter
+- safety: paste 走 W3-A 规则集, type 与 paste 等价对待 (敏感字段名匹配)
+- 工时估 ~6-10h (含 5 actions → 7 actions 扩 + tests + LLM tool schema 加描述)
+
+#### 触发条件 (V0.17+ 何时立项)
+1. 用户反馈 ≥3 个真实任务因 actuator 缺 keyboard shortcut 失败 (V0.16.31 是第 1 个, 还差 2 个)
+2. 反检测层升级需 paste-from-clipboard 模拟人行为 (相比拟人键入更像真人复制)
+3. spike 证 paste action 比拟人键入快 ≥3× 且不触发反检测 (反检测优势)
+
+不到立项触发不实施 — V0.17 优先做 Action discriminated union 重构 (V0.16.12 标的技术债).
+
+#### 用户走 A 路径修博客 1 cross-link (1 分钟手动)
+1. 打开 https://dev.to/francise_liang_e4544eadb9/50-compliance-not-0-how-a-logging-spike-almost-triggered-the-wrong-architecture-rewrite-1lna
+2. 点 Edit
+3. 在末尾 (在 "Repost requires source attribution" 段之前) 加:
+   ```
+   ---
+
+   **Related**: [Why I Permanently NO-GO'd Patchright After a Spike (And the Anti-Detection Decision Tree)](https://dev.to/francise_liang_e4544eadb9/why-i-permanently-no-god-patchright-after-a-spike-and-the-anti-detection-decision-tree-3m11) — V0.16.14 spike + decision tree story.
+   ```
+4. Save (会自动更新已 published 文章)
+
+### Why
+- **dogfooding 失败也是有价值的 spike 数据** — 证明 web-agent 不是"什么都能跑"的魔术工具, 有明确能力边界 (actuator 5 actions). 落档边界比假装能跑更负责
+- LOOP_DETECTED anti-loop **保护用户数据完整性** = 项目 V0.5.0 设计意图被实证: LLM 可能盲目 retry, anti-loop 是必须的 safety net
+- 能力边界 + 触发条件 + V0.17+ TODO 落档, 后人接手不会以为这是 bug 或反复尝试
+
+### Real-account E2E 累积更新 (含 V0.16.31 spike fail)
+
+| 版本 | 平台 | 任务 | 结果 |
+|---|---|---|---|
+| V0.16.17 | Gmail | compose + send | ✅ SUCCESS |
+| V0.16.27 中文 | dev.to | save draft (避开 Publish) | ✅ SUCCESS |
+| V0.16.27 英文 | dev.to | save draft (避开 Publish) | ✅ SUCCESS |
+| V0.16.30 | dev.to | publish (主动 click Publish) | ✅ SUCCESS |
+| **V0.16.31** | **dev.to** | **edit existing append** | **❌ LOOP_DETECTED (能力边界)** |
+
+4/5 = 80% 真账号 E2E 成功率, 失败的 1 个**根因明确 + V0.17+ 有修复路径**, 不是设计 bug.
+
+### Compatibility
+- 主代码零改动 (只 CHANGELOG + bump), 行为 100% 与 V0.16.30 一致
+- 255 passed + 2 skipped, ruff 0, mypy strict 0
+- bump: pyproject.toml + `__init__.py` `0.16.30` → `0.16.31`
+
 ## [0.16.30] - 2026-05-05
 
 ### Add (博客 2 publish 到 dev.to + V0.16.27 双向对照 verify + README Featured Blogs 升级)
