@@ -20,13 +20,19 @@ from web_agent.trace import Step, Trace
 
 
 def test_M1_chinese_subgoal_marker_hits():
-    """中文 subgoal 标记词 (子目标 / 步骤 N / 第 N 步 / 序号前缀) 命中."""
+    """中文 subgoal 标记词 (子目标 / 步骤 N / 第 N 步 / 序号前缀) 命中.
+
+    V0.16.21: 加中文序数 case (第一步/第二步/第三步) — V0.16.20 漏判 task 04 实际样本.
+    """
     cases = [
         "目前在子目标 2",
         "执行步骤 3 的搜索动作",
         "已完成第 1 步, 进入第 2 步",
         "1. 搜索 2. 筛选 3. 点击",
         "① 输入 ② 提交",
+        "第一步: 搜索 Python",  # V0.16.21: 中文序数
+        "第二步要求点击 Guido 链接",  # V0.16.21
+        "第三步是提取 Nationality",  # V0.16.21
     ]
     for thought in cases:
         assert _SPIKE_M1_RE.search(thought), f"M1 should match: {thought!r}"
@@ -58,13 +64,18 @@ def test_M1_no_marker_no_match():
 
 
 def test_M2_plan_referenced_chinese():
-    """中文 plan 引用 (目前/当前在第 N 步, 按计划) 命中."""
+    """中文 plan 引用 (目前/当前在第 N 步, 按计划) 命中.
+
+    V0.16.21: 中文序数 case (第一/第二) + 现在 prefix.
+    """
     cases = [
         "目前在第 2 步",
         "当前在步骤 3 的执行阶段",
         "现在在 subgoal 2",
         "按计划应该先点击搜索框",
         "根据上面拆出的 4 个 subgoal, 先做第一个",
+        "目前在第一步, 还差 3 个 subgoal",  # V0.16.21: 中文序数
+        "当前进行到第二阶段",  # V0.16.21
     ]
     for thought in cases:
         assert _SPIKE_M2_RE.search(thought), f"M2 should match: {thought!r}"

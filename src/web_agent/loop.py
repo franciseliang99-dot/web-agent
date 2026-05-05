@@ -83,13 +83,16 @@ def _maybe_inject_reflect_hint(trace: Trace, recent_pages: deque[str], fp: str) 
 # V0.16.20 W5-C.2 logging spike: 量化 LLM 是否在 thought 拆 subgoal (ARCHITECTURE §1.5 触发条件 ③).
 # 仅在 env WEB_AGENT_SPIKE_W5C2=1 时激活, noop overhead 极小.
 _SPIKE_M1_RE = re.compile(
-    r"子目标|步骤\s*\d|第\s*\d\s*步|"
+    r"子目标|步骤\s*\d|"
+    r"第\s*[一二三四五六七八九十0-9]+\s*步|"  # V0.16.21: 中文/阿拉伯序数 (第一步/第2步)
     r"(?:^|[^\w])(?:1\.|2\.|3\.|①|②|③|④|⑤)|"
     r"\b(?:first|then|next|finally|step\s*\d)\b",
     re.IGNORECASE,
 )
 _SPIKE_M2_RE = re.compile(
-    r"(?:目前|当前|现在)在\s*(?:第|subgoal|步骤)|按计划|根据(?:上面|前面)拆|"
+    r"(?:目前|当前|现在)(?:在|进行到|进入到?)\s*"  # V0.16.21: 进行到/进入也算 plan reference
+    r"(?:第\s*[一二三四五六七八九十0-9]+|subgoal|步骤)|"  # V0.16.21: 中文序数
+    r"按计划|根据(?:上面|前面)拆|"
     r"\bcurrently\s+(?:on|at)\s+(?:subgoal|step)|"
     r"\baccording\s+to\s+(?:the\s+)?plan|\bas\s+planned",
     re.IGNORECASE,

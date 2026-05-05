@@ -2,6 +2,47 @@
 
 All notable changes to web-agent. 版本号遵循 SemVer 简化形式（V<major>.<minor>.<patch>）。
 
+## [0.16.21] - 2026-05-05
+
+### Fix (V0.16.20 W5-C.2 spike 跑批 4 根因修复 — 重跑前置, 数据可信度审核后)
+
+V0.16.20 跑出 stdout 显示 compliance=0% / success=45% / decompose subset n=2, 看似落 "compliance<30% ∧ success<50% → 触发条件 ③ 候选" (跑 plan-and-execute 对照 spike, 工时 ~3h). **但 4 个根因检查后数据不可信**, 直接触发 ③ 风险高 (修复重跑后 compliance 可能升至 30%+ 导致决策反转, 那 3h 对照 spike 浪费). V0.16.21 = 修复 4 根因 + 重跑前置.
+
+#### 4 根因 + 修复
+
+1. **Chrome 9 任务后 GPU SwiftShader 死锁** (Plan subagent 诊断: duckduckgo paint pipeline hang, GPU 进程累 53min CPU, CDP 共享 GPU 进程导致 close+reconnect 无效, 必须 kill 进程级重启). label 14-20 (7 任务) 全 SCRIPT_ERROR Timeout 30000ms, jsonl 0 字节, **实际有效样本只剩 13/20**
+   - **`scripts/run_w5c2_spike.py` 加 `_kill_chrome_and_respawn()` helper**: pkill -9 + sleep 2s + ensure_chrome_running 重 spawn. 总 ~3-5s overhead per call
+   - **L1 防御 (retry)**: SCRIPT_ERROR Timeout 后 kill+respawn + retry 1 次
+   - **L3 防御 (周期重启)**: 每 KILL_EVERY=5 任务主动 kill+respawn, env `WEB_AGENT_SPIKE_KILL_EVERY` 可调
+   - 跑批 overhead 增量: 4 次 respawn × ~3s ≈ 15s
+2. **设计字数估错**: 4 个长任务 (label 15/16/18/20) 实际 166-189 字 < 200 阈值 → augmentation 路线只对 2 个任务注入 hint (04/17, 17 还挂了) → 真实 augmentation 测试 **n=1**
+   - **`scripts/run_w5c2_spike.py` 4 任务 goal 拼到 ≥220 字** (15: 180→317; 16: 166→340; 18: 172→475; 20: 189→369)
+   - 全 6 个长任务 (04/15/16/17/18/20) 现 should_decompose=True 验证通过
+3. **`_judge()` false success bug**: V0.16.20 task 04 result=`LOOP_DETECTED 在 step 16` 但 expect 'Dutch' 命中中途 extract answer → success=True (任务实际 abort)
+   - **`_judge()` 加 FAILURE_MARKERS 短路**: 任务异常退出 (LOOP_DETECTED / WALLCLOCK / LLM_FAILED / SAFETY_BLOCK / SCRIPT_ERROR / max_steps) 直接 False, 反指标 expect_safety_block 仍正向判 SAFETY_BLOCK 命中
+4. **M1/M2 regex 假阴性**: task 04 step 0/2 thought 用"第一步/第二步/第三步" (subagent spot check 证), 是合法 subgoal 标记但 M1 漏判 (M1 原 regex `第\s*\d\s*步` 只匹配阿拉伯数字, 漏中文序数)
+   - **`src/web_agent/loop.py` _SPIKE_M1_RE 拓宽**: `第\s*\d\s*步` → `第\s*[一二三四五六七八九十0-9]+\s*步` (中文/阿拉伯通吃)
+   - **`src/web_agent/loop.py` _SPIKE_M2_RE 拓宽**: `(?:目前|当前|现在)在\s*(?:第|subgoal|步骤)` → `(?:目前|当前|现在)(?:在|进行到|进入到?)\s*(?:第\s*[一二三四五六七八九十0-9]+|subgoal|步骤)` (加 进行到/进入 + 中文序数)
+   - **`tests/test_loop_spike_w5c2.py` 加 5 个 case**: M1 中文序数 (第一步/第二步/第三步) + M2 (目前在第一步/当前进行到第二阶段)
+
+#### V0.16.20 数据 read between the lines (V0.16.21 回看)
+- M5=0% 是**真信号** (subagent 抽样确认 task 04 step 3-16 在 Wikipedia stuck 14 步反复找不存在的 'Nationality' 字段, 从未换策略). 即使 regex 校准也不会变.
+- compliance=0% 是 **regex 假阴性 + n=1 微样本组合**, 不能直接信 (修复后预期 task 04 thought 改判 M1=True, M3 升至 ≥1/N)
+
+### Why (重跑而非接受弱数据)
+- α (接受 V0.16.20 数据触发条件 ③) 风险: 若修复重跑后 compliance 升至 30%+, 决策反转维持 DEFER, 那触发条件 ③ 立项的 plan-and-execute 对照 spike (~3h) 是浪费
+- β (修后重跑) 投入 ~2h vs α 浪费风险 → ROI 明显更优
+- γ (维持 DEFER 不修) 是认输, 4 根因都是明确可修 bug, 没必要
+
+### 不包含 (留 V0.16.22)
+- **重跑数据**: 用户后台跑 ~80 min × 1 round (Anthropic) + 4 次 Chrome respawn ≈ 82 min, 数据 + verdict 落档 V0.16.22
+- **plan-and-execute 对照 spike**: 仅在 V0.16.22 数据落 "compliance<30% ∧ success<50%" 才触发, +3h Anthropic-only MVP
+
+### Compatibility
+- 255 passed + 2 skipped (10 spike test function, 加 5 个 case 在现有 function 内, count 不变), ruff 0, mypy strict 0
+- 默认 spike noop 主 path 100% 与 V0.16.20 一致, env 开关 `WEB_AGENT_SPIKE_W5C2=1` 激活
+- bump: pyproject.toml + `__init__.py` `0.16.20` → `0.16.21`
+
 ## [0.16.20] - 2026-05-05
 
 ### Add (W5-C.2 logging spike instrumentation: 量化 prompt augmentation 是否真在 thought 拆 subgoal)
