@@ -1,6 +1,6 @@
 # 我差点重写整个规划层 — 一个 regex 假阴性的故事
 
-*W5-C.2 spike 闭环 · 2026-05 · 阅读约 8 分钟 · [中文 / English](#) · 作者: [@franciseliang99-dot](https://github.com/franciseliang99-dot)*
+*W5-C.2 spike 闭环 · 2026-05 · 阅读约 8 分钟 · 中文 / [English](2026-05-w5c2-spike-story-final-en.md) · 作者: [@franciseliang99-dot](https://github.com/franciseliang99-dot)*
 
 ![hero](assets/hero.jpg)
 

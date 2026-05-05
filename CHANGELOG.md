@@ -2,6 +2,54 @@
 
 All notable changes to web-agent. 版本号遵循 SemVer 简化形式（V<major>.<minor>.<patch>）。
 
+## [0.16.27] - 2026-05-05
+
+### Add (英文版博客 + dev.to 草稿真账号 E2E verify dogfooding)
+
+V0.16.26 ship 中文 final 后, 用户测试 web-agent dogfooding 发 dev.to 草稿成功, 但反馈 "希望英文版" (dev.to 主流英文社区受众). V0.16.27 = 翻译英文 final + 落档 dev.to 真账号 E2E verify (V0.16.17 W3-C Gmail 同模式的姊妹 verify).
+
+#### 英文版博客 ship
+- **`docs/blog-drafts/2026-05-w5c2-spike-story-final-en.md` 新建** (~250 行翻译): 标题选 HN-friendly "50% Compliance, Not 0%: How a Logging Spike Almost Triggered the Wrong Architecture Rewrite" + 完整 7 段对照中文 final + 共享 hero.jpg + 共享 mermaid quadrantChart/timeline (mermaid 标签英化)
+- **中文 final 顶部链接更新**: `[中文 / English](#)` → `中文 / [English](2026-05-w5c2-spike-story-final-en.md)` (双向跳转)
+
+#### dev.to 草稿真账号 E2E verify (V0.16.17 W3-C 姊妹)
+- **实测**: V0.16.27 用 web-agent 自己 dogfooding 发布短版到 dev.to 草稿成功
+- **跑法**: `WEB_AGENT_AUTO_APPROVE='*' uv run web-agent "..." --url https://dev.to/new --max-steps 30 --max-wallclock-s 600`
+- **执行轨迹**: 9 step / 总用时 2.5 min (vs 拟人键入估 16 min, 快 6×)
+  - step 0-1: click [7] 标题 textarea + type 标题
+  - step 2-3: click [9] tags input + type 4 个 tags
+  - step 4-5: click [30/31] body textarea + **一次性** type 整段 markdown (~500 字)
+  - step 6: click [35] **Save Draft** (LLM 主动避开 [34] Publish, 按 goal 约束执行)
+  - step 7: extract 确认 "Unpublished Post" pink banner
+  - step 8: done `SAVED:已保存为草稿`
+- **关键证据**: LLM thought 自述 "需要点击 Save Draft 按钮 (mark_id=35) 来保存草稿，而不是 Publish 按钮 (mark_id=34)" — 主动避开危险按钮
+- **dogfooding 故事点**: "用 web-agent 自己发布关于 web-agent 的博客" 完整证据链 + 真账号 E2E 实测通过 (V0.16.17 Gmail 之后第二个真账号 E2E)
+
+#### 前置 spike (web-agent 看 dev.to 编辑器 SoM 标注能力 verify)
+- **跑法**: `uv run web-agent "...截图列出 fields..." --url https://dev.to/new`
+- **结果**: 27 marks 全标到, 含 [7] 标题 / [9] tags / [23] body / [24] Publish / [25] Save Draft 等关键 fields, 满足 W3-C 安全约束 (主动 click [25] 不 [24])
+
+### Why
+- 用户中文母语但 dev.to/HN 主流英文受众, 中文版 dev.to 触达低. 翻译英文版补全两渠道
+- W3-C V0.16.17 真账号 E2E (Gmail compose) 之后, dev.to 草稿是第二个真账号 E2E — 证明 web-agent 在**主流 SaaS 平台 (Gmail, dev.to)** 都能 dogfooding
+- web-agent 9 step 2.5 min 真发草稿 = 故事最强证据 ("用 web-agent 自动写博客发到 dev.to")
+
+### 不包含 (待用户做)
+- **Publish (公开发布)**: V0.16.27 仅 ship 草稿. 用户 dev.to web 端审改 + 点 Publish 公开
+- **知乎手动发**: V0.16.26 推荐路径不变 — markdown 复制到知乎编辑器 + mermaid 截 GitHub render 上传 + hero.jpg 上传
+- **更长版 dogfooding**: 用户审完后如果觉得短版 ROI 高, 不必发完整 7 章版到 dev.to (markdown 5KB 拟人键入 16 min 不实用)
+
+### Real-account E2E verify 累积
+| 版本 | 平台 | 任务 | 步数 | 用时 | 主动避开危险按钮 |
+|---|---|---|---|---|---|
+| V0.16.17 | Gmail compose | 写邮件 + 发送 | ~10 | ~3 min | ✓ (safety auto_approve 放行 Send) |
+| V0.16.27 | dev.to publish | 写草稿 + 保存 | 9 | 2.5 min | ✓ (LLM 主动 click Save Draft 避开 Publish) |
+
+### Compatibility
+- 主代码零改动, 行为 100% 与 V0.16.26 一致
+- 255 passed + 2 skipped, ruff 0, mypy strict 0
+- bump: pyproject.toml + `__init__.py` `0.16.26` → `0.16.27`
+
 ## [0.16.26] - 2026-05-05
 
 ### Add (博客 final 版本: 删 draft markers + 强化 CTA + rename `-final.md`)
