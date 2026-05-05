@@ -29,11 +29,34 @@
 
 ### 1.3 反检测：patchright-python vs playwright-stealth 2.0.3
 
-**选择**：先用 `playwright-stealth` 2.0.3，patchright 升级路径留 README "已知缺口"。
+**选择**：`playwright-stealth` 2.0.3 — V0.16.14 spike 实测后**永久关闭** patchright 升级路径（在 connect_over_cdp 接管模式下）。
 
-否决理由：
-- **patchright-python (2026 SOTA)**：要求 `launch_persistent_context` + patchright 自己魔改的 Chromium，放弃 `connect_over_cdp` ⇒ 与决策 1.1 冲突，丢失用户已登录 profile。除非真的撞 Cloudflare 撞硬，否则不值得。
-- **playwright-stealth 2.0.3 (选定)**：保留 CDP 接管，反检测虽弱于 patchright，但配合 xvfb headed 模式跑普通站够用。`browser.apply_stealth(page)` 多版本 API fallback (apply_stealth_async / apply_async / 全吞 ImportError)，不阻塞主路径。
+#### V0.16.14 spike 实测数据（worktree 隔离, sannysoft.com 35+ 项指纹检测）
+
+| ID | 配置 | PASS / 计分 | FAIL |
+|---|---|---|---|
+| A | vanilla playwright + 裸接管 | 19 / 32 (~59%) | 4 |
+| B | vanilla + apply_stealth (当前) | 21 / 32 (~66%, 扣 WebGL 双坑实际 23/32 ~72%) | 2 (WebGL Vendor/Renderer, 环境问题非反爬) |
+| C | patchright + 裸接管 | 19 / 32 (~59%) | 4 |
+
+**A == C 完全相同**：patchright 在 `connect_over_cdp` 9222 模式下的 client patch 被旁路。
+
+#### 根因（subagent 分析）
+
+- patchright 的核心 patch 大部分在 **launch 阶段**：改 launch flags、改 driver bin、抑制 `Runtime.enable` CDP 探针
+- web-agent 接管的是用户**已启动**的 Chrome（`scripts/start_chrome.sh`），launch 阶段全部旁路
+- sannysoft 的 35 项检测全在 **JS 注入层**（`navigator.*` / WebGL / canvas / `chrome.runtime`）；patchright 改的是 **CDP 协议层** — sannysoft 根本看不到
+
+**B 比 A 多的 2 项 PASS**（HEADCHR_UA + CHR_MEMORY）正是 stealth 真正在防的 head-chr 探测；patchright 没补这层 JS 注入。
+
+#### 否决理由
+
+- **patchright-python**：要求 `launch_persistent_context` + 它自己魔改的 Chromium 才能让 launch flags / Runtime.enable patch 生效，放弃 `connect_over_cdp` ⇒ 与决策 1.1 冲突，丢失用户已登录 profile（项目核心架构）。即便如此，spike 已证伪它在接管模式下无任何观察到的增量。除非未来转向 `launch_persistent_context` 路径（W6 重大架构变更），否则**永久 NO-GO**。
+- **playwright-stealth 2.0.3 (选定)**：保留 CDP 接管，反检测在 sannysoft 上实测 ~72% 通过率（扣环境 WebGL 后），配合 V0.16.14 GL flags + xvfb headed 模式跑普通站够用。`browser.apply_stealth(page)` 多版本 API fallback (apply_stealth_async / apply_async / 全吞 ImportError)，不阻塞主路径。
+
+#### V0.16.14 副产物：WebGL SwiftShader flags
+
+spike 暴露 sannysoft 上 B 的 2 个 FAIL 全是 `WebGL Vendor/Renderer = "Canvas has no webgl context"` — Xvfb 无 GPU 导致 SwiftShader 没启。修法：`scripts/start_chrome.sh` ARGS 加 `--use-gl=angle --use-angle=swiftshader --enable-unsafe-swiftshader`，headless 模式删 deprecated 的 `--disable-gpu`。预期 B 跳到 23/32 (~72%) 且 FAIL=0。
 
 ### 1.4 数据持久化：单库 trace.db vs 分库 trace.db + memory.db
 

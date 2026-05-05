@@ -51,6 +51,12 @@ ARGS=(
   --no-first-run
   --no-default-browser-check
   --disable-features=PrivacySandboxSettings4
+  # V0.16.14 GL flags: Xvfb / headless 无 GPU 时启 SwiftShader 软件渲染
+  # 不加这 3 个 → sannysoft "WebGL Vendor/Renderer" 直接 FAIL（Canvas has no webgl context）
+  # → 反爬站点用 WebGL fingerprint 过滤 bot 时直接命中
+  --use-gl=angle
+  --use-angle=swiftshader
+  --enable-unsafe-swiftshader
 )
 
 echo "Chrome:        ${CHROME_BIN}"
@@ -70,7 +76,9 @@ case "$MODE" in
     exec xvfb-run -a -s "-screen 0 1920x1080x24" "${CHROME_BIN}" "${ARGS[@]}" "$@"
     ;;
   headless)
-    exec "${CHROME_BIN}" --headless=new --disable-gpu "${ARGS[@]}" "$@"
+    # V0.16.14: 删 --disable-gpu, 让 ARGS 里的 SwiftShader GL flags 接管软件渲染.
+    # --headless=new + SwiftShader 是 Chrome 109+ 官方推荐组合, --disable-gpu 已 deprecated.
+    exec "${CHROME_BIN}" --headless=new "${ARGS[@]}" "$@"
     ;;
   headed)
     if [[ -z "${DISPLAY:-}" ]]; then

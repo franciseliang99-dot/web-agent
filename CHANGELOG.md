@@ -2,6 +2,30 @@
 
 All notable changes to web-agent. 版本号遵循 SemVer 简化形式（V<major>.<minor>.<patch>）。
 
+## [0.16.14] - 2026-05-04
+
+### Fix (P0 WebGL SwiftShader flags + patchright spike NO-GO 落档)
+- **`scripts/start_chrome.sh` ARGS 加 3 个 GL flag**: `--use-gl=angle --use-angle=swiftshader --enable-unsafe-swiftshader` — Xvfb / headless 无 GPU 时启 SwiftShader 软件渲染. 不加时 sannysoft "WebGL Vendor/Renderer" 直接 FAIL ("Canvas has no webgl context"), 反爬站点用 WebGL fingerprint 过滤直接命中
+- **headless 模式删 `--disable-gpu`**: Chrome 109+ 该 flag 已 deprecated, `--headless=new` + SwiftShader 是官方推荐组合; 留着会与新 GL flags 矛盾
+- 实测预期: sannysoft B (vanilla+stealth) 21/32 → 23/32 (~72%), FAIL 从 2 (WebGL 双坑) 降到 0
+
+### Doc (patchright NO-GO 永久落档)
+- **`docs/ARCHITECTURE.md` §1.3 升级**: 从"基于理论冲突的否决" 升为"V0.16.14 spike 实测验证的永久 NO-GO". 加测试矩阵 (A=C 19/32 / B 21/32) + 根因分析 (patchright 的 patch 在 launch 阶段, connect_over_cdp 接管已启动 Chrome 全部旁路; sannysoft 测 JS 注入层不测 CDP 协议层, 选错靶子). 副产物 WebGL flags 修法也写入
+- **`README.md` L126 已知缺口**: 删 patchright 决断悬念条目, 替换为 NO-GO 摘要 + ARCHITECTURE §1.3 引用
+- **`README.md` 反检测层段** (L238-242): patchright 升级路径标 ~~strikethrough~~ + 引用 spike 数据, 突出"上住宅代理 + curl_cffi TLS" 才是真正下一层防御
+
+### Spike 工程
+- worktree 隔离: `../web-agent-spike-patchright` (branch `spike/patchright`), main 完全不动. 装 patchright 1.59.1 仅在 worktree venv. spike 完成后清理 (`git worktree remove` + `git branch -D`). spike 脚本 (`demos/spike_patchright.py` + `scripts/run_spike.sh`) **不进 main** — 一次性证伪用途, 留 git history 可查; 进 main 给后续读者制造"这是产品代码？"歧义
+
+### Why
+- V0.16.13 后 P3 patchright 决断仍开. 用户选 spike A 路线 (worktree 30min 实测) 后, sannysoft 数据三组矩阵立即出 NO-GO 信号 (A=C 完全相同 → patchright client patch 旁路). 副产物发现 B 的 2 个 FAIL 全是 Xvfb 无 GPU 环境问题不是反爬问题, 一行 GL flags 修
+- patchright NO-GO 不是"patchright 全无用", 是"connect_over_cdp 接管模式下不工作". scope 限定 + 永久落档比悬而未决的"未实测"更负责
+
+### Compatibility
+- 235 passed + 2 skipped 与 V0.16.13 一致, 公开 API / Python 代码零改动
+- 仅 `scripts/start_chrome.sh` + 3 个 doc 改动 + bump
+- bump: pyproject.toml + `__init__.py` `0.16.13` → `0.16.14`
+
 ## [0.16.13] - 2026-05-04
 
 ### Add (mypy strict 阶段 3 — CI gate + 文档同步)
