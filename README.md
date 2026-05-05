@@ -93,7 +93,7 @@ uv run web-agent-memory wikipedia.org --db data/memory.db
 - W5-B Shadow DOM 穿透 ✅ (V0.12.0)
 - W5-D 长期记忆 cross-session episodic ✅ (V0.13.0 持久化 + CLI dump)
 - W5-D.2 memory inject 到 planner 上下文 ✅ (V0.14.0)
-- W5-C 分层规划 ✅ (V0.15.0, prompt augmentation 路线; 真 plan-and-execute 留 W5-C.2)
+- W5-C 分层规划 ✅ (V0.15.0, prompt augmentation 路线; 真 plan-and-execute = W5-C.2 **永久 DEFER**, V0.16.16 落档 — SDK 阻碍未解 (OpenAI/Kimi vision 不能零截图调用) + ROI 未量化, 触发条件 3 选 1: ① 用户反馈 augmentation 失败案例 ② OpenAI/Kimi 支持零 image vision ③ spike 证 plan-and-execute 失败率低 >20%, 详见 ARCHITECTURE §1.5)
 
 **MCP server** ✅ (V0.16.0 ~ V0.16.9 累计 10 commit, 已完整 ship):
 - 暴露 web-agent 为 MCP server (Claude Desktop / 任意 MCP client 通过 tool 调用 `web_agent_run(goal, url)`)

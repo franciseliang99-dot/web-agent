@@ -90,11 +90,40 @@ curl_cffi（[lexiforest/curl_cffi](https://github.com/lexiforest/curl_cffi)，pa
 
 ### 1.5 W5-C 分层规划：plan-and-execute LLM call vs prompt augmentation
 
-**选择**：prompt augmentation（V0.15.0）。
+**选择**：prompt augmentation（V0.15.0）。W5-C.2 真 plan-and-execute **永久 DEFER**（V0.16.16 落档）。
 
 否决理由：
 - **plan-and-execute (subagent 原方案)**：第一步真调 LLM `plan()` 拿 subgoal 列表再执行；但这要求构造一次"无截图"的 LLM 调用 (`screenshot_b64=""`)，在 Anthropic / OpenAI / Kimi 三个 SDK 上的 vision-content-can-be-empty 兼容性都没验证过，撞坑成本未知。
 - **prompt augmentation (选定)**：不调 LLM，只在第一次 plan 前注入一段固定字符串 hint："如果任务复杂，请在 thought 里把任务拆 3-6 个 subgoal 再执行"，让 LLM 自己用 `thought` 字段拆。零 token 浪费、零 SDK 风险、零 Protocol 改动。代价：拆 subgoal 是 nudge 不是约束，效果可能弱于真 plan-and-execute；但 ROI/风险比明显更好。
+
+#### V0.16.16 W5-C.2 DEFER 决策（subagent 调研后落档）
+
+V0.16.x 重新评估真 plan-and-execute 的 ROI，结论 **DEFER 直到三个触发条件之一满足**。
+
+**SDK 兼容性现状**（V0.16.15，subagent 实测 SDK 文档）：
+
+| Provider | 零截图 plan() 可行 | 原因 |
+|---|---|---|
+| Anthropic | ✅ | `messages.create()` vision content block 是 optional |
+| OpenAI | ❌ | vision model（gpt-4o）必须 ≥1 image，text-only 要换模型混用 |
+| Kimi | ❌ | OpenAI 兼容端点同上限制 |
+
+**三 provider 中两个不可行**——这是 V0.15.0 当时担心的 SDK 兼容性问题，V0.16.x 仍然成立。
+
+**真做的成本**（subagent 估）：~27h（Protocol 扩 + Anthropic 实现 + OpenAI/Kimi fallback 设计 + loop 2 阶段重构 + 30-40 case 测试 + cassette 重录）。Anthropic-only MVP 限定方案 ~16h，但与"BYO LLM"项目卖点冲突。
+
+**触发条件**（任一满足才立项 W5-C.2）：
+
+1. 用户反馈多个"prompt augmentation 没拆 task 导致失败"的真实案例（数据驱动证伪当前路线）
+2. OpenAI/Kimi vision model 官方支持零 image 调用（如 `allow_empty_images=true` 参数）→ 三 provider 一致可行
+3. 前置 spike 数据证明真 plan-and-execute 失败率比 augmentation **低 >20%**
+
+**最低成本前置 spike**（1-2h，不立项）：在 `loop.py` 加 logging 记录"LLM 是否在 thought 里实际拆了 subgoal"，跑 20 个复杂任务统计比例——给 W5-C.2 ROI 一个数据底座。当前 prompt augmentation 在 W1-W3 实战中是否真不够用，**无 A/B 证据**——可能 soft nudge 已经够。
+
+**与 patchright NO-GO / curl_cffi NO-GO 的差异**：
+- patchright NO-GO = 架构冲突（与 connect_over_cdp 接管模式不兼容）
+- curl_cffi NO-GO = 路径不需要（Chrome 已是真 BoringSSL）
+- W5-C.2 DEFER = ROI 未量化 + SDK 阻碍未消除（不是永久 NO-GO，是"等条件成熟"）
 
 ---
 

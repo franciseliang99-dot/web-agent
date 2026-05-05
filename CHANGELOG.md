@@ -2,6 +2,26 @@
 
 All notable changes to web-agent. 版本号遵循 SemVer 简化形式（V<major>.<minor>.<patch>）。
 
+## [0.16.16] - 2026-05-04
+
+### Doc (W5-C.2 真 plan-and-execute DEFER 落档 + 触发条件明确)
+- **`docs/ARCHITECTURE.md` §1.5 加 V0.16.16 DEFER 决策段**:
+  - SDK 兼容性现状表 (subagent 实测 SDK 文档): Anthropic ✅ / OpenAI ❌ / Kimi ❌ — vision model 必须 ≥1 image, V0.15.0 担心的问题 V0.16.x 仍然成立
+  - 真做成本估算: ~27h (Protocol 扩 + Anthropic 实现 + OpenAI/Kimi fallback + loop 2 阶段重构 + 30-40 case 测试). Anthropic-only MVP ~16h 但与"BYO LLM"卖点冲突
+  - 三个触发条件 (任一满足立项): ① 用户反馈 augmentation 失败案例 ② OpenAI/Kimi 支持零 image vision ③ spike 证 plan-and-execute 失败率低 >20%
+  - 最低成本前置 spike (1-2h, 不立项): loop.py 加 logging 跑 20 任务量化"LLM 是否真拆 subgoal"
+  - 与 patchright/curl_cffi NO-GO 的差异: DEFER ≠ NO-GO, 是"等条件成熟"而非永久关闭
+- **`README.md` L96 路线图**: W5-C.2 状态从"留 W5-C.2"升为"**永久 DEFER**, V0.16.16 落档 + 3 选 1 触发条件 + ARCHITECTURE 引用"
+
+### Why
+- V0.16.15 反检测决策树闭环后, 用户继续问 W5-C.2 是什么. Explore subagent 调研后给出: SDK 阻碍未消除 + ROI 未量化 + Anthropic-only 与项目卖点冲突 → DEFER 比 立项 / 永久 NO-GO 都更准确
+- DEFER 比"留 W5-C.2"待办更负责: 写明 SDK 现状 + 工时 + 触发条件, 后人接手不用重新调研
+- 与反检测层决策 (patchright/curl_cffi NO-GO + 住宅代理 Defer to CF 命中) 同模式: 把"模糊待办"转化为"明确决断 + 立项条件"
+
+### Compatibility
+- 235 passed + 2 skipped 与 V0.16.15 一致, 仅 markdown 文档改动
+- bump: pyproject.toml + `__init__.py` `0.16.15` → `0.16.16`
+
 ## [0.16.15] - 2026-05-04
 
 ### Doc (curl_cffi TLS 指纹永久 NO-GO 落档 + 住宅代理路径明确)
