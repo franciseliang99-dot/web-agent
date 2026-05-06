@@ -7,13 +7,16 @@
 [![mypy strict](https://img.shields.io/badge/mypy-strict_0_errors-blue.svg)](pyproject.toml)
 [![CHANGELOG](https://img.shields.io/badge/CHANGELOG-V0.16.28-orange.svg)](CHANGELOG.md)
 
-## 📝 Featured Blogs
+## 📝 Featured Blogs (3 篇系列, 全部 web-agent dogfooding publish)
 
 1. **[50% Compliance, Not 0%: How a Logging Spike Almost Triggered the Wrong Architecture Rewrite](https://dev.to/francise_liang_e4544eadb9/50-compliance-not-0-how-a-logging-spike-almost-triggered-the-wrong-architecture-rewrite-1lna)** — dev.to · 8 min read
-   W5-C.2 spike 7 版本闭环: 测量层 regex 假阴性差点引发错误架构重写, 真账号 dev.to dogfooding 实测 (V0.16.27).
+   测量层故事: W5-C.2 spike 7 版本闭环 regex 假阴性差点引发错误架构重写 (V0.16.27 dogfooding).
 
 2. **[Why I Permanently NO-GO'd Patchright After a Spike (And the Anti-Detection Decision Tree)](https://dev.to/francise_liang_e4544eadb9/why-i-permanently-no-god-patchright-after-a-spike-and-the-anti-detection-decision-tree-3m11)** — dev.to · 7 min read
-   反检测决策树: V0.16.14 patchright spike NO-GO + V0.16.15 curl_cffi NO-GO + 住宅代理 GO 完整决策路径, web-agent 第 2 次 dogfooding 直接 publish (V0.16.30).
+   架构层故事: V0.16.14 patchright spike NO-GO + V0.16.15 curl_cffi NO-GO + 反检测决策树 4 层选择 (V0.16.30 dogfooding).
+
+3. **[Build Time vs Edit Time — My Web Agent Can Publish But Can't Edit (An Honest Capability-Boundary Spike)](https://dev.to/francise_liang_e4544eadb9/build-time-vs-edit-time-my-web-agent-can-publish-but-cant-edit-an-honest-capability-boundary-4lpl)** — dev.to · 6 min read
+   工具边界故事: V0.16.31 dogfooding 4/5 = 80% 成功率, edit existing article 触发 V0.5.0 anti-loop 暴露 actuator 5 actions 边界 (V0.16.32 dogfooding 第 4 次 publish 自身博客).
 
 ---
 

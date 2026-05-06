@@ -1266,7 +1266,7 @@ wheels = [
 
 [[package]]
 name = "web-agent"
-version = "0.16.32"
+version = "0.16.33"
 source = { editable = "." }
 dependencies = [
     { name = "anthropic" },

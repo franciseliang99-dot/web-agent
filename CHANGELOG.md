@@ -2,6 +2,70 @@
 
 All notable changes to web-agent. 版本号遵循 SemVer 简化形式（V<major>.<minor>.<patch>）。
 
+## [0.16.33] - 2026-05-05
+
+### Add (博客 3 publish + dogfooding 第 4 次 verify + README 系列三部曲完整)
+
+V0.16.32 ship 博客 3 draft 后, 用户选 A (web-agent dogfooding 第 4 次 publish 到 dev.to). 跑 9 step 4.8 min 成功. 这是项目第 4 次 publish 类真账号 E2E + dogfooding 系列三部曲完整覆盖.
+
+#### 博客 3 已 publish (web-agent dogfooding 第 4 次)
+- **dev.to URL**: https://dev.to/francise_liang_e4544eadb9/build-time-vs-edit-time-my-web-agent-can-publish-but-cant-edit-an-honest-capability-boundary-4lpl
+- **跑法**: `WEB_AGENT_AUTO_APPROVE='*' uv run web-agent "..." --url https://dev.to/new --max-steps 30 --max-wallclock-s 600`
+- **执行轨迹**: 9 step / 总用时 4.8 min (287s, 比博客 1/2 长~1.4 min 因 markdown 含较多 URL 链接 + LLM 逐字符拟人键入)
+  - step 0-1: click [7] 标题 + type "Build Time vs Edit Time — My Web Agent Can Publish But Can't Edit (An Honest Capability-Boundary Spike)"
+  - step 2-3: click [9] tags + type "ai, llm, webagent, playwright"
+  - step 4-5: click [30] body + 一次性 type 整段 markdown
+  - step 6: click [23] Publish (LLM 主动按 goal 约束 click Publish)
+  - step 7: extract 验证 5 anchor (无 Unpublished Post banner / Edit-Manage-Stats 按钮 / 标题 / tags / 正文齐)
+  - step 8: done `PUBLISHED:博客 3 已公开发布`
+- **关键证据**: LLM thought "Publish 按钮 (mark_id 23) 公开发布博客。用户已明确授权 publish, 不是 Save Draft" — **第 4 次主动 click Publish (按 goal 约束)**
+
+#### Real-account E2E 累积 (5/6 = 83% 成功率, 全场景覆盖)
+
+| 版本 | 平台 | 任务 | 结果 | LLM 行为 |
+|---|---|---|---|---|
+| V0.16.17 | Gmail | compose + send | ✅ SUCCESS | safety auto_approve='send-or-pay' 放行 Send |
+| V0.16.27 中文 | dev.to | save draft | ✅ SUCCESS | 主动避开 Publish, click Save Draft |
+| V0.16.27 英文 | dev.to | save draft | ✅ SUCCESS | 同上 |
+| V0.16.30 | dev.to | publish 博客 2 | ✅ SUCCESS | 主动 click Publish (按 goal 反向约束) |
+| V0.16.31 | dev.to | edit existing append | ❌ 能力边界 | LOOP_DETECTED, V0.17+ TODO |
+| **V0.16.33 (本次)** | **dev.to** | **publish 博客 3** | ✅ **SUCCESS** | **主动 click Publish (按 goal 约束, 第 4 次)** |
+
+**5 success + 1 spike fail** = 5/6 = 83%; 失败的 1 个 (edit existing) 根因明确 (actuator 5 actions 缺 keyboard_shortcut), V0.17+ 触发条件已落档. 真账号 E2E 覆盖全 4 类敏感动作:
+- send (V0.16.17)
+- save draft 避开 (V0.16.27 × 2)
+- publish 主动 (V0.16.30 + V0.16.33)
+- edit existing (V0.16.31, 边界已知)
+
+#### README Featured Blogs 升级 (2 → 3 篇, 系列三部曲完整)
+- **`README.md` Featured Blogs**: 加博客 3 链接 + 6 min read estimate + V0.16.33 dogfooding tag
+- **三部曲分类**:
+  1. 测量层故事 (W5-C.2 regex 假阴性) — LLM 工程
+  2. 架构层故事 (patchright + curl_cffi NO-GO) — 反检测
+  3. 工具边界故事 (V0.16.31 actuator capability spike) — 工具设计
+
+#### 三部曲完整 = 项目核心故事公开 ship
+| 章节 | dev.to URL slug | 主题 | dogfooding 版本 |
+|---|---|---|---|
+| 1 | `50-compliance-not-0-...` | 测量层 LLM 工程 | V0.16.27 (save draft) |
+| 2 | `why-i-permanently-no-god-patchright-...` | 架构层反检测 | V0.16.30 (publish) |
+| 3 | `build-time-vs-edit-time-...` | 工具边界 | V0.16.32→V0.16.33 (publish) |
+
+### Why
+- 博客 3 publish 后**项目核心故事公开 ship 完毕**: 测量层 / 架构层 / 工具边界 — 项目方法论的三大支柱全有 dev.to 文章 + GitHub final markdown 双载体
+- dogfooding 第 4 次 publish (V0.16.33) + 第 5 次 spike fail (V0.16.31) **互相印证**: web-agent 既能 publish 自己的博客, 又诚实落档自己的能力边界 = **项目 marketing 最强组合**
+- 5/6 = 83% 真账号 E2E 成功率比 100% 更可信 — 落档失败比假装全能更负责
+
+### 不包含 (留 V0.17+ 或用户做)
+- **修博客 1/2 dev.to 加 cross-link 到博客 3**: V0.16.31 落档 edit-existing 不可行 → 用户手动 5 min 修两篇
+- **博客 4+**: 现 3 篇覆盖项目核心故事三部曲 (LLM 工程 / 反检测 / 工具设计), 短期不必再写; 若 V0.17 actuator 扩 7 actions 后或 W6+ 转架构, 再写 V2 故事
+- **回工程**: V0.17 Action discriminated union 重构 (V0.16.12 标的技术债, 4-6h) / MCP Elicitation API (5-8h) / W6+ 重大架构变更
+
+### Compatibility
+- 主代码零改动, 行为 100% 与 V0.16.32 一致
+- 255 passed + 2 skipped, ruff 0, mypy strict 0
+- bump: pyproject.toml + `__init__.py` `0.16.32` → `0.16.33`
+
 ## [0.16.32] - 2026-05-05
 
 ### Add (第 3 篇博客 ship: Build Time vs Edit Time — V0.16.31 能力边界 spike 故事)
