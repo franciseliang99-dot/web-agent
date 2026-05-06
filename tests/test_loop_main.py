@@ -18,6 +18,7 @@ from pathlib import Path
 import pytest
 
 from web_agent.llm.base import Action
+from web_agent.types import DoneAction, ScrollAction
 from web_agent.loop import run_react_loop
 from web_agent.perceiver import Mark
 
@@ -100,8 +101,8 @@ async def test_max_steps_exhausted_returns_signal_string(
     monkeypatch.delenv("WEB_AGENT_AUTO_APPROVE", raising=False)
 
     client = FakeLLMClient([
-        Action(type="scroll", args={"dy": 100}, thought="x"),
-        Action(type="scroll", args={"dy": 200}, thought="x"),
+        ScrollAction(thought="x", dy=100),
+        ScrollAction(thought="x", dy=200),
     ])  # 2 步 + max_steps=2 → 第 2 步用尽不 done → 出 max_steps 路径
 
     db = tmp_path / "trace.db"
@@ -128,7 +129,7 @@ async def test_wallclock_exceeded_aborts_without_step_row(
     monkeypatch.delenv("WEB_AGENT_AUTO_APPROVE", raising=False)
 
     client = FakeLLMClient([
-        Action(type="scroll", args={"dy": 100}, thought="x"),
+        ScrollAction(thought="x", dy=100),
     ])
     db = tmp_path / "trace.db"
     shots = tmp_path / "shots"
@@ -163,7 +164,7 @@ async def test_memories_injected_as_synthetic_step_minus_one(
 
         async def plan(self, goal, screenshot_b64, marks, trace):
             seen_traces.append(list(trace.for_llm()))
-            return Action(type="done", args={"result": "ok"}, thought="x")
+            return DoneAction(thought="x", result="ok")
 
     db = tmp_path / "trace.db"
     shots = tmp_path / "shots"

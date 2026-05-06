@@ -5,6 +5,7 @@ from __future__ import annotations
 import pytest
 
 from web_agent.llm.base import Action
+from web_agent.types import ClickAction, DoneAction, ExtractAction, ScrollAction, TypeAction
 from web_agent.perceiver import Mark
 from web_agent.safety import check
 
@@ -28,11 +29,11 @@ def _input(input_type: str = "text", name: str = "") -> Mark:
 
 
 def _click(mark_id: int = 1) -> Action:
-    return Action(type="click", args={"mark_id": mark_id}, thought="x")
+    return ClickAction(thought="x", mark_id=mark_id)
 
 
 def _type(text: str = "hi") -> Action:
-    return Action(type="type", args={"text": text}, thought="x")
+    return TypeAction(thought="x", text=text)
 
 
 # --- click 按钮文本黑名单 ---
@@ -163,8 +164,13 @@ def test_auto_approve_unset_blocks(monkeypatch):
 # --- 边界 ---
 
 def test_scroll_extract_done_always_allowed():
-    for atype in ("scroll", "extract", "done"):
-        a = Action(type=atype, args={}, thought="x")
+    # V0.17.0: dispatch 5 dataclass (此前 Action(type=atype, args={}, thought="x") 一律 fail)
+    actions: list[Action] = [
+        ScrollAction(thought="x", dy=0),
+        ExtractAction(thought="x", query="", answer=""),
+        DoneAction(thought="x", result=""),
+    ]
+    for a in actions:
         assert check(a, None, []).allow
 
 

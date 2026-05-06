@@ -2,6 +2,70 @@
 
 All notable changes to web-agent. 版本号遵循 SemVer 简化形式（V<major>.<minor>.<patch>）。
 
+## [0.17.0] - 2026-05-05
+
+### Refactor (Action discriminated union — V0.16.12 标的技术债清债, mypy 自动 narrow)
+
+V0.16.12 自承"Action.args dict[str, Any] mypy 不能 narrow union TypedDict, 留 V0.17 拆 5 dataclass + Literal type 字段, 跨多文件大重构". V0.17.0 ship 这个重构.
+
+#### α 大爆炸路径 (单 commit, 8 文件全改)
+β 渐进路径不可行: Action 是 dataclass union, 中间 commit 状态 (旧 Action + 新 5 dataclass 共存) 让 mypy 在 loop branch 同时遇到 5 新 + 1 旧, narrow 不出, 比现状还差. 一次性 ship.
+
+#### 设计: 5 dataclass + Literal type 字段
+```python
+@dataclass(frozen=True, slots=True)
+class ClickAction:
+    thought: str
+    mark_id: int
+    type: Literal["click"] = "click"
+
+# TypeAction / ScrollAction / ExtractAction / DoneAction 类似
+
+Action = ClickAction | TypeAction | ScrollAction | ExtractAction | DoneAction
+```
+
+`frozen=True` 防 in-memory deque 多 ref 时意外 mutate; `slots=True` 省内存; `type` 字段带默认值放最后 (Python dataclass 要求 default 字段在后).
+
+#### 改动文件 (8)
+- **`src/web_agent/types.py`**: 删 `Action` 单 dataclass, 加 5 dataclass + `Action = X | Y | Z | ...` union type alias + `action_from_tool_call(name, raw)` factory dispatch (LLM provider 共享, 避 anthropic/openai 各写一遍 match-case)
+- **`src/web_agent/llm/anthropic.py`**: `Action(type=block.name, args=args, thought=thought)` → `action_from_tool_call(block.name, dict(block.input))`. **删 1 处 `cast(dict[str, Any], ...)`**
+- **`src/web_agent/llm/openai.py`**: 同上模式. **删 1 处 `cast(dict[str, Any], ...)`** + 删 `from typing import cast` (仅剩 Any)
+- **`src/web_agent/loop.py`**:
+  - 加 `_action_args_only(action)` helper 用 `dataclasses.fields(action)` 序列化到 dict 剔 type/thought (trace.Step 兼容旧 sqlite schema)
+  - `_action_signature` 改用 helper
+  - safety branch `if action.type in (...)` → `if isinstance(action, (ClickAction, TypeAction)):` + 字段直接访问 `action.mark_id`
+  - 主 dispatch 5 if-elif → `match action: case ClickAction(mark_id=mid): ...` Python 3.10+ structural pattern matching, mypy 自动 narrow 字段
+  - `if action.type == "done"` → `if isinstance(action, DoneAction)`
+  - import 5 dataclass 加进 `from web_agent.types import (...)`
+- **`src/web_agent/safety.py`**: 零改动. `action.type in ("scroll", ...)` 字符串比对在 Literal 字段上 mypy 仍能 narrow type, 不必改 isinstance
+- **`tests/_smoke_helpers.py`**: `isinstance(action, Action)` (Python 3.12 不支持 type alias 直接 isinstance) → `isinstance(action, (ClickAction, TypeAction, ...))` tuple. 删 `assert isinstance(action.args, dict)` (新 dataclass 无 args 字段)
+- **6 测试文件 (test_safety / test_safety_loop_integration / test_captcha / test_loop_anti_loop / test_loop_main / test_loop_reflect)**: 38 处 `Action(type="click", args={...}, thought="...")` → `ClickAction(thought="...", mark_id=...)` 等 5 dataclass. 用 `scripts/_migrate_action.py` (一次性 transform 后删) 批量 sed-style regex 替换. test_safety.py L167 `Action(type=atype, args={}, ...)` parametric 用 list of 5 dataclass 重写
+
+#### 不改动文件 (provider 边界外稳定)
+- `src/web_agent/llm/_schema.py`: TOOL_SCHEMAS 是 LLM wire format JSON, 与 Python dataclass 无关, 零改动
+- `src/web_agent/trace.py`: `Step.action_type: str / action_args: dict` 是 sqlite 序列化格式, 与 Action dataclass 解耦, 零改动 (loop 用 _action_args_only helper 桥接)
+- `src/web_agent/replay.py`: 从 sqlite 读 dict, 与 Action 解耦, 零改动
+- `src/web_agent/actuator.py`: 接 Mark + 原始 text/dy 值, 不接 Action dataclass, 零改动
+- `tests/cassettes/*.yaml`: VCR 录的是 HTTP wire, 与 Python 类型无关, 零改动
+
+#### 收益 (mypy strict 类型质量)
+- 删 2 处 `cast(dict[str, Any], ...)` (anthropic.py:82 + openai.py:104)
+- loop.py 内 `action.args.get("mark_id", -1)` 这种 `Any` 走查 → `action.mark_id: int` 字段, mypy 全程 narrow
+- match-case dispatch 是 Python 3.10+ structural pattern matching, mypy 在 `case ClickAction(mark_id=mid):` branch 自动知道 `mid: int`
+
+#### 留 V0.18+
+- `anthropic.py:68-77` 4 处 `cast(Any, ...)` 是 anthropic SDK TypedDict 紧 + 社区惯例 dict 字面量, **与 Action 重构无关**, 留着 (CHANGELOG V0.16.12 误算入此 TODO 范围)
+- `tests/_smoke_helpers.py` `from web_agent.llm.base import Action` (作 alias 文档保留 union type) — V0.18 可考虑统一改 `from web_agent.types import Action`
+
+### Compatibility
+- **行为 100% 与 V0.16.33 一致** (重构纯类型层, 主路径无 semantic 变化)
+- 255 passed + 2 skipped, ruff 0, mypy strict 0 (21 source files)
+- bump: pyproject.toml + `__init__.py` `0.16.33` → `0.17.0`
+
+### Why 单 commit V0.17.0 (vs V0.16.34)
+- 是项目第一个 minor bump (V0.16 → V0.17), 标志 Action 类型架构变化 (虽然行为兼容)
+- V0.17 之后可继续做 V0.17.1+ 工程清债 (例如统一 _smoke_helpers Action import / 4 处 cast(Any) SDK TypedDict 干净化)
+
 ## [0.16.33] - 2026-05-05
 
 ### Add (博客 3 publish + dogfooding 第 4 次 verify + README 系列三部曲完整)

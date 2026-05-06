@@ -17,6 +17,7 @@ from pathlib import Path
 import pytest
 
 from web_agent.llm.base import Action
+from web_agent.types import ClickAction, DoneAction
 from web_agent.loop import run_react_loop
 from web_agent.perceiver import Mark
 
@@ -97,7 +98,7 @@ async def test_send_click_default_blocked_writes_safety_step(
     monkeypatch.delenv("WEB_AGENT_AUTO_APPROVE", raising=False)
 
     client = FakeLLMClient([
-        Action(type="click", args={"mark_id": 1}, thought="点 Send 发邮件"),
+        ClickAction(thought="点 Send 发邮件", mark_id=1),
     ])
     db = tmp_path / "trace.db"
     shots = tmp_path / "shots"
@@ -127,8 +128,8 @@ async def test_send_click_auto_approved_proceeds_to_done(
     monkeypatch.setenv("WEB_AGENT_AUTO_APPROVE", "send-or-pay")
 
     client = FakeLLMClient([
-        Action(type="click", args={"mark_id": 1}, thought="点 Send"),
-        Action(type="done", args={"result": "sent"}, thought="完成"),
+        ClickAction(thought="点 Send", mark_id=1),
+        DoneAction(thought="完成", result="sent"),
     ])
     db = tmp_path / "trace.db"
     shots = tmp_path / "shots"
@@ -154,8 +155,8 @@ async def test_wildcard_auto_approve_also_allows_send(
     monkeypatch.setenv("WEB_AGENT_AUTO_APPROVE", "*")
 
     client = FakeLLMClient([
-        Action(type="click", args={"mark_id": 1}, thought="点 Send"),
-        Action(type="done", args={"result": "ok"}, thought="完成"),
+        ClickAction(thought="点 Send", mark_id=1),
+        DoneAction(thought="完成", result="ok"),
     ])
     db = tmp_path / "trace.db"
     shots = tmp_path / "shots"

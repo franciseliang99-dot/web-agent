@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import base64
+import dataclasses
 import json
 import logging
 import os
@@ -13,7 +14,7 @@ import time
 import uuid
 from collections import deque
 from pathlib import Path
-from typing import Awaitable, Callable
+from typing import Any, Awaitable, Callable
 
 from playwright.async_api import Page
 
@@ -24,7 +25,27 @@ from web_agent.notify import notify
 from web_agent.perceiver import perceive
 from web_agent.safety import check as safety_check
 from web_agent.trace import Step, Trace, end_task, init_db, start_task, write_step
-from web_agent.types import Action, Mark
+from web_agent.types import (
+    Action,
+    ClickAction,
+    DoneAction,
+    ExtractAction,
+    Mark,
+    ScrollAction,
+    TypeAction,
+)
+
+
+def _action_args_only(action: Action) -> dict[str, Any]:
+    """V0.17.0: 序列化 dataclass action 到 dict, 剔 type/thought (trace 兼容旧 schema).
+
+    用于 trace.Step.action_args + safety_block step + LOOP_DETECTED step + log + signature.
+    """
+    return {
+        f.name: getattr(action, f.name)
+        for f in dataclasses.fields(action)
+        if f.name not in ("type", "thought")
+    }
 
 # V0.16.1 progress callback: (step_i, max_steps, message=None) → 注 mcp ctx.report_progress
 # 形参可选, 不传则 loop 行为 100% 同 V0.16.0; 传则主循环每步 + captcha poll 心跳触发
@@ -38,8 +59,8 @@ def _find_mark(marks: list[Mark], mark_id: int) -> Mark | None:
 
 
 def _action_signature(action: Action) -> str:
-    """归一化 action 用于死循环检测。"""
-    return f"{action.type}:{json.dumps(action.args, sort_keys=True, ensure_ascii=False)}"
+    """归一化 action 用于死循环检测。V0.17.0: dataclass action 用 _action_args_only 取字段."""
+    return f"{action.type}:{json.dumps(_action_args_only(action), sort_keys=True, ensure_ascii=False)}"
 
 
 def _page_fingerprint(url: str, marks: list[Mark]) -> str:
@@ -315,14 +336,15 @@ async def run_react_loop(
                 write_step(conn, task_id, step, str(shot_path))
                 end_task(conn, task_id, result)
                 return result
-            logger.info("step %d action (%s): %s %s | thought: %s", step_i, client.name, action.type, action.args, action.thought[:120])
+            logger.info("step %d action (%s): %s %s | thought: %s", step_i, client.name, action.type, _action_args_only(action), action.thought[:120])
 
             # safety check：在 actuator 之前 intercept 敏感 action（send/pay/delete/密码字段...）
-            if action.type in ("click", "type"):
+            # V0.17.0: isinstance 替 action.type 字符串比, mypy 自动 narrow ClickAction.mark_id
+            if isinstance(action, (ClickAction, TypeAction)):
                 check_mark: Mark | None = None
-                if action.type == "click":
-                    check_mark = _find_mark(marks, action.args.get("mark_id", -1))
-                else:  # type
+                if isinstance(action, ClickAction):
+                    check_mark = _find_mark(marks, action.mark_id)
+                else:  # TypeAction
                     check_mark = last_clicked_mark
                 decision = safety_check(action, check_mark, marks)
                 if not decision.allow:
@@ -331,7 +353,7 @@ async def run_react_loop(
                     step = Step(
                         step=step_i, ts=time.time(), thought=action.thought,
                         action_type="safety_block",
-                        action_args={"original_type": action.type, "rule": decision.rule, **action.args},
+                        action_args={"original_type": action.type, "rule": decision.rule, **_action_args_only(action)},
                         observation=result,
                     )
                     trace.append(step)
@@ -350,7 +372,7 @@ async def run_react_loop(
                 logger.warning("anti-loop %s", result)
                 step = Step(
                     step=step_i, ts=time.time(), thought=action.thought,
-                    action_type=action.type, action_args=action.args,
+                    action_type=action.type, action_args=_action_args_only(action),
                     observation="LOOP_DETECTED — aborted",
                 )
                 trace.append(step)
@@ -359,58 +381,51 @@ async def run_react_loop(
                 return result
             recent_actions.append(sig)
 
+            # V0.17.0: match-case dispatch on dataclass discriminated union (mypy narrow 自动)
             obs = ""
-            if action.type == "click":
-                m = _find_mark(marks, action.args.get("mark_id", -1))
-                if m is None:
-                    obs = f"ERROR: mark_id={action.args.get('mark_id')} 不在当前 marks 里"
-                else:
-                    await human_like_click(page, m)
-                    last_clicked_mark = m  # 给下一步 type action 的 safety check 用
-                    try:
-                        await page.wait_for_load_state("domcontentloaded", timeout=5000)
-                    except Exception:
-                        pass
-                    obs = f"clicked [{m.id}] {m.tag} {m.text!r}"
-
-            elif action.type == "type":
-                text = action.args.get("text", "")
-                submit = bool(action.args.get("submit", False))
-                await human_like_type(page, text)
-                if submit:
-                    await page.keyboard.press("Enter")
-                    try:
-                        await page.wait_for_load_state("networkidle", timeout=8000)
-                    except Exception:
-                        pass
-                obs = f"typed {text!r}" + (" + submit" if submit else "")
-
-            elif action.type == "scroll":
-                dy = int(action.args.get("dy", 400))
-                await scroll(page, dy)
-                obs = f"scrolled dy={dy}"
-
-            elif action.type == "extract":
-                obs = f"extracted: {action.args.get('answer', '')[:200]}"
-
-            elif action.type == "done":
-                result = action.args.get("result", "")
-                obs = result
-            else:
-                obs = f"unknown action type: {action.type}"
+            match action:
+                case ClickAction(mark_id=mid):
+                    m = _find_mark(marks, mid)
+                    if m is None:
+                        obs = f"ERROR: mark_id={mid} 不在当前 marks 里"
+                    else:
+                        await human_like_click(page, m)
+                        last_clicked_mark = m  # 给下一步 type action 的 safety check 用
+                        try:
+                            await page.wait_for_load_state("domcontentloaded", timeout=5000)
+                        except Exception:
+                            pass
+                        obs = f"clicked [{m.id}] {m.tag} {m.text!r}"
+                case TypeAction(text=text, submit=submit):
+                    await human_like_type(page, text)
+                    if submit:
+                        await page.keyboard.press("Enter")
+                        try:
+                            await page.wait_for_load_state("networkidle", timeout=8000)
+                        except Exception:
+                            pass
+                    obs = f"typed {text!r}" + (" + submit" if submit else "")
+                case ScrollAction(dy=dy):
+                    await scroll(page, dy)
+                    obs = f"scrolled dy={dy}"
+                case ExtractAction(answer=answer):
+                    obs = f"extracted: {answer[:200]}"
+                case DoneAction(result=res):
+                    result = res
+                    obs = res
 
             step = Step(
                 step=step_i,
                 ts=time.time(),
                 thought=action.thought,
                 action_type=action.type,
-                action_args=action.args,
+                action_args=_action_args_only(action),
                 observation=obs,
             )
             trace.append(step)
             write_step(conn, task_id, step, str(shot_path))
 
-            if action.type == "done":
+            if isinstance(action, DoneAction):
                 end_task(conn, task_id, result)
                 logger.info("done %s", result[:200])
                 return result

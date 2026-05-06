@@ -9,6 +9,7 @@ from __future__ import annotations
 import pytest
 
 from web_agent.llm.base import Action
+from web_agent.types import DoneAction, ScrollAction
 from web_agent.loop import _page_fingerprint, run_react_loop
 from web_agent.perceiver import Mark
 
@@ -109,10 +110,10 @@ async def test_reflect_hint_injected_when_page_stuck_3_steps(
     monkeypatch.setattr("web_agent.loop.perceive", _stuck_perceive)
 
     client = RecordingLLMClient([
-        Action(type="scroll", args={"dy": 100}, thought="试 scroll 1"),
-        Action(type="scroll", args={"dy": 200}, thought="试 scroll 2"),
-        Action(type="scroll", args={"dy": 300}, thought="试 scroll 3"),
-        Action(type="done", args={"result": "fin"}, thought="收尾"),
+        ScrollAction(thought="试 scroll 1", dy=100),
+        ScrollAction(thought="试 scroll 2", dy=200),
+        ScrollAction(thought="试 scroll 3", dy=300),
+        DoneAction(thought="收尾", result="fin"),
     ])
 
     db = tmp_path / "trace.db"
@@ -153,10 +154,10 @@ async def test_reflect_not_injected_when_marks_change(
     monkeypatch.setattr("web_agent.loop.perceive", varying_perceive)
 
     client = RecordingLLMClient([
-        Action(type="scroll", args={"dy": 100}, thought="x"),
-        Action(type="scroll", args={"dy": 200}, thought="x"),
-        Action(type="scroll", args={"dy": 300}, thought="x"),
-        Action(type="done", args={"result": "fin"}, thought="x"),
+        ScrollAction(thought="x", dy=100),
+        ScrollAction(thought="x", dy=200),
+        ScrollAction(thought="x", dy=300),
+        DoneAction(thought="x", result="fin"),
     ])
     db = tmp_path / "trace.db"
     shots = tmp_path / "shots"
@@ -178,12 +179,12 @@ async def test_reflect_idempotent_no_double_append(
     monkeypatch.setattr("web_agent.loop.perceive", _stuck_perceive)
 
     client = RecordingLLMClient([
-        Action(type="scroll", args={"dy": 100}, thought="x"),
-        Action(type="scroll", args={"dy": 200}, thought="x"),
-        Action(type="scroll", args={"dy": 300}, thought="x"),
-        Action(type="scroll", args={"dy": 400}, thought="x"),
-        Action(type="scroll", args={"dy": 500}, thought="x"),
-        Action(type="done", args={"result": "fin"}, thought="x"),
+        ScrollAction(thought="x", dy=100),
+        ScrollAction(thought="x", dy=200),
+        ScrollAction(thought="x", dy=300),
+        ScrollAction(thought="x", dy=400),
+        ScrollAction(thought="x", dy=500),
+        DoneAction(thought="x", result="fin"),
     ])
     db = tmp_path / "trace.db"
     shots = tmp_path / "shots"

@@ -11,7 +11,7 @@ from pathlib import Path
 
 import pytest
 
-from web_agent.llm.base import Action
+from web_agent.types import ClickAction, DoneAction, ExtractAction, ScrollAction, TypeAction
 
 # 16×16 RGB (128,128,128) 灰 PNG, base64=112 字节 - Claude/OpenAI/Kimi 各 vision 模型
 # 实测最小可接受图片下限. 1×1 透明会被 Claude 拒 "image too small to process".
@@ -58,10 +58,10 @@ def smoke_skip_marker(
 
 
 def assert_smoke_action(action) -> None:
-    """smoke = pipeline alive 共用断言, 不验行为正确性."""
-    assert isinstance(action, Action), \
-        f"plan() 应返 Action dataclass, got {type(action)!r}"
+    """smoke = pipeline alive 共用断言, 不验行为正确性. V0.17.0: 5 dataclass tuple isinstance."""
+    _ACTION_TYPES = (ClickAction, TypeAction, ScrollAction, ExtractAction, DoneAction)
+    assert isinstance(action, _ACTION_TYPES), \
+        f"plan() 应返 5 Action dataclass 之一, got {type(action)!r}"
     assert action.type in _VALID_ACTION_TYPES, \
         f"action.type 必须是 5 合法值之一, got {action.type!r}"
-    assert isinstance(action.args, dict)
     assert isinstance(action.thought, str)

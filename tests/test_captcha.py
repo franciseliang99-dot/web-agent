@@ -16,6 +16,7 @@ import pytest
 
 from web_agent.captcha import CaptchaInfo, detect, wait_for_resolution
 from web_agent.llm.base import Action
+from web_agent.types import DoneAction
 from web_agent.loop import run_react_loop
 from web_agent.perceiver import Mark
 
@@ -182,7 +183,7 @@ async def test_loop_pause_then_resume_after_captcha_cleared(
 
     monkeypatch.setattr("web_agent.loop.captcha_detect", fake_detect)
 
-    client = FakeLLMClient([Action(type="done", args={"result": "ok"}, thought="完成")])
+    client = FakeLLMClient([DoneAction(thought="完成", result="ok")])
     db = tmp_path / "trace.db"
     shots = tmp_path / "shots"
 
@@ -212,7 +213,7 @@ async def test_loop_captcha_timeout_writes_step_and_aborts(
 
     monkeypatch.setattr("web_agent.loop.captcha_detect", fake_detect)
 
-    client = FakeLLMClient([Action(type="done", args={"result": "won't reach"}, thought="x")])
+    client = FakeLLMClient([DoneAction(thought="x", result="won't reach")])
     db = tmp_path / "trace.db"
     shots = tmp_path / "shots"
 
@@ -257,7 +258,7 @@ async def test_loop_captcha_hit_calls_notify(
     monkeypatch.setattr("web_agent.loop.captcha_detect", fake_detect)
     monkeypatch.setattr("web_agent.loop.notify", fake_notify)
 
-    client = FakeLLMClient([Action(type="done", args={"result": "ok"}, thought="x")])
+    client = FakeLLMClient([DoneAction(thought="x", result="ok")])
     db = tmp_path / "trace.db"
     shots = tmp_path / "shots"
 
@@ -287,7 +288,7 @@ async def test_loop_disable_env_skips_captcha_check(
 
     monkeypatch.setattr("web_agent.loop.captcha_detect", fake_detect)
 
-    client = FakeLLMClient([Action(type="done", args={"result": "skipped"}, thought="x")])
+    client = FakeLLMClient([DoneAction(thought="x", result="skipped")])
     db = tmp_path / "trace.db"
     shots = tmp_path / "shots"
 

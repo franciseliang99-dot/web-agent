@@ -6,17 +6,17 @@
 本文件不 import 任何 web_agent.* 模块，是依赖图的最叶子节点。
 
 V0.16.11: `Mark.bbox` 升 BBox TypedDict (4 个 float key) — actuator.py:52-57 4 处算子用法被 mypy 守护.
-V0.16.12: `Action.args` 暂保 `dict[str, Any]` (而非 ActionArgs union TypedDict) — Action.type 是 str 不是 Literal,
-mypy 无法在 `if action.type == "click"` branch 内 narrow union TypedDict 到 ClickArgs;
-真要 discriminated union 需把 Action 拆 5 个 dataclass + Literal type 字段, 跨多文件大重构,
-留 V0.17 (W6 reflect 阶段) 顺手做. 本版本 ActionArgs 5 个 TypedDict 仅作 schema 文档保留.
-LLM 返回 `args` 后, `thought` 已被 args.pop 弹出独立放 `Action.thought`, 故 ActionArgs 不含 thought.
+V0.17.0: Action 拆 5 dataclass discriminated union (`ClickAction` / `TypeAction` / `ScrollAction` /
+  `ExtractAction` / `DoneAction`), 每个含 `type: Literal[...]` 字段. 用 `match action: case
+  ClickAction(...)` 让 mypy 自动 narrow, 删 V0.16.12 留下的 2 处 `cast(dict[str, Any], ...)`.
+  V0.16.11 的 `ActionArgs` union TypedDict 删除 (不再需要). LLM provider parse 后调
+  `action_from_tool_call(name, raw)` factory dispatch 到对应 dataclass.
 """
 
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any, NotRequired, TypedDict
+from typing import Any, Literal, NotRequired, TypedDict
 
 
 class BBox(TypedDict):
@@ -26,41 +26,6 @@ class BBox(TypedDict):
     y: float
     w: float
     h: float
-
-
-class ClickArgs(TypedDict):
-    """click 动作 args — schema/_schema.py:36-43 (required: thought+mark_id; thought 已 pop)。"""
-
-    mark_id: int
-
-
-class TypeArgs(TypedDict):
-    """type 动作 args — schema:44-53 (required: thought+text; submit 可选 default False, OpenAI strict 强制 required)。"""
-
-    text: str
-    submit: NotRequired[bool]
-
-
-class ScrollArgs(TypedDict):
-    """scroll 动作 args — schema:54-62 (required: thought+dy)。"""
-
-    dy: int
-
-
-class ExtractArgs(TypedDict):
-    """extract 动作 args — schema:63-72 (required: thought+query+answer)。"""
-
-    query: str
-    answer: str
-
-
-class DoneArgs(TypedDict):
-    """done 动作 args — schema:73-81 (required: thought+result)。"""
-
-    result: str
-
-
-ActionArgs = ClickArgs | TypeArgs | ScrollArgs | ExtractArgs | DoneArgs
 
 
 @dataclass
@@ -77,10 +42,105 @@ class Mark:
     href: str = ""  # a.href（绝对 URL），仅 a 标签有
 
 
-@dataclass
-class Action:
-    """LLM 返回的下一步行动（5 种 type: click / type / scroll / extract / done）。"""
+# ===== V0.17.0: Action discriminated union (5 dataclass + Literal type) =====
+# 每个 dataclass 有 `type: Literal[...]` 字段 (放最后, dataclass 要求 default 字段在后),
+# `thought: str` 是公共字段 (每个 dataclass 重写而非继承 — explicit-better-than-implicit + frozen 子类坑).
+# `frozen=True` 防意外 mutate (Action 在短期记忆 deque 里被多次 ref); `slots=True` 省内存.
 
-    type: str
-    args: dict[str, Any]
+
+@dataclass(frozen=True, slots=True)
+class ClickAction:
+    """click 动作 — schema/_schema.py:36-43 (required: thought+mark_id)."""
+
     thought: str
+    mark_id: int
+    type: Literal["click"] = "click"
+
+
+@dataclass(frozen=True, slots=True)
+class TypeAction:
+    """type 动作 — schema:44-53 (required: thought+text+submit; submit OpenAI strict 强制 required)."""
+
+    thought: str
+    text: str
+    submit: bool = False
+    type: Literal["type"] = "type"
+
+
+@dataclass(frozen=True, slots=True)
+class ScrollAction:
+    """scroll 动作 — schema:54-62 (required: thought+dy)."""
+
+    thought: str
+    dy: int
+    type: Literal["scroll"] = "scroll"
+
+
+@dataclass(frozen=True, slots=True)
+class ExtractAction:
+    """extract 动作 — schema:63-72 (required: thought+query+answer)."""
+
+    thought: str
+    query: str
+    answer: str
+    type: Literal["extract"] = "extract"
+
+
+@dataclass(frozen=True, slots=True)
+class DoneAction:
+    """done 动作 — schema:73-81 (required: thought+result)."""
+
+    thought: str
+    result: str
+    type: Literal["done"] = "done"
+
+
+Action = ClickAction | TypeAction | ScrollAction | ExtractAction | DoneAction
+
+
+def action_from_tool_call(name: str, raw: dict[str, Any]) -> Action:
+    """V0.17.0: LLM provider parse 用. `raw` 是 tool_use input dict (含 thought+args).
+
+    `thought` 必须在调用前已 pop 出, 或 raw 含 thought 由本函数 pop. 5 type 之一不匹配抛 RuntimeError.
+    """
+    thought = raw.pop("thought", "") if "thought" in raw else ""
+    match name:
+        case "click":
+            return ClickAction(thought=thought, mark_id=int(raw["mark_id"]))
+        case "type":
+            return TypeAction(thought=thought, text=str(raw["text"]), submit=bool(raw.get("submit", False)))
+        case "scroll":
+            return ScrollAction(thought=thought, dy=int(raw["dy"]))
+        case "extract":
+            return ExtractAction(thought=thought, query=str(raw["query"]), answer=str(raw["answer"]))
+        case "done":
+            return DoneAction(thought=thought, result=str(raw["result"]))
+        case _:
+            raise RuntimeError(f"action_from_tool_call: unknown tool name {name!r}")
+
+
+# ===== ActionArgs 兼容 stub (TypedDict 保留 schema 文档, 但不再用于 union) =====
+# V0.17.0 删除 ActionArgs union, 但留 5 个 TypedDict 是因为 `_schema.py` 里某些参考 schema 文档
+# 仍引用这些 type. 实际 LLM tool schema 是 hand-written JSON, 这 5 个 TypedDict 仅作 IDE 提示作用.
+
+
+class ClickArgs(TypedDict):
+    mark_id: int
+
+
+class TypeArgs(TypedDict):
+    text: str
+    submit: NotRequired[bool]
+
+
+class ScrollArgs(TypedDict):
+    dy: int
+
+
+class ExtractArgs(TypedDict):
+    query: str
+    answer: str
+
+
+class DoneArgs(TypedDict):
+    result: str

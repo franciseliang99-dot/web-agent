@@ -12,7 +12,7 @@ from anthropic import AsyncAnthropic
 
 from web_agent.llm._schema import SYSTEM_PROMPT, build_user_text, to_anthropic_tools
 from web_agent.trace import Trace
-from web_agent.types import Action, Mark
+from web_agent.types import Action, Mark, action_from_tool_call
 
 DEFAULT_MODEL = "claude-sonnet-4-6"
 
@@ -79,8 +79,7 @@ class AnthropicClient:
 
         for block in resp.content:
             if block.type == "tool_use":
-                args = cast(dict[str, Any], dict(block.input))
-                thought = args.pop("thought", "")
-                return Action(type=block.name, args=args, thought=thought)
+                # V0.17.0: action_from_tool_call dispatch 到 5 dataclass union, 删 cast(dict[str, Any])
+                return action_from_tool_call(block.name, dict(block.input))
 
         raise RuntimeError(f"Anthropic 没返回 tool_use: {resp.content!r}")
