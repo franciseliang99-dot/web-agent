@@ -12,6 +12,7 @@ import pytest
 
 from web_agent.jd_extract import (
     RATE_LIMIT_SESSION_CAP,
+    _url_match,
     check_rate_limit,
     init_upwork_db,
     parse_jd_result,
@@ -204,3 +205,46 @@ def test_parse_non_dict_top_raises() -> None:
         parse_jd_result('["a", "b"]')
     with pytest.raises(SystemExit, match="顶层不是 object"):
         parse_jd_result('"just a string"')
+
+
+# ===== V0.20.5: _url_match URL normalization tests =====
+
+
+def test_url_match_exact() -> None:
+    """exact match (含 https + 同 host + 同 path)."""
+    assert _url_match(
+        "https://www.upwork.com/jobs/~01abc",
+        "https://www.upwork.com/jobs/~01abc",
+    )
+
+
+def test_url_match_query_string_diff_passes() -> None:
+    """用户贴 clean URL, Chrome page.url 含 tracking query → 仍 match (path 同)."""
+    assert _url_match(
+        "https://www.upwork.com/jobs/~01abc",
+        "https://www.upwork.com/jobs/~01abc?pageTitle=foo&utm_source=email",
+    )
+
+
+def test_url_match_host_diff_rejects() -> None:
+    """path 同但 host 不同 (eg upwork.com vs upwork.fr) → 不同 JD."""
+    assert not _url_match(
+        "https://www.upwork.com/jobs/~01abc",
+        "https://www.upwork.fr/jobs/~01abc",
+    )
+
+
+def test_url_match_fragment_ignored() -> None:
+    """fragment (#proposals 等) 不影响 match."""
+    assert _url_match(
+        "https://www.upwork.com/jobs/~01abc",
+        "https://www.upwork.com/jobs/~01abc#proposals",
+    )
+
+
+def test_url_match_trailing_slash_normalized() -> None:
+    """trailing slash 兜 /jobs/~01abc vs /jobs/~01abc/ — 同 JD."""
+    assert _url_match(
+        "https://www.upwork.com/jobs/~01abc",
+        "https://www.upwork.com/jobs/~01abc/",
+    )

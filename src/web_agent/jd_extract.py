@@ -1,19 +1,19 @@
-"""V0.20.4 JD extract entrypoint — 复用 cli.py 的 run_react_loop 让 LLM 走 done(JSON) 路径.
+"""V0.20.5 JD extract entrypoint — 半自动: 用户手 navigate, agent 只 perceive 当前 tab.
 
 路径 D (CHANGELOG V0.20.0): 用户从 Upwork 原生 saved-search email alert 手动拿 JD URL,
 贴给 web-agent-jd, web-agent extract 9 字段写 data/upwork.db. 评分由 scripts/score_upwork.py
 桥到 jobscout-bot eval-jd (rubric 单 SoT).
 
-V0.20.4 撕开 V0.20.0 设计原则 "不依赖 ReAct loop" — multi-provider 需求 (Kimi-k2.6 走 Moonshot
-OpenAI compat, 不支持 anthropic SDK 直调 + tool_choice specific name) 强制 jd_extract 复用
-run_react_loop. LLM 看 SoM 截图后, 用 done.result 字段塞 JSON 字符串, jd_extract 三层 fallback
-解析后写库.
+V0.20.4 实测 (commit c0ce9d9) page.goto(url) 触发 Cloudflare 重激活 challenge, LLM 看到
+"正在验证..." 0 marks 全 null. V0.20.5 改半自动: 用户在 9222 Chrome 手浏览到 JD URL (CF 已过),
+agent 遍历 ctx.pages 找 URL match 的 page 直接 perceive, **不调 page.goto** (不触发 CF 重激活).
 
 设计原则 (按 CLAUDE.md 解耦):
-- 复用 chrome_launcher / browser / loop (ReAct 主循环 + 五大守护: captcha / safety / anti-loop /
-  wallclock / LLM-failed) / llm.make_client (provider 自动按 model 名前缀推断)
+- 复用 chrome_launcher / browser / loop (ReAct + 五大守护) / llm.make_client
 - jd_extract 自身只: rate-limit / SQLite UPSERT / goal 引导 / done.result JSON 解析
+  + URL match 找 active tab (V0.20.5 新)
 - max_steps=3 限单步 perceive → done; LLM 误用 click/scroll → ReAct anti-loop 兜底
+- `--allow-url-mismatch` 紧急绕过 fallback ctx.pages[0] (用户场景: query string 微差)
 """
 
 from __future__ import annotations
@@ -29,9 +29,10 @@ import sys
 import time
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlparse
 
 from dotenv import load_dotenv
-from playwright.async_api import async_playwright
+from playwright.async_api import BrowserContext, Page, async_playwright
 
 from web_agent.browser import apply_stealth, connect
 from web_agent.chrome_launcher import ensure_chrome_running
@@ -62,7 +63,6 @@ _JD_EXTRACT_GOAL = """你是 Upwork JD 字段提取器. 当前页面是 Upwork J
 """
 
 
-# run_react_loop 失败 sentinel 字符串 (loop.py 的 6 种 abort 路径). 命中即 jd extract abort.
 _LOOP_ERROR_PREFIXES = (
     "CAPTCHA_TIMEOUT", "WALLCLOCK_EXCEEDED", "LOOP_DETECTED",
     "(max_steps 耗尽未完成)", "SAFETY_BLOCK", "LLM_FAILED",
@@ -146,7 +146,7 @@ def upsert_jd(conn: sqlite3.Connection, row: dict[str, Any]) -> None:
     conn.commit()
 
 
-# ===== JSON 解析 (V0.20.4 新, 三层 fallback) =====
+# ===== JSON 解析 (V0.20.4, 三层 fallback) =====
 
 def _ensure_dict(obj: Any) -> dict[str, Any]:
     """json.loads 可能返非 dict (list / scalar). 不是 dict 就 SystemExit."""
@@ -164,10 +164,7 @@ def _check_loop_error(result: str) -> None:
 
 
 def parse_jd_result(result: str) -> dict[str, Any]:
-    """三层 fallback 解析 LLM done.result: 严格 JSON → ```json md block → 裸 {} block. 失败 SystemExit.
-
-    Public function (无下划线) 因为 tests/test_jd_extract.py 复用它做 unit test.
-    """
+    """三层 fallback 解析 LLM done.result: 严格 JSON → ```json md block → 裸 {} block. 失败 SystemExit."""
     _check_loop_error(result)
 
     text = result.strip()
@@ -194,6 +191,29 @@ def parse_jd_result(result: str) -> dict[str, Any]:
     raise SystemExit(f"LLM done.result 不是 JSON: {result[:300]!r}")
 
 
+# ===== URL match + 找 active tab (V0.20.5 新, 半自动模式) =====
+
+def _url_match(want: str, have: str) -> bool:
+    """V0.20.5: normalize URL 比 host + path, 忽略 scheme casing / query / fragment / trailing slash.
+
+    Upwork JD URL path 已唯一标识 JD (`~01abc...`), query 仅含 tracking (?pageTitle=, &utm_*=);
+    exact match 撞 query 必败, substring 撞同 host sidebar 推荐链接风险.
+    """
+    try:
+        w, h = urlparse(want), urlparse(have)
+    except Exception:
+        return False
+    return (
+        w.netloc.lower() == h.netloc.lower()
+        and w.path.rstrip("/") == h.path.rstrip("/")
+    )
+
+
+def _find_jd_page(ctx: BrowserContext, url: str) -> Page | None:
+    """V0.20.5: 遍历 ctx.pages 找第一个 URL match 的 page. 找不到返 None."""
+    return next((p for p in ctx.pages if _url_match(url, p.url)), None)
+
+
 # ===== 主流程 =====
 
 def _bool_to_int(v: Any) -> int | None:
@@ -212,8 +232,14 @@ async def extract_url(
     model: str | None = None,
     captcha_timeout_s: float | None = None,
     ignore_rate_limit: bool = False,
+    allow_url_mismatch: bool = False,
 ) -> dict[str, Any]:
-    """主流程: rate-limit → spawn Chrome → connect → goto → run_react_loop → parse JSON → upsert."""
+    """V0.20.5 半自动主流程: rate-limit → connect 9222 → 找 URL match page → run_react_loop → parse → upsert.
+
+    用户必须先在 9222 Chrome 手 navigate 到 url (CF 验证已过, 页面正常显示 JD). agent 不调 page.goto
+    (V0.20.4 实测 navigation 触发 CF 重激活 challenge). --allow-url-mismatch 紧急绕过用 ctx.pages[0]
+    强抽 (用户场景: query string 微差).
+    """
     load_dotenv()
     cdp_url = cdp_url or os.environ.get("WEB_AGENT_CDP_URL", "http://127.0.0.1:9222")
     if captcha_timeout_s is not None:
@@ -226,16 +252,30 @@ async def extract_url(
     await asyncio.to_thread(ensure_chrome_running, cdp_url)
 
     async with async_playwright() as p:
-        _, _, page = await connect(p, cdp_url=cdp_url)
-        await apply_stealth(page)
-        logger.info("navigating to %s", url)
-        await page.goto(url, wait_until="domcontentloaded")
+        _, ctx, fallback_page = await connect(p, cdp_url=cdp_url)
+
+        jd_page = _find_jd_page(ctx, url)
+        if jd_page is None:
+            if not allow_url_mismatch:
+                tabs = [pg.url[:80] for pg in ctx.pages]
+                raise SystemExit(
+                    f"V0.20.5 半自动模式: 当前 9222 Chrome 没找到 URL 在 {url} 的 tab.\n"
+                    f"  当前 {len(ctx.pages)} 个 tab: {tabs}\n"
+                    f"操作: 在 Chrome 手动打开该 URL, 等 Cloudflare 过完 (页面正常显示 JD 内容), "
+                    f"再重跑 web-agent-jd. 或加 --allow-url-mismatch 用当前 active tab "
+                    f"(pages[0]) 强抽."
+                )
+            logger.warning("--allow-url-mismatch ON, fallback ctx.pages[0].url=%r", fallback_page.url)
+            jd_page = fallback_page
+
+        await apply_stealth(jd_page)
+        logger.info("using existing 9222 tab: %s", jd_page.url[:120])
 
         client = make_client(model=model)
         logger.info("LLM provider=%s model=%s", client.name, client.model)
 
         result_str = await run_react_loop(
-            page=page,
+            page=jd_page,
             client=client,
             goal=_JD_EXTRACT_GOAL,
             max_steps=JD_EXTRACT_MAX_STEPS,
@@ -276,9 +316,9 @@ def main() -> None:
     )
     parser = argparse.ArgumentParser(
         prog="web-agent-jd",
-        description="V0.20.4 路径 D: 单 Upwork JD URL 抽 9 字段写 SQLite (复用 ReAct loop, multi-provider)",
+        description="V0.20.5 路径 D 半自动: 用户手 navigate 到 Upwork JD, agent 只 perceive 当前 tab",
     )
-    parser.add_argument("url", help="Upwork JD URL")
+    parser.add_argument("url", help="Upwork JD URL (用户必须先在 9222 Chrome 手 navigate 到该 URL)")
     parser.add_argument("--db", default=str(DEFAULT_DB), help=f"SQLite path (默认 {DEFAULT_DB})")
     parser.add_argument("--cdp-url", default=None, help="覆盖 WEB_AGENT_CDP_URL")
     parser.add_argument("--model", default=None,
@@ -290,10 +330,17 @@ def main() -> None:
         action="store_true",
         help="紧急绕过 rate limit (默认 OFF, stderr 打 warn)",
     )
+    parser.add_argument(
+        "--allow-url-mismatch",
+        action="store_true",
+        help="V0.20.5 紧急绕过: 找不到 URL match 的 tab 时 fallback ctx.pages[0] (默认 OFF)",
+    )
     args = parser.parse_args()
 
     if args.ignore_rate_limit:
         logger.warning("--ignore-rate-limit ON, 真人节律守护已禁用 (Upwork 反爬风险升)")
+    if args.allow_url_mismatch:
+        logger.warning("--allow-url-mismatch ON, 跳过 URL verify (字段可能从错的 tab 抽)")
 
     row = asyncio.run(
         extract_url(
@@ -303,6 +350,7 @@ def main() -> None:
             model=args.model,
             captcha_timeout_s=args.captcha_timeout_s,
             ignore_rate_limit=args.ignore_rate_limit,
+            allow_url_mismatch=args.allow_url_mismatch,
         )
     )
     print(json.dumps(row, ensure_ascii=False, indent=2))

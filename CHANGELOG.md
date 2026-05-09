@@ -2,6 +2,53 @@
 
 All notable changes to web-agent. 版本号遵循 SemVer 简化形式（V<major>.<minor>.<patch>）。
 
+## [0.20.5] - 2026-05-09
+
+### Fix (路径 D 半自动 — 删 page.goto 绕开 Cloudflare 重激活)
+
+V0.20.4 e2e 实测 (commit c0ce9d9): page.goto(url) 触发 Cloudflare 重激活 challenge — Chrome
+手动浏览时 CF 已过, 但 CDP-driven `page.goto` 重新触发 challenge (`正在验证...` 中文 inline
+challenge 页). LLM 看到 challenge 截图 0 marks, done(全 null). 根因: `captcha.py:38` detect
+规则 (`iframe[src*="challenges.cloudflare.com"]` + body text "verify you're not a robot")
+**漏 Upwork inline CF + 中文** "正在验证..." → captcha guard 没触发, agent 没等手解.
+
+V0.20.5 改 D 路径**真正**形态: 用户在 9222 Chrome 手 navigate 到 JD URL (CF 验证手过), agent
+遍历 `ctx.pages` 找 URL match 的 page 直接 perceive, **不调 page.goto** (不触发 CF 重激活).
+契合 D 路径"用户手贴 URL + 手浏览 + agent 只 extract 当前页"原意.
+
+### Changed
+
+- `src/web_agent/jd_extract.py`:
+  - 加 `_url_match(want, have)` — `urlparse` normalize host + path, 忽略 scheme casing /
+    query / fragment / trailing slash. Upwork JD path 已唯一标识 (`~01abc...`), query 仅
+    tracking. exact match 撞 query 必败; substring 撞同 host sidebar 推荐链接风险.
+  - 加 `_find_jd_page(ctx, url)` — `ctx.pages` 遍历找第一个 `_url_match` 命中的 page.
+  - `extract_url` 主体改半自动: 删 `await page.goto(url, wait_until="domcontentloaded")`,
+    改用 `_find_jd_page`; 找不到 SystemExit 带可执行修复指令 (列当前 tabs + 手动 navigate
+    步骤). `--allow-url-mismatch` flag 紧急绕过 fallback `ctx.pages[0]`.
+  - `extract_url` signature 加 `allow_url_mismatch: bool = False` 参数.
+  - `main` argparse 加 `--allow-url-mismatch` (默认 OFF, ON 时 stderr 打 warn).
+  - 模块 docstring 改 "半自动: 用户手 navigate, agent 只 perceive 当前 tab".
+- `tests/test_jd_extract.py` +5 测试 (`_url_match`: exact / 查询字符串差异 / host 不同 /
+  fragment ignored / trailing slash normalized).
+
+### Compatibility
+
+- 数据契约 100% 与 V0.20.0/3/4 兼容: `data/upwork.db` schema 不变, `score_upwork.py` 桥不变,
+  console_scripts (`web-agent-jd`) CLI 加 `--allow-url-mismatch` optional flag (默认 OFF, 不
+  破坏现有调用).
+- LLM 提供商兼容: anthropic / openai (含 Kimi via Moonshot OpenAI compat) 双路.
+- 行为变化: 用户必须先在 9222 Chrome 手 navigate 到 JD URL (CF 已过), 否则 SystemExit 带操作
+  指引. 之前 V0.20.4 自动 navigate 但被 CF 拦, 实际跑不通.
+- 282 passed + 2 skipped (V0.20.4 baseline 277 + 5 V0.20.5 测试), ruff 0, mypy strict 0.
+- bump 0.20.4 → 0.20.5 (patch, 反爬 UX 改半自动 + 新 flag).
+
+### Why patch (V0.20.5) 不 minor
+
+- 用户感知层加 `--allow-url-mismatch` optional flag, 默认 OFF 不破坏现有 CLI 调用.
+- 行为变化: 用户须先手 navigate. 这是产品边界修正 (D 路径原意), 不是新外部能力.
+- 数据契约 + 桥 + LLM 路径全不变.
+
 ## [0.20.4] - 2026-05-09
 
 ### Refactor (路径 D 适配 multi-provider — jd_extract 切到 run_react_loop 复用)
