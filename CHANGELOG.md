@@ -2,6 +2,41 @@
 
 All notable changes to web-agent. 版本号遵循 SemVer 简化形式（V<major>.<minor>.<patch>）。
 
+## [0.20.7] - 2026-05-09
+
+### Fix (perceiver — `marks_to_text` 暴露 `a[href]` 让 LLM 看到 link target)
+
+V0.20.6 commit cbb1b76 实测 list_extract Kimi 老实承认 *"screenshot 看不到 a[href], 只看到 text
+label, url 必须 null 不能瞎编 ~01abc"* → `_validate_jds` 全 drop → SystemExit (设计 expected).
+
+Root cause: perceiver 的 SoM JS 已抓 `a[href]` (perceiver.py:88 `el.href`) 写入 `Mark.href`, 但
+`llm/_schema.py:178-189` `marks_to_text` 序列化**漏暴露 href 字段**, LLM 看到的文本零 URL 信息.
+
+V0.20.5 jd_extract 单 JD 模式不受影响 (用户传 URL agent 不需自抽); V0.20.6 list extract 必须靠
+LLM 抽 link 才能给手选清单 → 强依赖 `marks_to_text` 暴露 href.
+
+### Changed
+
+- `src/web_agent/llm/_schema.py:186` `marks_to_text`: 加 1 行 `if m.href: s += f" → {m.href}"`,
+  在 text 之后输出 link target. 数据已在 `Mark.href` (V0.16.x), 仅补序列化输出.
+- `tests/test_llm_schema.py` — 必要时加 1-2 测试覆盖 a[href] 序列化 + 非 a 标签不输出 (实际改动
+  视现有 marks_to_text test 而定).
+
+### Compatibility
+
+- 行为变化: 所有 LLM 调用 (cli.py ReAct loop / jd_extract / list_extract) 看到的 marks 文本
+  现含 href 字段. **enhance 不 regression** — LLM tool_use 输出 schema 不变, 现有 ReAct 逻辑
+  不需修改.
+- LLM 决策可能轻微变化 (看到 link target 后 click/navigate 决策更精准, 不再瞎猜).
+- 287+ tests, ruff 0, mypy strict 0.
+- bump 0.20.6 → 0.20.7 (patch — 内部序列化 enhance, 数据契约 + tool schema 不变).
+
+### Why patch (V0.20.7)
+
+- 改 1 行 + 必要 test, 数据已在 `Mark.href`, 仅补输出.
+- 影响所有 LLM 调用但 enhance 不 regression — V0.16+ baseline 行为本来就**应该**暴露 href, 历史
+  marks_to_text 漏写是 bug 不是 feature.
+
 ## [0.20.6] - 2026-05-09
 
 ### Add (路径 D 延伸 — list 页只读抽 JD URL 清单给用户手选)
