@@ -2,6 +2,82 @@
 
 All notable changes to web-agent. 版本号遵循 SemVer 简化形式（V<major>.<minor>.<patch>）。
 
+## [0.20.0] - 2026-05-09
+
+### Add (路径 D MVP — Upwork JD extract entrypoint + jobscout-bot 评分桥)
+
+V0.18 周期闭合 + V0.19 actuator 扩 7 actions 落地后, 用户提需求"用 web-agent 帮我搜索 + 分析 Upwork job".
+经 5 步流程 (Step 0 起 subagent 审核 → Step 1-2 三方调研 → Step 3 plan → Step 4 复述) 收敛到路径 D:
+**用户从 Upwork 原生 saved-search email alert 手动拿 JD URL → web-agent extract 字段写库 → jobscout-bot
+fit-checker 评分回写**, 不爬搜索结果列表页 / 不依赖第三方聚合器 / 不投递 / 单次单 URL.
+
+#### 调研事实 (web fetch + curl 实测交叉验证)
+
+- Upwork **RSS 已 2024-08-20 永久下线** (实测 `GET /ab/feed/jobs/rss?q=python` → HTTP 410); RSS 路径死.
+- Upwork GraphQL 官方 API 不支持 jobs search (仅 freelancerProfileRecords 可搜); 官方 API 对找活无用.
+- ToS 明令禁止 scraping, 2025 suspension 同比 +23%, 申诉成功率 24%, 关联 IP/设备级联封;
+  登录态 Playwright 抓搜索页是合规 deal breaker (web-agent V0.19.0 stealth ~72% sannysoft 不够 Upwork
+  行为指纹检测).
+- 第三方聚合器 (Vibeworker / GigRadar / UpHunt / Vollna) 是真实赛道, 但用户选 D 路径 (零三方依赖).
+
+#### Phase 0 验桥 ✅ (实跑确认)
+
+- `pnpm --dir ~/jobscout-bot cli:eval-jd -` 接 stdin → exit 0, fixture sample 跑通 (~10s e2e)
+- recommendation enum = `"draft" | "drop" | "manual-review"` (实测, 非 plan 初版假设的 drop/maybe/recommend)
+- 结构化数据写 `jobscout-bot/data/outbox/<ts>-<slug>.md` YAML frontmatter (`fit_score` / `fit_recommendation`)
+
+#### Phase 1 落地
+
+**`src/web_agent/jd_extract.py`** (242 行) — 独立组合根 (mirror cli.py), 不依赖 ReAct loop / memory /
+planner. 复用 chrome_launcher / browser / perceiver / captcha (无状态业务层). LLM extract 直调
+Anthropic SDK 单次 tool_use (`report_jd` 工具, 9 字段), 不复用 `AnthropicClient.plan` (它的 SYSTEM_PROMPT
++ 7 ReAct tools 是 ReAct-specific). 新 entrypoint `web-agent-jd <url>`.
+
+设计要点:
+
+- **真人节律守护** (≤1/min, ≤30/30min) — `check_rate_limit(conn)` 5 行 SQL, SQLite 自身做状态存储,
+  跨 shell 重启状态连续. `--ignore-rate-limit` escape hatch 默认 OFF.
+- **Captcha guard** — `wait_captcha_resolution(page, timeout_s=300)` deterministic 路径专用版, 复用
+  `captcha.detect()` 但不写 trace.db (jd_extract 不用 trace 系统), notify 用户手解, poll 等清除.
+- **SQLite UPSERT 不动 score** — `_UPSERT_FIELDS` 不含 score/recommendation/fit_json, 重 extract 同
+  URL 刷字段但保已写入的评分 (避免 score_upwork 跑过的结果被覆盖).
+
+**`scripts/score_upwork.py`** (148 行) — 桥. SELECT score IS NULL → 渲染 jobscout-bot
+`FRONTMATTER_TEMPLATE` → `pnpm cli:eval-jd -` 子进程 → parse stdout `✓ outbox card:` 拿 markdown 路径
+→ 手解 frontmatter (无 yaml 依赖) → UPDATE `score`/`recommendation`/`fit_json` 回写. 单行失败 continue
+不阻塞批次. CLAUDE.md "Sync rule": fit-rubric.ts 是 SoT, 本桥跨 repo 调用维护单点.
+
+**`tests/test_jd_extract.py`** (8 测试) — db 幂等 / rate-limit 4 分支 (空表 / <60s / >60s / session-cap)
++ 滚动窗口外 row 不计 / UPSERT 新行 / UPSERT 保 score. 不测 LLM / Playwright (e2e 跑验).
+
+#### 解耦审查 (按 CLAUDE.md "解耦优先")
+
+- **依赖方向**: domain (types) ← ports (browser.connect / captcha.detect / perceiver.perceive) ← 业务层
+  (jd_extract 工具函数) ← 组合根 (jd_extract.main + extract_url). cli.py 与 jd_extract.py 都是组合根,
+  互不依赖 (ReAct 路径 vs deterministic 路径职责正交).
+- **跨 repo**: web-agent 调 jobscout-bot 走 subprocess CLI 边界, 不导 jobscout-bot Python/TS 模块, 没有
+  共享代码或数据库, 唯一接口是 stdin/stdout/markdown 文件 — 解耦最深档 (AGENT_INTEROP B mode 落地实例).
+
+### Compatibility
+
+- 行为 100% 与 V0.19.0 兼容 (新加 jd_extract.py + scripts/score_upwork.py, 现有 cli/loop/actuator 零改动);
+  console_scripts 4 → 5 (加 `web-agent-jd`).
+- 271 passed + 2 skipped (V0.19.0 baseline 263 + 8 V0.20.0 测试), ruff 0, mypy strict 0 (22 source files).
+- bump: pyproject.toml + `__init__.py` `0.19.0` → `0.20.0`.
+
+### Why minor bump (V0.20.0) 不 patch
+
+- 新外部能力: console_scripts 加 `web-agent-jd` (用户感知层变化, 5th entrypoint)
+- 新跨 repo 边界: web-agent ↔ jobscout-bot subprocess 桥 (AGENT_INTEROP B mode 落地实例)
+- 新 SQLite schema: `data/upwork.db` `upwork_jds` 表 (持久化数据契约, downstream 可消费)
+
+### Phase 1 后置 TODO (不在本 commit)
+
+- 真实 Upwork JD 跑一次 e2e (用户登录 9222 Chrome → `web-agent-jd <真 URL>` → `python scripts/score_upwork.py`)
+- 接 Phase 1 数据后看 fit-rubric 给的分对 Upwork JD 是否合理, rubric 可能要补 Upwork-specific 信号
+  (connect cost / proposals count / client total spent — 不在现 rubric)
+- 如 Phase 1 跑通且评分质量 OK, V0.21+ 可选: 通知 / 排序 / 跟进状态机
+
 ## [0.19.0] - 2026-05-08
 
 ### Add (actuator 扩 keyboard_shortcut + paste — 修 V0.16.31 + V0.18.5 spike-2 contenteditable edit fail mode)

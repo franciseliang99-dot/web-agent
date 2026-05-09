@@ -1,0 +1,151 @@
+"""V0.20.0 jd_extract module tests — db / rate-limit / upsert.
+
+不覆盖 LLM extract / Playwright 路径 (依赖外部); 这两块靠 e2e 真实跑验证.
+"""
+
+from __future__ import annotations
+
+import time
+from pathlib import Path
+
+import pytest
+
+from web_agent.jd_extract import (
+    RATE_LIMIT_SESSION_CAP,
+    check_rate_limit,
+    init_upwork_db,
+    upsert_jd,
+)
+
+
+def _row(url: str, scraped_at: float, **extra: object) -> dict[str, object]:
+    base: dict[str, object] = {
+        "url": url,
+        "scraped_at": scraped_at,
+        "title": "test job",
+        "description": "test body",
+        "budget": None,
+        "hourly": None,
+        "client_country": None,
+        "client_rating": None,
+        "posted_at": None,
+        "proposals_count": None,
+        "connect_cost": None,
+        "raw_thought": None,
+    }
+    base.update(extra)
+    return base
+
+
+def test_init_upwork_db_idempotent(tmp_path: Path) -> None:
+    """连建两次不报错, 表结构含 url/score/recommendation 关键列."""
+    db = tmp_path / "test.db"
+    conn1 = init_upwork_db(db)
+    conn1.close()
+    conn2 = init_upwork_db(db)
+    cols = [r[1] for r in conn2.execute("PRAGMA table_info(upwork_jds)").fetchall()]
+    assert "url" in cols
+    assert "score" in cols
+    assert "recommendation" in cols
+    assert "fit_json" in cols
+    conn2.close()
+
+
+def test_check_rate_limit_empty_db_passes(tmp_path: Path) -> None:
+    db = tmp_path / "test.db"
+    conn = init_upwork_db(db)
+    check_rate_limit(conn)  # no rows → no raise
+    conn.close()
+
+
+def test_check_rate_limit_under_60s_blocks(tmp_path: Path) -> None:
+    db = tmp_path / "test.db"
+    conn = init_upwork_db(db)
+    now = time.time()
+    upsert_jd(conn, _row("https://upwork.com/x1", now - 30))
+    with pytest.raises(SystemExit, match="rate-limit"):
+        check_rate_limit(conn, now=now)
+    conn.close()
+
+
+def test_check_rate_limit_after_60s_passes(tmp_path: Path) -> None:
+    db = tmp_path / "test.db"
+    conn = init_upwork_db(db)
+    now = time.time()
+    upsert_jd(conn, _row("https://upwork.com/x1", now - 70))
+    check_rate_limit(conn, now=now)  # > 60s → no raise
+    conn.close()
+
+
+def test_check_rate_limit_session_cap_blocks(tmp_path: Path) -> None:
+    """30min 窗口内 30 行 (全 5min 前, 都 > 60s 间隔) → session-cap 拒."""
+    db = tmp_path / "test.db"
+    conn = init_upwork_db(db)
+    now = time.time()
+    for i in range(RATE_LIMIT_SESSION_CAP):
+        upsert_jd(conn, _row(f"https://upwork.com/x{i}", now - 300))
+    with pytest.raises(SystemExit, match="session-cap"):
+        check_rate_limit(conn, now=now)
+    conn.close()
+
+
+def test_check_rate_limit_old_rows_outside_window(tmp_path: Path) -> None:
+    """31min 前的旧 row 不计入 session window cap."""
+    db = tmp_path / "test.db"
+    conn = init_upwork_db(db)
+    now = time.time()
+    # 30 行全部 31min 前 (滚动窗口外) + 1 行 70s 前 (窗口内但 > 60s 间隔)
+    for i in range(RATE_LIMIT_SESSION_CAP):
+        upsert_jd(conn, _row(f"https://upwork.com/old{i}", now - 31 * 60))
+    upsert_jd(conn, _row("https://upwork.com/recent", now - 70))
+    check_rate_limit(conn, now=now)  # 应该 pass: 窗口内只 1 行, 上次 70s > 60s
+    conn.close()
+
+
+def test_upsert_jd_new_row(tmp_path: Path) -> None:
+    db = tmp_path / "test.db"
+    conn = init_upwork_db(db)
+    upsert_jd(conn, _row(
+        "https://upwork.com/abc", 1000.0,
+        title="Test JD", hourly=1, client_rating=4.8, client_country="US",
+    ))
+    row = conn.execute(
+        "SELECT url, title, hourly, client_rating, client_country "
+        "FROM upwork_jds WHERE url=?",
+        ("https://upwork.com/abc",),
+    ).fetchone()
+    assert row == ("https://upwork.com/abc", "Test JD", 1, 4.8, "US")
+    conn.close()
+
+
+def test_upsert_jd_conflict_preserves_score(tmp_path: Path) -> None:
+    """同 url 重 upsert: 字段刷新, id 保留, score/recommendation/fit_json 不被覆盖 (UPSERT 不写 score 字段)."""
+    db = tmp_path / "test.db"
+    conn = init_upwork_db(db)
+    upsert_jd(conn, _row("https://upwork.com/y", 1000.0, title="old"))
+    id1 = conn.execute(
+        "SELECT id FROM upwork_jds WHERE url=?", ("https://upwork.com/y",)
+    ).fetchone()[0]
+
+    # score_upwork.py 模拟写入 score
+    conn.execute(
+        "UPDATE upwork_jds SET score=85, recommendation='draft', fit_json='{}' "
+        "WHERE url=?",
+        ("https://upwork.com/y",),
+    )
+    conn.commit()
+
+    # 重新 extract 同一 URL
+    upsert_jd(conn, _row("https://upwork.com/y", 2000.0, title="new"))
+
+    row = conn.execute(
+        "SELECT id, title, scraped_at, score, recommendation FROM upwork_jds "
+        "WHERE url=?",
+        ("https://upwork.com/y",),
+    ).fetchone()
+    assert row[0] == id1
+    assert row[1] == "new"
+    assert row[2] == 2000.0
+    assert row[3] == 85
+    assert row[4] == "draft"
+    conn.close()
