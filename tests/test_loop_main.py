@@ -17,8 +17,7 @@ from pathlib import Path
 
 import pytest
 
-from web_agent.llm.base import Action
-from web_agent.types import DoneAction, ScrollAction
+from web_agent.types import Action, DoneAction, ScrollAction
 from web_agent.loop import run_react_loop
 from web_agent.perceiver import Mark
 

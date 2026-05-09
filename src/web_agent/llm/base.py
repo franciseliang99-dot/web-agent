@@ -5,8 +5,6 @@
 
 各 provider 的具体 client（anthropic.py / openai.py / ...）实现本 Protocol，
 仅在 llm/__init__.py 的 make_client factory 里实例化，外部代码只依赖 LLMClient 类型。
-
-V0.16.9: `Action` 上提到 `web_agent.types` 共享 domain 模块；本文件保留 re-export 兼容旧 import 路径。
 """
 
 from __future__ import annotations
@@ -14,7 +12,7 @@ from __future__ import annotations
 from typing import Protocol, runtime_checkable
 
 from web_agent.trace import Trace
-from web_agent.types import Action as Action, Mark as Mark  # explicit re-export shim — 旧 `from web_agent.llm.base import Action` 仍可用
+from web_agent.types import Action, Mark
 
 
 @runtime_checkable

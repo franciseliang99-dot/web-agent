@@ -4,8 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-from web_agent.llm.base import Action
-from web_agent.types import ClickAction, DoneAction, ExtractAction, ScrollAction, TypeAction
+from web_agent.types import Action, ClickAction, DoneAction, ExtractAction, ScrollAction, TypeAction
 from web_agent.perceiver import Mark
 from web_agent.safety import check
 

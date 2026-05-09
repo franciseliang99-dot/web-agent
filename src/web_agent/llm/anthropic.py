@@ -9,6 +9,12 @@ import os
 from typing import Any, cast
 
 from anthropic import AsyncAnthropic
+from anthropic.types import (
+    MessageParam,
+    TextBlockParam,
+    ToolChoiceAnyParam,
+    ToolParam,
+)
 
 from web_agent.llm._schema import SYSTEM_PROMPT, build_user_text, to_anthropic_tools
 from web_agent.trace import Trace
@@ -60,21 +66,23 @@ class AnthropicClient:
             {"type": "text", "text": build_user_text(goal, marks, trace)},
         ]
 
-        # messages.create 的 system / tools / tool_choice 期望 TypedDict (TextBlockParam / ToolParam ...);
-        # 这里用裸 dict 字面量 + cast 是社区惯例 — anthropic SDK 运行时接受 dict, mypy 严格不放行
+        # V0.17.1: anthropic SDK TypedDict 直接 annotate, 替 4 处 cast(Any).
+        # tools/messages 仍走 cast 因为 _schema/user_content 是 dict[str, Any] 中性结构.
+        system: list[TextBlockParam] = [
+            {
+                "type": "text",
+                "text": SYSTEM_PROMPT,
+                "cache_control": {"type": "ephemeral"},
+            }
+        ]
+        tool_choice: ToolChoiceAnyParam = {"type": "any"}
         resp = await self._client.messages.create(
             model=self.model,
             max_tokens=2048,
-            system=cast(Any, [
-                {
-                    "type": "text",
-                    "text": SYSTEM_PROMPT,
-                    "cache_control": {"type": "ephemeral"},
-                }
-            ]),
-            tools=cast(Any, self._tools),
-            tool_choice=cast(Any, {"type": "any"}),
-            messages=cast(Any, [{"role": "user", "content": user_content}]),
+            system=system,
+            tools=cast(list[ToolParam], self._tools),
+            tool_choice=tool_choice,
+            messages=cast(list[MessageParam], [{"role": "user", "content": user_content}]),
         )
 
         for block in resp.content:

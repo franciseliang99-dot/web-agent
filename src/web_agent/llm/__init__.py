@@ -1,7 +1,8 @@
 """LLM 抽象层：跨 provider 的 plan() 接口 + factory。
 
 公共 API：
-    from web_agent.llm import LLMClient, Action, make_client
+    from web_agent.llm import LLMClient, make_client
+    from web_agent.types import Action  # Action 唯一来源是 domain 层
 
 provider 选择优先级（参数 > env > 推断 > 默认）：
     1. make_client(provider=...) 显式参数
@@ -14,7 +15,7 @@ from __future__ import annotations
 
 import os
 
-from web_agent.llm.base import Action as Action, LLMClient as LLMClient
+from web_agent.llm.base import LLMClient as LLMClient
 
 
 def provider_from_model(model: str) -> str:
@@ -86,4 +87,4 @@ def make_client(
     )
 
 
-__all__ = ["LLMClient", "Action", "make_client", "provider_from_model"]
+__all__ = ["LLMClient", "make_client", "provider_from_model"]

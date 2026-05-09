@@ -2,6 +2,67 @@
 
 All notable changes to web-agent. 版本号遵循 SemVer 简化形式（V<major>.<minor>.<patch>）。
 
+## [0.17.1] - 2026-05-08
+
+### Refactor (V0.17.0 自留 V0.18+ 清债收尾 — Action import 统一 + anthropic cast(Any) 消除)
+
+V0.17.0 自承留 V0.18+ 两条: ① `_smoke_helpers.py` Action import shim; ② `anthropic.py:68-77` 4 处 `cast(Any, ...)` SDK TypedDict. 本版本两条同步收尾, V0.17 minor 周期闭合.
+
+#### ① Action import 路径统一 (5 test + 2 shim)
+
+V0.16.9 把 `Action` 上提到 `web_agent.types` 作 domain 层共享, 但 `llm/base.py` + `llm/__init__.py` 留了 `Action as Action` re-export shim 兼容旧 import 路径. V0.17.1 删 shim, **`web_agent.types` 是 Action 唯一来源**.
+
+- **5 test 文件 import 合并**: `tests/test_safety.py / test_captcha.py / test_loop_main.py / test_loop_reflect.py / test_safety_loop_integration.py` — 原 `from web_agent.llm.base import Action` 一行 + `from web_agent.types import ClickAction, ...` 一行 → 合并为 `from web_agent.types import Action, ClickAction, ...` 一行
+- **`src/web_agent/llm/base.py`**: 删 `from web_agent.types import Action as Action, Mark as Mark` re-export shim, 改成普通 `from web_agent.types import Action, Mark` (Protocol 类型注解仍需要). 删 docstring 旧的 V0.16.9 兼容说明
+- **`src/web_agent/llm/__init__.py`**: 删 `Action as Action` re-export, `__all__` 删 `"Action"`, docstring 公共 API 段从 `from web_agent.llm import LLMClient, Action, make_client` 改为 `from web_agent.llm import LLMClient, make_client` + `from web_agent.types import Action  # Action 唯一来源是 domain 层`
+
+破坏性变化 (但项目仍 0.x, 无外部 API 承诺):
+- `from web_agent.llm.base import Action` → 失效, 用 `from web_agent.types import Action`
+- `from web_agent.llm import Action` → 失效, 同上
+
+V0.17.0 自留 TODO 中 `_smoke_helpers.py` 那条**实际 stale**: V0.17.0 重构时 `_smoke_helpers.py:14` 已改为 `from web_agent.types import ClickAction, DoneAction, ExtractAction, ScrollAction, TypeAction`, 不存在 `from web_agent.llm.base import Action` 这一 import. CHANGELOG V0.17.0 §V0.18+ 第 2 条引用为遗留误差, 实际待清的是上述 5 test 文件.
+
+#### ② anthropic.py 4 处 cast(Any) → 具体 TypedDict
+
+V0.17.0 自承"anthropic SDK TypedDict 紧 + 社区惯例 dict 字面量, 留着". V0.17.1 spike 实测 `anthropic.types` 的 `MessageParam / TextBlockParam / ToolParam / ToolChoiceAnyParam` 都已稳定 export, **可直接用 TypedDict 类型注解或具体 cast 替换 cast(Any)**.
+
+替换前 (V0.17.0):
+```python
+system=cast(Any, [{"type": "text", "text": SYSTEM_PROMPT, "cache_control": {...}}]),
+tools=cast(Any, self._tools),
+tool_choice=cast(Any, {"type": "any"}),
+messages=cast(Any, [{"role": "user", "content": user_content}]),
+```
+
+替换后 (V0.17.1):
+```python
+system: list[TextBlockParam] = [{"type": "text", "text": SYSTEM_PROMPT, "cache_control": {"type": "ephemeral"}}]
+tool_choice: ToolChoiceAnyParam = {"type": "any"}
+resp = await self._client.messages.create(
+    ...,
+    system=system,
+    tools=cast(list[ToolParam], self._tools),  # _schema 返 dict[str, Any] 中性结构, 仍需 cast
+    tool_choice=tool_choice,
+    messages=cast(list[MessageParam], [{"role": "user", "content": user_content}]),
+)
+```
+
+净改善:
+- **0 处 `cast(Any, ...)` for SDK params** (V0.17.0: 4 处)
+- 2 处直接 TypedDict annotate (`system` / `tool_choice`) — 完全无 cast
+- 2 处 `cast(具体 TypedDict, ...)` (`tools` / `messages`) — 比 `cast(Any)` 强类型, mypy 仍能查内部字段类型. 之所以仍 cast 是因为 `to_anthropic_tools()` 返 `list[dict[str, Any]]` 中性结构 (跨 provider 共享 _schema), 不是直接构造 `ToolParam`; `user_content` 里 `image` block 是 `dict[str, Any]` 因 SDK `ImageBlockParam` 嵌套 `source` TypedDict 不便 inline literal
+
+V0.17.0 CHANGELOG `留 V0.18+` §1 标的 "anthropic.py:68-77 4 处 cast(Any)" → V0.17.1 已清.
+
+### Compatibility
+- **行为 100% 与 V0.17.0 一致** (纯类型层 / import 路径迁移, 主路径无 semantic 变化)
+- 255 passed + 2 skipped, ruff 0, mypy strict 0 (21 source files)
+- bump: pyproject.toml + `__init__.py` `0.17.0` → `0.17.1`
+
+### Why patch (V0.17.1) 不 bump V0.18
+- 是 V0.17.0 自承"留 V0.18+"的清债收尾, 性质是 V0.17 minor 周期内的 follow-up, 不开新 minor
+- V0.18.0 留给真正能力跃迁 (e.g. actuator 扩 keyboard_shortcut/paste, V0.16.31 spike 落档但门槛未到, 当前 1/3 真实任务失败)
+
 ## [0.17.0] - 2026-05-05
 
 ### Refactor (Action discriminated union — V0.16.12 标的技术债清债, mypy 自动 narrow)

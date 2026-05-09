@@ -15,8 +15,7 @@ from pathlib import Path
 import pytest
 
 from web_agent.captcha import CaptchaInfo, detect, wait_for_resolution
-from web_agent.llm.base import Action
-from web_agent.types import DoneAction
+from web_agent.types import Action, DoneAction
 from web_agent.loop import run_react_loop
 from web_agent.perceiver import Mark
 
