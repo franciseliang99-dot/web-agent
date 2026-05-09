@@ -2,6 +2,59 @@
 
 All notable changes to web-agent. 版本号遵循 SemVer 简化形式（V<major>.<minor>.<patch>）。
 
+## [0.18.5] - 2026-05-08
+
+### Spike (V0.19 actuator gate 主动凑触发条件 — 2 reproducible fail 复刻)
+
+V0.18 周期闭合后, 接 subagent 推荐主动跑 edit-time 候选凑 V0.16.31 actuator gate (≥2 真实失败), 不等被动 user reports (repo 0 stars solo-dogfood 阶段).
+
+#### Spike 1 ✅ success: 裸 textarea append (`tests/fixtures/edit_append_test.html`)
+
+- task: textarea 预填 'Hello world', append ' GOODBYE'
+- result: `Hello world GOODBYE` (3 steps to done)
+- 结论: 简单 `<textarea>` click default 光标到末尾, type append 工作正常
+
+#### Spike 2 ❌ FAIL: contenteditable 多段追加 (`tests/fixtures/edit_contenteditable_test.html`)
+
+- task: `<div contenteditable>` 含 3 段 `<p>` 文本, 在末尾追加 'APPENDED LINE'
+- result: `LOOP_DETECTED 在 step 3：连续 3+ 次同一 action click:{"mark_id": 1}`
+- fail mode: 反复 click 试定位光标 → V0.5.0 anti-loop hard abort
+
+#### V0.16.31 dogfood (dev.to edit existing article) ❌ FAIL — 同 root cause
+
+- step 0-1 click Edit + textarea ✓ → step 2-6 反复 click 试定位 ❌ → step 7 anti-loop abort
+- LLM thought 自述 "工具限制 (无键盘快捷键如 Ctrl+End)"
+
+#### Root cause (从"LLM thought 自述"升级到 controlled reproducer)
+
+- `<textarea>` 简单 → actuator click + type 工作 ✓
+- `<div contenteditable>` / 富文本编辑器 → click 光标定位不到末尾, actuator 缺 `keyboard_shortcut` (Ctrl+End / End key) + `paste` action
+- 之前根因只是 LLM 自述, 现 Spike 2 在 isolated fixture 控制环境复刻 → reproducer 在手可 TDD
+
+#### Gate 状态
+
+- README 阈值 "≥2 真实失败 当前 1/3" → 2 reproducible fail (V0.16.31 + Spike 2) → **实质满足**
+- V0.16.31 commit body 阈值 "≥3 真实失败" → 严格 fixture 不算"真实"则还差 1; 但同 root cause
+- 决策: reproducer fixture 在手 → **V0.19 立项 actuator 扩 keyboard_shortcut + paste**
+
+#### V0.19 预告
+
+- 新 actions: `KeyboardShortcutAction(key)` + `PasteAction(text)`
+- 实现路径: `page.keyboard.press()` + clipboard / contenteditable value setter
+- 测试: Spike 2 fixture 作 V0.19 acceptance test (跑必须 pass)
+- 工时估: 6-10h (V0.16.31 spike 估)
+
+### Compatibility
+
+- **行为 100% 与 V0.18.4 一致** — 纯 fixture + CHANGELOG, 无 src/ 代码改动
+- 259 passed + 2 skipped, ruff 0, mypy strict 0 (21 source files)
+- bump: pyproject.toml + `__init__.py` + uv.lock `0.18.4` → `0.18.5`
+
+### Why patch (V0.18.5) 不开 V0.19 同时
+
+- V0.18.5 是 V0.18 minor 周期最后一笔 (ship → simplify → dogfood → README cheat sheet → ARCHITECTURE/demos → V0.19 trigger 数据落档)
+- V0.19.0 留给真 actuator 扩展 (keyboard_shortcut + paste action 实现 + LLM tool schema + system prompt)
+
 ## [0.18.4] - 2026-05-08
 
 ### Docs (V0.18 周期收尾文档闭环 — ARCHITECTURE §5.5 elicit 设计 + demos showcase + tests fixture)

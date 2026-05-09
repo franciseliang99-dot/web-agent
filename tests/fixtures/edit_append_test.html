@@ -1,0 +1,20 @@
+<!DOCTYPE html>
+<html>
+<head><title>Edit-append spike fixture</title></head>
+<body>
+  <h1>Edit-append capability spike (V0.19 actuator gate)</h1>
+  <p>Task: append ' GOODBYE' (note leading space) to the textarea below.
+     Final content should be exactly 'Hello world GOODBYE'.</p>
+  <textarea id="content" rows="5" cols="50">Hello world</textarea>
+  <div id="status" style="margin-top:1em;color:gray;font-family:monospace">
+    [textarea contains: <span id="show"></span>]
+  </div>
+  <script>
+    const ta = document.getElementById('content');
+    const show = document.getElementById('show');
+    const update = () => show.innerText = JSON.stringify(ta.value);
+    ta.addEventListener('input', update);
+    update();
+  </script>
+</body>
+</html>

@@ -1,0 +1,29 @@
+<!DOCTYPE html>
+<html>
+<head><title>Contenteditable edit-append spike fixture</title></head>
+<body>
+  <h1>Contenteditable edit-append (V0.19 actuator gate spike #2)</h1>
+  <p>Task: append a new paragraph 'APPENDED LINE' to the END of the editable area below.
+     Do NOT delete or modify the 3 existing paragraphs.</p>
+  <div contenteditable="true" id="editor" style="border:1px solid #888;padding:1em;min-height:200px;width:600px">
+    <p>Para 1: lorem ipsum dolor sit amet.</p>
+    <p>Para 2: consectetur adipiscing elit.</p>
+    <p>Para 3: sed do eiusmod tempor incididunt.</p>
+  </div>
+  <div id="status" style="margin-top:1em;color:gray;font-family:monospace">
+    [paragraph count: <span id="pcount"></span> | last text: <span id="lastp"></span>]
+  </div>
+  <script>
+    const editor = document.getElementById('editor');
+    const pcount = document.getElementById('pcount');
+    const lastp = document.getElementById('lastp');
+    const update = () => {
+      const ps = editor.querySelectorAll('p');
+      pcount.innerText = ps.length;
+      lastp.innerText = ps.length > 0 ? JSON.stringify(ps[ps.length-1].innerText) : '(none)';
+    };
+    editor.addEventListener('input', update);
+    update();
+  </script>
+</body>
+</html>
