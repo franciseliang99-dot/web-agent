@@ -2,6 +2,21 @@
 
 All notable changes to web-agent. 版本号遵循 SemVer 简化形式（V<major>.<minor>.<patch>）。
 
+## [0.20.2] - 2026-05-09
+
+### Fix (chore)
+
+- `.gitignore` 补 `data/upwork.db` 一行 (V0.20.0 新加 SQLite 漏配; jd_extract 第一次
+  `sqlite3.connect(data/upwork.db)` 会创建文件被 git status 抓到, score_upwork.py 跑空 db 时同样
+  落 0 字节副本). 同模式 trace.db / memory.db 已显式列, 跟齐显式 ignore 风格 (不用 `data/*.db`
+  通配, 防未来误 ignore 该 commit 的 db schema sample).
+- 删 `data/upwork.db` 0 字节残留 (V0.20.0 Phase 1 验证前 score_upwork smoke test 留下的副作用).
+
+### Compatibility
+
+- 行为 0 改, 271 passed + 2 skipped 保持.
+- bump 0.20.1 → 0.20.2 (纯 repo hygiene, 无代码 / 行为变化).
+
 ## [0.20.1] - 2026-05-09
 
 ### Refactor (V0.20.0 simplify audit — 复用 captcha.wait_for_resolution + 提常量)

@@ -24,6 +24,7 @@ data/screenshots/
 data/replays/
 data/trace.db
 data/memory.db
+data/upwork.db
 data/*.db-journal
 data/*.db-wal
 data/*.db-shm
