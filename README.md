@@ -157,6 +157,22 @@ uv run web-agent-memory wikipedia.org --db data/memory.db
 ```
 Claude Desktop 重启后会出现 web_agent_run / web_agent_get_replay / web_agent_query_memory 三个 tool。
 
+**safety 拦截时 elicit UI 操作** (Claude Code 2.1.137+ / 任意支持 elicitation 的 client):
+
+碰到敏感动作 (send/publish/pay/delete/transfer/unsubscribe 等) 时, MCP server 调 `ctx.elicit()` 弹双层 UI:
+
+    ❯ ✔ Approve: ☐                  ← schema 字段 (Space 切换 ☐/☑)
+       Accept    Decline             ← form 提交 (Tab/Enter)
+
+| 意图 | 操作 | 结果 |
+|---|---|---|
+| **放行** | Space 勾 ☑ + `Accept` | 真 click 继续, trace 标记 `elicited_approval_rule` |
+| **拦截** | `Decline` (checkbox 无关) | task SAFETY_BLOCK abort |
+| **拦截 (等价)** | ☐ 不勾 + `Accept` | 同上 |
+| ⚠️ **不要 Esc** | Esc | MCP error -32001 user-cancel, tool fail + trace 半死. 要拦截请用 `Decline` |
+
+V0.18.2 真账号 dogfooding e2e 双路径已验, 详见 CHANGELOG V0.18.2.
+
 **已知缺口** (不在主蓝本但需追):
 - ~~patchright-python 决断~~ — V0.16.14 spike 实测关闭: `connect_over_cdp` 接管模式下 patchright 的 client patch 旁路 (A=C 19/32 完全相同), 仅在 launch_persistent_context 模式才有效 → 与项目 CDP 接管核心架构冲突, 永久 NO-GO. 详见 ARCHITECTURE §1.3
 - ~~curl_cffi TLS 指纹接入~~ — V0.16.15 永久 NO-GO: web-agent 接管真 Chrome, 所有浏览流量走 Chrome 自己的 BoringSSL = 真 Chrome JA3/JA4, curl_cffi 在浏览路径完全没用 (LLM API 端点不做反爬也用不上). W6+ 若引入"Python 直发 HTTP 旁路"才重评估. 详见 ARCHITECTURE §1.3

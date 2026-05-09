@@ -2,6 +2,31 @@
 
 All notable changes to web-agent. 版本号遵循 SemVer 简化形式（V<major>.<minor>.<patch>）。
 
+## [0.18.3] - 2026-05-08
+
+### Docs (V0.18.2 elicit UI cheat sheet 推到 README MCP setup 节)
+
+V0.18.2 dogfooding 暴露的 elicit UI 双层操作语义 + Esc 陷阱本来只在 CHANGELOG 落档. 首次接入者从 README L147 "跑 MCP server" 段读到 config JSON 装上, 碰到 safety 弹窗会重踩 Esc 陷阱 (实际 dogfooding 中作者本人就踩过, 误判 V0.18.0 有 bug).
+
+#### 改动
+
+- `README.md` L158 "三个 tool" 后插一段 "**safety 拦截时 elicit UI 操作**":
+  - elicit UI 双层结构示意 (`Approve: ☐` checkbox + `Accept`/`Decline` button)
+  - 4 行操作表 (放行 / 拦截 / 拦截等价 / ⚠️ 不要 Esc)
+  - 反向链接 CHANGELOG V0.18.2 详细 dogfooding 落档
+
+#### Why patch (V0.18.3) 不 V0.19
+
+- 纯文档补丁 (V0.18.2 CHANGELOG 已写, 这一版只是把它推到用户首次接触处)
+- 无代码改动 / 无 API 变化 / 测试基线一致
+- 跟 V0.18.x 周期收尾 (V0.18.0 ship → V0.18.1 simplify → V0.18.2 dogfooding → V0.18.3 user-facing 文档)
+
+### Compatibility
+
+- **行为 100% 与 V0.18.2 一致** — 纯 README 补丁, 无代码改动
+- 259 passed + 2 skipped, ruff 0, mypy strict 0 (21 source files)
+- bump: pyproject.toml + `__init__.py` `0.18.2` → `0.18.3`
+
 ## [0.18.2] - 2026-05-08
 
 ### Verification (V0.18.0 elicit 真账号 dogfooding e2e — 双路径通过)
