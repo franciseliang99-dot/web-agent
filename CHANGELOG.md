@@ -2,6 +2,50 @@
 
 All notable changes to web-agent. 版本号遵循 SemVer 简化形式（V<major>.<minor>.<patch>）。
 
+## [0.18.4] - 2026-05-08
+
+### Docs (V0.18 周期收尾文档闭环 — ARCHITECTURE §5.5 elicit 设计 + demos showcase + tests fixture)
+
+V0.18 patch 周期 (V0.18.0 ship → V0.18.1 simplify → V0.18.2 dogfooding → V0.18.3 README cheat sheet) 收尾两块文档欠债:
+
+#### 1. `docs/ARCHITECTURE.md` 新增 §5.5 V0.18 elicitation callback
+
+V0.16.8 落 §5 MCP server 6 小节 (5.1 三 tools/两 resources / 5.2 progress 三轨 / 5.3 _RUN_LOCK / 5.4 9222 检查 / 5.5 SystemExit 转译 / 5.6 print 抑制) 是 V0.16.4 ship 完 progress wire-up 后的 backfill. 同模式: V0.18.0 ship 完 elicit callback 后 ARCHITECTURE 也该补本节. 本版 §5.5 内容:
+
+- ports 类型 (`SafetyApprovalCallback = Callable[[str, str], Awaitable[bool]]`) 与 注入链 (`mcp_server` → `cli` → `loop`)
+- 优先级链 (env AUTO_APPROVE > cb > abort)
+- MCP `ctx.elicit()` 包装 `_elicit_safety` 实现细节 + `SafetyApproval` schema 限制
+- 异常兜底 (旧 client 抛异常 → 视作 decline) + trace 标记 (`elicited_approval_rule`)
+- V0.18.2 dogfood 实证 (task IDs `89a4be93` / `96118978`) + Esc 陷阱
+- 解耦设计选项 (为什么 ports 在 `loop.py` 不在 `safety.py` / 为什么 `cli.py` 默认 cb=None)
+
+老 §5.5 SystemExit / §5.6 print → 顺移到 §5.6 / §5.7.
+
+#### 2. `demos/elicit_showcase.py` + `tests/fixtures/dogfood_publish.html`
+
+V0.18.2 dogfooding 用过的 `/tmp/dogfood_publish.html` 是 ad-hoc fixture, 这次 check in 到 `tests/fixtures/`. `demos/elicit_showcase.py` 演示 SafetyApprovalCallback 程序化定制 — CLI 模式跑 web-agent 时不靠 MCP elicit, 改用终端 `input()` 问 y/n (`asyncio.to_thread(input)` 防卡 event loop).
+
+跑法:
+
+```bash
+bash scripts/start_chrome.sh             # 终端 A
+uv run python demos/elicit_showcase.py   # 终端 B
+```
+
+agent 推到 click Publish → 终端打印 rule + reason → 你输 y/n. mirrors V0.16.1 mcp ship → V0.16.2/V0.16.3 demo 同周期模式 (本次延后到 V0.18.4 是 V0.18 周期内 catch-up).
+
+### Compatibility
+
+- **行为 100% 与 V0.18.3 一致** — 纯文档 + demo + fixture, 无 src/ 代码改动, 无 API 变化
+- 259 passed + 2 skipped (与 V0.18.3 baseline 一致), ruff 0, mypy strict 0 (21 source files)
+- bump: pyproject.toml + `__init__.py` + uv.lock `0.18.3` → `0.18.4`
+
+### Why patch (V0.18.4) 不 V0.19
+
+- V0.18 周期收尾 (5 patch: ship → simplify → dogfood → README cheat sheet → ARCHITECTURE + demos), 不开新 minor
+- 无新外部能力 / 无 API 变化
+- V0.19+ 留给真正能力跃迁 (e.g. actuator 扩 keyboard_shortcut/paste — V0.16.31 spike 触发条件 ≥2 真实任务失败 仍未达, 当前 1/3)
+
 ## [0.18.3] - 2026-05-08
 
 ### Docs (V0.18.2 elicit UI cheat sheet 推到 README MCP setup 节)

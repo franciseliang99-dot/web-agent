@@ -390,11 +390,69 @@ async def web_agent_run(...):
 
 **为什么 `asyncio.to_thread` 包阻塞 urllib**：urllib `urlopen(timeout=2)` 是同步阻塞 ≤2s；不包 to_thread 会卡住 MCP 事件循环，进而卡住其他 tool/resource 的并发请求。stdlib 路径（不引 aiohttp 依赖）+ 异步友好。
 
-### 5.5 SystemExit → RuntimeError 转译
+### 5.5 V0.18 elicitation callback：safety 拦 → 询问用户 → continue/abort
+
+V0.18.0 把 safety hardcoded "拦截即 abort" 改为可注入的 callback, 让 MCP client 决定阻拦动作的去留:
+
+```
+loop.py (业务层)              — 接 SafetyApprovalCallback ports, safety check 失败 + cb → await
+  ↑
+cli.py (组合根 CLI)            — 透传 safety_approval_cb=None 默认 (维持 env-based)
+  ↑
+mcp_server.py (组合根 MCP)     — ctx 可用时构造 _elicit_safety wrapper 注入
+```
+
+**ports 类型** (`web_agent.loop.SafetyApprovalCallback`):
+
+```python
+SafetyApprovalCallback = Callable[[str, str], Awaitable[bool]]
+# (rule, reason) → approve (True=放行 / False=拦截)
+```
+
+**优先级链** (`loop.py` 主循环):
+
+```
+1. env WEB_AGENT_AUTO_APPROVE=* / 命中规则 → safety._block 直接放行 (cb 不调)
+2. env 未放行 + cb 可用 → await cb(rule, reason); accept → 继续 dispatch + 标 elicited_approval_rule; decline → abort
+3. env 未放行 + cb=None (CLI 模式默认) → 维持原 SAFETY_BLOCK abort
+```
+
+**MCP elicit 注入** (`mcp_server._elicit_safety` 由 `ctx` 触发构造):
+
+```python
+async def _elicit_safety(rule: str, reason: str) -> bool:
+    try:
+        result = await ctx.elicit(message=..., schema=SafetyApproval)
+    except Exception as e:
+        logger.warning("ctx.elicit 失败 (%r) → 视作 decline", e)
+        return False
+    if isinstance(result, AcceptedElicitation):
+        return bool(result.data.approve)
+    return False  # DeclinedElicitation / CancelledElicitation / 其他
+```
+
+**Schema 限制**: `SafetyApproval = BaseModel(approve: bool)` — MCP elicitation primitive `_validate_elicitation_schema` 只允许 primitive 字段 (str/int/float/bool), 不能嵌套 model.
+
+**异常兜底**: cb 抛任何异常 (e.g. 旧 client 不支持 elicitation) → loop.py 视作 decline + log warning, 不 break loop. 安全 default.
+
+**trace 标记**: cb 返 True 时, 主 dispatch 写 trace step 时给 `action_args` 加 `"elicited_approval_rule": rule`. replay HTML 可高亮"用户授权放行"的 step. V0.18.2 dogfood task `89a4be93e163` 的 step 2 click `action_args` 实证: `{"mark_id": 2, "elicited_approval_rule": "send-or-pay"}`.
+
+**Esc 陷阱** (V0.18.2 dogfooding 实测): Claude Code 2.1.137 elicit 弹窗按 Esc → MCP error -32001 user-cancel, **不是 decline**. tool 整体 fail, trace 半死 (e.g. task `96118978d12b`: step 2 已写 `elicited_approval_rule` 但 `task.result=NULL`). 客户端 UI 操作语义见 README MCP setup 节 (V0.18.3 落档).
+
+**为什么 ports 在 `loop.py` 不在 `safety.py`**:
+- `safety.py` 是纯函数 (无 IO, 无 await), 改它接 cb 会污染 domain 层语义
+- `loop.py` 是业务层, 本就持有 `progress_cb` (V0.16.4) 和 safety 调用上下文, 加 `safety_approval_cb` 自然
+- 符合 CLAUDE.md "解耦优先" 依赖方向: domain (safety / types) ← ports (loop SafetyApprovalCallback) ← 业务层 (loop) ← 组合根 (cli / mcp_server)
+
+**为什么 `cli.py` 默认 `cb=None` 而不构造终端 prompt 默认实现**:
+- CLI 模式默认应保持向后兼容 (V0.17.x 行为 = abort), 用户主动覆盖才走 cb 路径
+- 想要 CLI 模式带 cb (终端 prompt) → `demos/elicit_showcase.py` 是 reference 实现, 用户拷贝改造即可
+
+### 5.6 SystemExit → RuntimeError 转译
 
 `replay.load_task` 用 `sys.exit("db 不存在: ...")` 报错（CLI 行为）。MCP tool/resource 调用方拿 SystemExit 会让 server 进程退出（FastMCP 不 catch BaseException）。所以 `_render_replay` 内 catch SystemExit → `raise RuntimeError(...) from e`，让 SDK 序列化为 tool/resource error 而不让 server 死。
 
-### 5.6 print → logging.info(stderr) 硬前提
+### 5.7 print → logging.info(stderr) 硬前提
 
 stdio transport 模式下 stdout 是 JSON-RPC 通道，**任何 `print()` 污染会破坏协议**。所以 V0.16.0 把业务模块 25 处 print 改 `logger.warning/info`（`browser` / `perceiver` / `loop` / `cli`）；保留 7 处用户面向 stdout（`cli` 任务结果 / `memory` CLI dump / `replay` "wrote ..."）。`cli.main()` + `mcp_server.main()` 都 `logging.basicConfig(stream=sys.stderr)` 让 INFO 走 stderr。
 
