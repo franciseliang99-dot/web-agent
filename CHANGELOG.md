@@ -2,6 +2,62 @@
 
 All notable changes to web-agent. 版本号遵循 SemVer 简化形式（V<major>.<minor>.<patch>）。
 
+## [0.20.4] - 2026-05-09
+
+### Refactor (路径 D 适配 multi-provider — jd_extract 切到 run_react_loop 复用)
+
+V0.20.3 Phase 1 e2e pre-flight 实测用户 `.env` `ANTHROPIC_API_KEY` 空 + 用户只持 Kimi-k2.6 key.
+WebFetch 验 Moonshot 官方 Anthropic-compat endpoint 404 (kimrel 等第三方代理才有), Kimi 必走 OpenAI
+compat (`api.moonshot.ai/v1`, tool_choice 仅支持 `auto`/`none`, vision 用 `image_url` 不是 anthropic
+风格 `image/source.base64`).
+
+V0.20.0 设计原则 "jd_extract 不依赖 ReAct loop / memory / planner" 在 multi-provider 需求下不可行 —
+撕开复用 `run_react_loop` 是最小 viable 解 (1-2h 工时, vs 接 LLMClient 抽象 V0.21+ 3-4h).
+
+### Changed
+
+- `src/web_agent/jd_extract.py`:
+  - 删 `from anthropic import AsyncAnthropic` + `anthropic.types` 4 import (V0.20.0 直调路径)
+  - 删 `_JD_FIELDS_TOOL` (V0.20.0 hand-rolled tool schema) + `_JD_EXTRACT_SYSTEM` 常量
+  - 删 `llm_extract_jd(client, model, screenshot_b64)` 函数 (V0.20.0 直调 messages.create)
+  - 删 `wait_captcha_resolution()` (`run_react_loop` 内置 `_handle_captcha` loop.py:319 等价覆盖)
+  - 删 `DEFAULT_CAPTCHA_TIMEOUT_S` 常量 (`run_react_loop` 走 `WEB_AGENT_CAPTCHA_TIMEOUT_S` env)
+  - 删 `DEFAULT_MODEL = "claude-sonnet-4-6"` (改 `make_client(model=None)` 按 env 推断)
+  - 加 `from web_agent.llm import make_client` + `from web_agent.loop import run_react_loop`
+  - 加 `_JD_EXTRACT_GOAL` 字符串 — 引导 LLM 仅 perceive → done(JSON), 严禁 click/scroll/type/extract
+  - 加 `_parse_jd_result(result)` — 三层 fallback (严格 JSON / markdown code block / 裸 `{...}` block)
+  - 加 `_check_loop_error(result)` — 识别 6 种 ReAct sentinel (CAPTCHA_TIMEOUT / WALLCLOCK_EXCEEDED /
+    LOOP_DETECTED / max_steps 耗尽 / SAFETY_BLOCK / LLM_FAILED) → SystemExit
+  - `extract_url` 主体: 替直调 SDK 为 `client = make_client(model=model)` + `result_str = await
+    run_react_loop(...)` (max_steps=3, max_wallclock_s=120s, 复用 cli.py 的 trace 路径)
+- 模块 docstring: 删 "不依赖 ReAct loop", 改 "复用 run_react_loop 让 LLM 走 done(JSON) 路径".
+
+### Add (.env config for Kimi-k2.6 走 OpenAI compat)
+
+- `.env.example` 已有 Kimi 模板 (line 13-19), 用户填:
+  - `OPENAI_API_KEY=<kimi_key>`
+  - `OPENAI_BASE_URL=https://api.moonshot.ai/v1` (国际版) 或 `https://api.moonshot.cn/v1` (国内版)
+  - `WEB_AGENT_MODEL=kimi-k2.6`
+- 装 OpenAI provider deps: `uv sync --extra openai` (cli.py 已用 OpenAI provider, jd_extract 共享).
+- `make_client(model="kimi-k2.6")` 按前缀自动 → `OpenAIClient` (`llm/__init__.py:33`)
+  → `OpenAIClient.__init__` 检测 `base_url` 含 `moonshot` (`openai.py:54`) → 自动开 Kimi 补丁
+  (`max_completion_tokens` → `max_tokens`, `tool_choice="required"` → `"auto"`).
+
+### Compatibility
+
+- 数据契约 100% 与 V0.20.0/3 一致: `data/upwork.db` `upwork_jds` 表字段不变, `score_upwork.py` 桥不变,
+  console_scripts (`web-agent-jd`) CLI flags 不变.
+- LLM 提供商: anthropic (claude-*) + openai (gpt-* / kimi-*) 双路, 与 cli.py 一致.
+- captcha guard: 行为等价 V0.20.3, 但写 `data/trace.db` (jd_extract 现走 trace 系统, 与 cli.py 一致).
+- bump 0.20.3 → 0.20.4 (refactor, multi-provider 解锁).
+
+### Why patch (V0.20.4) 不 minor (V0.21.0)
+
+- 用户感知层零变化 (entrypoint / CLI flags / db schema 都不动); 内部实现切换 (直调 SDK → 复用 ReAct loop).
+- 新增 multi-provider 是 cli.py 已有能力的延伸到 jd_extract, 不是 jd_extract 全新能力.
+- 真正 minor (V0.21+) 触发条件: 给 LLMClient Protocol 加新接口 `extract_with_tool` (jd_extract
+  独立 ReAct-free 路径), 比当前 D-route (复用 ReAct) 多 ~3h 工时, 暂 defer.
+
 ## [0.20.3] - 2026-05-09
 
 ### Fix (chore — 反爬 UX patch)

@@ -1,15 +1,19 @@
-"""V0.20.0 JD extract entrypoint — 从单个 Upwork JD URL 抽 9 字段写 SQLite.
+"""V0.20.4 JD extract entrypoint — 复用 cli.py 的 run_react_loop 让 LLM 走 done(JSON) 路径.
 
 路径 D (CHANGELOG V0.20.0): 用户从 Upwork 原生 saved-search email alert 手动拿 JD URL,
-贴给 web-agent-jd, 走 deterministic perceive + 单次 Anthropic SDK tool_use, 写 data/upwork.db.
-评分由 scripts/score_upwork.py 桥到 jobscout-bot eval-jd (rubric 单 SoT).
+贴给 web-agent-jd, web-agent extract 9 字段写 data/upwork.db. 评分由 scripts/score_upwork.py
+桥到 jobscout-bot eval-jd (rubric 单 SoT).
+
+V0.20.4 撕开 V0.20.0 设计原则 "不依赖 ReAct loop" — multi-provider 需求 (Kimi-k2.6 走 Moonshot
+OpenAI compat, 不支持 anthropic SDK 直调 + tool_choice specific name) 强制 jd_extract 复用
+run_react_loop. LLM 看 SoM 截图后, 用 done.result 字段塞 JSON 字符串, jd_extract 三层 fallback
+解析后写库.
 
 设计原则 (按 CLAUDE.md 解耦):
-- 本文件是独立组合根 (mirror cli.py), 不依赖 ReAct loop / memory / planner.
-- 复用 chrome_launcher / browser / perceiver / captcha (无状态业务层 / adapter).
-- 真人节律守护 (≤1/min, ≤30/30min) 放本层, SQLite 自身做状态存储, 跨 shell 重启状态连续.
-- LLM extract 直调 Anthropic SDK (不复用 AnthropicClient.plan: 它的 SYSTEM_PROMPT 与 7 ReAct tools
-  是 ReAct-specific, JD extract 是不同语义).
+- 复用 chrome_launcher / browser / loop (ReAct 主循环 + 五大守护: captcha / safety / anti-loop /
+  wallclock / LLM-failed) / llm.make_client (provider 自动按 model 名前缀推断)
+- jd_extract 自身只: rate-limit / SQLite UPSERT / goal 引导 / done.result JSON 解析
+- max_steps=3 限单步 perceive → done; LLM 误用 click/scroll → ReAct anti-loop 兜底
 """
 
 from __future__ import annotations
@@ -19,68 +23,56 @@ import asyncio
 import json
 import logging
 import os
+import re
 import sqlite3
 import sys
 import time
 from pathlib import Path
-from typing import Any, cast
+from typing import Any
 
-from anthropic import AsyncAnthropic
-from anthropic.types import (
-    MessageParam,
-    TextBlockParam,
-    ToolChoiceToolParam,
-    ToolParam,
-)
 from dotenv import load_dotenv
-from playwright.async_api import Page, async_playwright
+from playwright.async_api import async_playwright
 
 from web_agent.browser import apply_stealth, connect
-from web_agent.captcha import detect as captcha_detect, wait_for_resolution as captcha_wait
 from web_agent.chrome_launcher import ensure_chrome_running
-from web_agent.notify import notify
-from web_agent.perceiver import perceive
+from web_agent.llm import make_client
+from web_agent.loop import run_react_loop
 
 logger = logging.getLogger(__name__)
 
 DEFAULT_DB = Path("data/upwork.db")
-DEFAULT_MODEL = "claude-sonnet-4-6"
-DEFAULT_CAPTCHA_TIMEOUT_S = 300.0
 RATE_LIMIT_MIN_INTERVAL_S = 60.0
 RATE_LIMIT_SESSION_WINDOW_S = 1800.0
 RATE_LIMIT_SESSION_CAP = 30
 DESCRIPTION_TRUNC_CHARS = 8000
+JD_EXTRACT_MAX_STEPS = 3
+JD_EXTRACT_MAX_WALLCLOCK_S = 120.0
 
 
-# ===== JD extract tool schema (单工具 single tool_use, 不复用 _schema.TOOL_SCHEMAS) =====
+_JD_EXTRACT_GOAL = """你是 Upwork JD 字段提取器. 当前页面是 Upwork JD 详情页.
 
-_JD_FIELDS_TOOL: dict[str, Any] = {
-    "name": "report_jd",
-    "description": "从 Upwork JD 页面截图提取字段为 JSON. 看不到的字段 omit (不要瞎猜).",
-    "input_schema": {
-        "type": "object",
-        "properties": {
-            "thought": {"type": "string", "description": "你看到了什么 / 哪些字段缺失"},
-            "title": {"type": "string", "description": "JD 标题原文"},
-            "description": {"type": "string", "description": "JD body 完整内容"},
-            "budget": {"type": "string", "description": "预算原文 e.g. 'Fixed-price $500' 或 '$30-50/hr'"},
-            "hourly": {"type": "boolean", "description": "true=hourly, false=fixed-price"},
-            "client_country": {"type": "string"},
-            "client_rating": {"type": "number", "description": "客户评分 0-5 浮点"},
-            "posted_at": {"type": "string", "description": "发布时间原文 e.g. 'Posted 2 hours ago'"},
-            "proposals_count": {"type": "integer", "description": "已提交 proposals 数"},
-            "connect_cost": {"type": "integer", "description": "投递所需 connects 数"},
-        },
-        "required": ["thought", "title", "description"],
-    },
-}
+仅 perceive 截图后**直接调 done 工具**, 把以下 9 字段塞进 done.result (单行严格 JSON, UTF-8):
 
-_JD_EXTRACT_SYSTEM = """你是 Upwork JD 字段提取器. 给你一张 Upwork JD 页面截图, 必须调用 `report_jd` 工具填字段.
-title / description 必填; 其它字段截图里看不到就 omit, 严禁瞎猜或编造.
-description 应包含 JD body 完整内容 (会被截到 8000 字符)."""
+{"thought": "你看到了什么", "title": "JD 标题原文", "description": "JD body 完整内容 (≤8000 字符)", "budget": "$30/hr 或 Fixed-$500", "hourly": true 或 false, "client_country": "...", "client_rating": 4.8, "posted_at": "Posted 2 hours ago", "proposals_count": 15, "connect_cost": 12}
+
+约束:
+- title / description 必填, 看不到 raise; 其它字段看不到填 null 不要瞎猜
+- 严禁 click / scroll / type / extract — 直接发 done. 整个任务 1 步完成.
+- done.result 字段填 JSON 字符串本体 (不要包 markdown code fence, 不要包 prose 描述).
+"""
 
 
-# ===== SQLite =====
+# run_react_loop 失败 sentinel 字符串 (loop.py 的 6 种 abort 路径). 命中即 jd extract abort.
+_LOOP_ERROR_PREFIXES = (
+    "CAPTCHA_TIMEOUT", "WALLCLOCK_EXCEEDED", "LOOP_DETECTED",
+    "(max_steps 耗尽未完成)", "SAFETY_BLOCK", "LLM_FAILED",
+)
+
+_MD_CODE_BLOCK_RE = re.compile(r"```(?:json)?\s*(\{.*?\})\s*```", re.DOTALL)
+_BARE_BRACE_RE = re.compile(r"\{[^{}]*(?:\{[^{}]*\}[^{}]*)*\}", re.DOTALL)
+
+
+# ===== SQLite (与 V0.20.0 一致, 数据契约不变) =====
 
 _INIT_SQL = """
 CREATE TABLE IF NOT EXISTS upwork_jds (
@@ -142,7 +134,7 @@ def check_rate_limit(conn: sqlite3.Connection, now: float | None = None) -> None
 
 
 def upsert_jd(conn: sqlite3.Connection, row: dict[str, Any]) -> None:
-    """INSERT ... ON CONFLICT(url) DO UPDATE. 重贴同 URL 刷 scraped_at + 字段, 保 id 与已写 score."""
+    """INSERT ... ON CONFLICT(url) DO UPDATE. 重贴同 URL 刷字段, 保 id 与已写 score."""
     placeholders = ",".join("?" * len(_UPSERT_FIELDS))
     cols = ",".join(_UPSERT_FIELDS)
     update_set = ",".join(f"{f}=excluded.{f}" for f in _UPSERT_FIELDS if f != "url")
@@ -154,55 +146,52 @@ def upsert_jd(conn: sqlite3.Connection, row: dict[str, Any]) -> None:
     conn.commit()
 
 
-# ===== captcha guard (deterministic 路径专用; 不写 trace.db, jd_extract 不用 trace 系统) =====
+# ===== JSON 解析 (V0.20.4 新, 三层 fallback) =====
 
-async def wait_captcha_resolution(
-    page: Page, timeout_s: float = DEFAULT_CAPTCHA_TIMEOUT_S, poll_s: float = 3.0
-) -> bool:
-    """检测 → notify → poll 等用户手解. timeout False / 解决或无 captcha True."""
-    info = await captcha_detect(page)
-    if info is None:
-        return True
-    logger.info("%s 命中 @ %s — 请在浏览器手动解决, 每 %ss 重检 (超时 %ss)",
-                info.vendor, info.url[:80], poll_s, timeout_s)
-    notify("web-agent-jd captcha", f"{info.vendor} 命中, 请手解 ({info.url[:60]})")
-    resolved = await captcha_wait(page, timeout_s=timeout_s, poll_s=poll_s)
-    if resolved:
-        logger.info("%s 已清除", info.vendor)
-    else:
-        logger.warning("captcha %ss 未解, 中止", timeout_s)
-    return resolved
+def _ensure_dict(obj: Any) -> dict[str, Any]:
+    """json.loads 可能返非 dict (list / scalar). 不是 dict 就 SystemExit."""
+    if not isinstance(obj, dict):
+        raise SystemExit(f"LLM done.result JSON 顶层不是 object: type={type(obj).__name__}")
+    return obj
 
 
-# ===== LLM extract (直调 SDK, 单 tool_use) =====
+def _check_loop_error(result: str) -> None:
+    """识别 run_react_loop 6 种 sentinel 错误字符串, 命中 → SystemExit."""
+    head = result[:80]
+    for prefix in _LOOP_ERROR_PREFIXES:
+        if prefix in head:
+            raise SystemExit(f"jd extract aborted: {result[:200]}")
 
-async def llm_extract_jd(
-    client: AsyncAnthropic, model: str, screenshot_b64: str
-) -> dict[str, Any]:
-    """调一次 Anthropic vision + tool_use, 返回 report_jd input dict."""
-    user_content: list[dict[str, Any]] = [
-        {
-            "type": "image",
-            "source": {"type": "base64", "media_type": "image/png", "data": screenshot_b64},
-        },
-        {"type": "text", "text": "看 Upwork JD 截图, 调 report_jd 填字段. 看不到的 omit."},
-    ]
-    system: list[TextBlockParam] = [
-        {"type": "text", "text": _JD_EXTRACT_SYSTEM, "cache_control": {"type": "ephemeral"}}
-    ]
-    tool_choice: ToolChoiceToolParam = {"type": "tool", "name": "report_jd"}
-    resp = await client.messages.create(
-        model=model,
-        max_tokens=4096,
-        system=system,
-        tools=cast(list[ToolParam], [_JD_FIELDS_TOOL]),
-        tool_choice=tool_choice,
-        messages=cast(list[MessageParam], [{"role": "user", "content": user_content}]),
-    )
-    for block in resp.content:
-        if block.type == "tool_use":
-            return cast(dict[str, Any], dict(block.input))
-    raise RuntimeError(f"LLM 没返回 tool_use: {resp.content!r}")
+
+def parse_jd_result(result: str) -> dict[str, Any]:
+    """三层 fallback 解析 LLM done.result: 严格 JSON → ```json md block → 裸 {} block. 失败 SystemExit.
+
+    Public function (无下划线) 因为 tests/test_jd_extract.py 复用它做 unit test.
+    """
+    _check_loop_error(result)
+
+    text = result.strip()
+
+    try:
+        return _ensure_dict(json.loads(text))
+    except json.JSONDecodeError:
+        pass
+
+    md_match = _MD_CODE_BLOCK_RE.search(text)
+    if md_match:
+        try:
+            return _ensure_dict(json.loads(md_match.group(1)))
+        except json.JSONDecodeError:
+            pass
+
+    bare_match = _BARE_BRACE_RE.search(text)
+    if bare_match:
+        try:
+            return _ensure_dict(json.loads(bare_match.group(0)))
+        except json.JSONDecodeError:
+            pass
+
+    raise SystemExit(f"LLM done.result 不是 JSON: {result[:300]!r}")
 
 
 # ===== 主流程 =====
@@ -220,26 +209,19 @@ async def extract_url(
     url: str,
     db_path: Path = DEFAULT_DB,
     cdp_url: str | None = None,
-    model: str = DEFAULT_MODEL,
-    captcha_timeout_s: float = DEFAULT_CAPTCHA_TIMEOUT_S,
+    model: str | None = None,
+    captcha_timeout_s: float | None = None,
     ignore_rate_limit: bool = False,
 ) -> dict[str, Any]:
-    """主流程: rate-limit → spawn Chrome → connect → goto → captcha guard → perceive → LLM → upsert."""
+    """主流程: rate-limit → spawn Chrome → connect → goto → run_react_loop → parse JSON → upsert."""
     load_dotenv()
     cdp_url = cdp_url or os.environ.get("WEB_AGENT_CDP_URL", "http://127.0.0.1:9222")
+    if captcha_timeout_s is not None:
+        os.environ["WEB_AGENT_CAPTCHA_TIMEOUT_S"] = str(captcha_timeout_s)
 
     conn = init_upwork_db(db_path)
     if not ignore_rate_limit:
         check_rate_limit(conn)
-
-    api_key = os.environ.get("ANTHROPIC_API_KEY")
-    if not api_key:
-        raise SystemExit("ANTHROPIC_API_KEY 未设置 — 请填 .env 或 export 环境变量")
-    sdk_kwargs: dict[str, Any] = {"api_key": api_key, "max_retries": 4, "timeout": 120.0}
-    base_url = os.environ.get("ANTHROPIC_BASE_URL")
-    if base_url:
-        sdk_kwargs["base_url"] = base_url
-    client = AsyncAnthropic(**sdk_kwargs)
 
     await asyncio.to_thread(ensure_chrome_running, cdp_url)
 
@@ -249,15 +231,22 @@ async def extract_url(
         logger.info("navigating to %s", url)
         await page.goto(url, wait_until="domcontentloaded")
 
-        if not await wait_captcha_resolution(page, timeout_s=captcha_timeout_s):
-            raise SystemExit(f"captcha 未在 {captcha_timeout_s}s 内解决, 中止")
+        client = make_client(model=model)
+        logger.info("LLM provider=%s model=%s", client.name, client.model)
 
-        marks, screenshot_b64 = await perceive(page)
-        logger.info("perceived %d marks; calling LLM", len(marks))
+        result_str = await run_react_loop(
+            page=page,
+            client=client,
+            goal=_JD_EXTRACT_GOAL,
+            max_steps=JD_EXTRACT_MAX_STEPS,
+            max_wallclock_s=JD_EXTRACT_MAX_WALLCLOCK_S,
+            db_path=Path("data/trace.db"),
+            screenshots_dir=Path("data/screenshots"),
+        )
 
-        fields = await llm_extract_jd(client, model, screenshot_b64)
-        logger.info("LLM extract: title=%r budget=%r posted=%r",
-                    fields.get("title"), fields.get("budget"), fields.get("posted_at"))
+    fields = parse_jd_result(result_str)
+    logger.info("parsed JD: title=%r budget=%r posted=%r",
+                fields.get("title"), fields.get("budget"), fields.get("posted_at"))
 
     desc_raw = fields.get("description") or ""
     row: dict[str, Any] = {
@@ -287,13 +276,15 @@ def main() -> None:
     )
     parser = argparse.ArgumentParser(
         prog="web-agent-jd",
-        description="V0.20.0 路径 D: 从单个 Upwork JD URL 抽 9 字段写 SQLite",
+        description="V0.20.4 路径 D: 单 Upwork JD URL 抽 9 字段写 SQLite (复用 ReAct loop, multi-provider)",
     )
     parser.add_argument("url", help="Upwork JD URL")
     parser.add_argument("--db", default=str(DEFAULT_DB), help=f"SQLite path (默认 {DEFAULT_DB})")
     parser.add_argument("--cdp-url", default=None, help="覆盖 WEB_AGENT_CDP_URL")
-    parser.add_argument("--model", default=DEFAULT_MODEL)
-    parser.add_argument("--captcha-timeout-s", type=float, default=DEFAULT_CAPTCHA_TIMEOUT_S)
+    parser.add_argument("--model", default=None,
+                        help="覆盖 WEB_AGENT_MODEL (e.g. claude-sonnet-4-6 / kimi-k2.6 / gpt-5)")
+    parser.add_argument("--captcha-timeout-s", type=float, default=None,
+                        help="覆盖 WEB_AGENT_CAPTCHA_TIMEOUT_S (默认 300)")
     parser.add_argument(
         "--ignore-rate-limit",
         action="store_true",

@@ -14,6 +14,7 @@ from web_agent.jd_extract import (
     RATE_LIMIT_SESSION_CAP,
     check_rate_limit,
     init_upwork_db,
+    parse_jd_result,
     upsert_jd,
 )
 
@@ -149,3 +150,57 @@ def test_upsert_jd_conflict_preserves_score(tmp_path: Path) -> None:
     assert row[3] == 85
     assert row[4] == "draft"
     conn.close()
+
+
+# ===== V0.20.4: parse_jd_result 三层 fallback tests =====
+
+
+def test_parse_strict_json() -> None:
+    """Layer 1: 严格 JSON 直接 parse."""
+    parsed = parse_jd_result('{"title": "Test", "description": "body"}')
+    assert parsed["title"] == "Test"
+    assert parsed["description"] == "body"
+
+
+def test_parse_md_code_block() -> None:
+    """Layer 2: ```json ... ``` fence 包裹的 JSON."""
+    result = '好的, JSON 是:\n```json\n{"title": "Test"}\n```\n完成.'
+    parsed = parse_jd_result(result)
+    assert parsed["title"] == "Test"
+
+
+def test_parse_bare_brace() -> None:
+    """Layer 3: LLM prose 前后包裹的裸 {} block."""
+    result = 'JSON: {"title": "Test", "budget": null} 完成.'
+    parsed = parse_jd_result(result)
+    assert parsed["title"] == "Test"
+    assert parsed["budget"] is None
+
+
+def test_parse_loop_error_sentinel_raises() -> None:
+    """run_react_loop 6 sentinel 字符串识别 → SystemExit (jd extract aborted)."""
+    sentinels = (
+        "CAPTCHA_TIMEOUT at step 0: cloudflare 未在 300s 内解决",
+        "WALLCLOCK_EXCEEDED at step 5: 超 max_wallclock_s",
+        "LOOP_DETECTED 在 step 3: 连续 3+ 次同一 action",
+        "(max_steps 耗尽未完成)",
+        "SAFETY_BLOCK at step 2: send-or-pay rule",
+        "LLM_FAILED at step 1: APIError",
+    )
+    for s in sentinels:
+        with pytest.raises(SystemExit, match="aborted"):
+            parse_jd_result(s)
+
+
+def test_parse_garbage_raises() -> None:
+    """完全不是 JSON 也不含 sentinel → SystemExit."""
+    with pytest.raises(SystemExit, match="不是 JSON"):
+        parse_jd_result("这是一段普通文字, 没有 JSON.")
+
+
+def test_parse_non_dict_top_raises() -> None:
+    """JSON 顶层不是 object (list/scalar) → SystemExit."""
+    with pytest.raises(SystemExit, match="顶层不是 object"):
+        parse_jd_result('["a", "b"]')
+    with pytest.raises(SystemExit, match="顶层不是 object"):
+        parse_jd_result('"just a string"')
