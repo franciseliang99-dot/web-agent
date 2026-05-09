@@ -174,7 +174,7 @@ async def test_wildcard_auto_approve_also_allows_send(
 async def test_safety_callback_accept_proceeds(
     monkeypatch, tmp_path, patch_loop_internals
 ):
-    """V0.18.0: callback 返 True (用户 elicit accept) → 放行继续 + 落 safety_elicited_approve step。"""
+    """V0.18.0: callback 返 True (用户 elicit accept) → 放行继续 + click step action_args 带 elicited_approval_rule 标记。"""
     monkeypatch.delenv("WEB_AGENT_AUTO_APPROVE", raising=False)
     elicit_calls: list[tuple[str, str]] = []
 
@@ -233,9 +233,11 @@ async def test_safety_callback_decline_blocks(
     )
 
     assert result.startswith("SAFETY_BLOCK"), f"decline 应 abort: {result!r}"
-    types = [s[1] for s in _read_trace_steps(db)]
+    steps = _read_trace_steps(db)
+    types = [s[1] for s in steps]
     assert "safety_block" in types
-    assert "safety_elicited_approve" not in types
+    # decline 路径下不应有 click step 带 elicited_approval_rule 标记 (没有放行就不该有 dispatch step)
+    assert "click" not in types, f"decline 不应放行 click: {types}"
 
 
 async def test_safety_callback_exception_treated_as_decline(
@@ -262,4 +264,5 @@ async def test_safety_callback_exception_treated_as_decline(
     assert result.startswith("SAFETY_BLOCK"), f"callback 异常应等同 decline: {result!r}"
     types = [s[1] for s in _read_trace_steps(db)]
     assert "safety_block" in types
-    assert "safety_elicited_approve" not in types
+    # exception 路径同 decline: 不该放行 click
+    assert "click" not in types, f"callback 异常不应放行 click: {types}"

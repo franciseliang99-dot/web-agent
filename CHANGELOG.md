@@ -2,6 +2,27 @@
 
 All notable changes to web-agent. 版本号遵循 SemVer 简化形式（V<major>.<minor>.<patch>）。
 
+## [0.18.1] - 2026-05-08
+
+### Refactor (/simplify pass — 测试 dead assertion + dead-store + 显式类型注解)
+
+V0.18.0 ship 后 /simplify subagent 自动审, 发现 3 处可清理点 (无功能变更, 行为 100% 一致):
+
+- **`tests/test_safety_loop_integration.py`**:
+  - `test_safety_callback_decline_blocks` / `test_safety_callback_exception_treated_as_decline` 原 assert `"safety_elicited_approve" not in types` — 该 step type 全 repo 不存在 (实现是给 click step 的 action_args 加 `elicited_approval_rule` 标记, 不另起 step type), 此断言永真 = 不测任何东西. 改为断言 `"click" not in types` (decline/exception 路径不应放行 dispatch)
+  - `test_safety_callback_accept_proceeds` docstring 错说 "落 safety_elicited_approve step" → 改为 "click step action_args 带 elicited_approval_rule 标记" (匹配实现)
+- **`src/web_agent/loop.py`**:
+  - 删 `except Exception ... elicited = False` 重复赋值 — `elicited` 已在 except 之前初始化为 False, 兜底分支再赋一次 dead store
+- **`src/web_agent/mcp_server.py`**:
+  - `safety_approval_cb = None` 加显式 `: SafetyApprovalCallback | None` 注解 (mypy strict 推断已通, 显式更利 reader)
+  - import `from web_agent.loop import SafetyApprovalCallback` (provide 注解所需 type)
+
+### Verification
+
+- 259 passed + 2 skipped (与 V0.18.0 baseline 完全一致, 无新测无回归)
+- `uv run mypy --strict src/web_agent`: 0 issue
+- `uv run ruff check`: All checks passed
+
 ## [0.18.0] - 2026-05-08
 
 ### Add (MCP Elicitation API 落地 — 替代 WEB_AGENT_AUTO_APPROVE 的人在回路 path)

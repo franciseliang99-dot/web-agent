@@ -37,6 +37,7 @@ from pydantic import BaseModel, Field
 from web_agent.chrome_launcher import ensure_chrome_running
 
 from web_agent.cli import run_task as cli_run_task
+from web_agent.loop import SafetyApprovalCallback
 from web_agent.memory import (
     DEFAULT_DB as _MEM_DB,
     extract_domain,
@@ -105,7 +106,7 @@ async def web_agent_run(
     # V0.18.0 elicitation: ctx 可用时把 ctx.elicit 包成 SafetyApprovalCallback.
     # safety check fail (env AUTO_APPROVE 未放行) → 弹 elicitation 让用户在 client 同意/拒绝.
     # client 不支持 elicitation / 异常 → 视作 decline (loop 维持 abort 现状, 安全 default).
-    safety_approval_cb = None
+    safety_approval_cb: SafetyApprovalCallback | None = None
     if ctx is not None:
         async def _elicit_safety(rule: str, reason: str) -> bool:
             msg = (

@@ -364,7 +364,6 @@ async def run_react_loop(
                             elicited = await safety_approval_cb(decision.rule, decision.reason)
                         except Exception as e:
                             logger.warning("safety_approval_cb failed (%r) → 视作 decline", e)
-                            elicited = False
                     if elicited:
                         elicited_approval_rule = decision.rule
                         logger.info("safety ALLOWED rule=%r elicited approve → 继续", decision.rule)
