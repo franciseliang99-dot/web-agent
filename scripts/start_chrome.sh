@@ -65,6 +65,9 @@ ARGS=(
   --use-gl=angle
   --use-angle=swiftshader
   --enable-unsafe-swiftshader
+  # V0.20.3: 反爬 UX baseline viewport (800x600 在 Upwork 等高密度站控件溢出/隐藏 →
+  # SoM perceiver 抓不到完整元素). 1920x1080 = sannysoft / brightdata 反爬基线尺寸.
+  --window-size=1920,1080
 )
 
 echo "Chrome:        ${CHROME_BIN}"

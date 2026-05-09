@@ -2,6 +2,24 @@
 
 All notable changes to web-agent. 版本号遵循 SemVer 简化形式（V<major>.<minor>.<patch>）。
 
+## [0.20.3] - 2026-05-09
+
+### Fix (chore — 反爬 UX patch)
+
+- `scripts/start_chrome.sh` ARGS 加 `--window-size=1920,1080`. V0.16 chrome_launcher 在没 DISPLAY 也
+  没 xvfb 的环境 fallback 到 `--headless=new` + `--ozone-override-screen-size=800,600`,
+  实测当前 9222 PID 启动参数确认. Upwork 等高密度站在 800x600 控件溢出/隐藏 → SoM perceiver
+  抓不到完整元素 (subagent 审 V0.20.2 时拍出). 1920x1080 是 sannysoft / brightdata 反爬基线尺寸.
+- 注意域: 此 patch 改 Chrome **window** 尺寸 (启动参数), 不影响 cli.py 的 page.set_viewport_size
+  (`WEB_AGENT_VIEWPORT_WIDTH/HEIGHT` env 默认 1280x800). 两者独立: jd_extract.py 不调
+  set_viewport_size, 直接用 window 尺寸; cli.py ReAct 用 page-level viewport.
+
+### Compatibility
+
+- 行为变化: 新 spawn 的 9222 Chrome window 默认 1920x1080 (已 spawn 实例不影响).
+- 271 passed + 2 skipped 保持, ruff 0, mypy strict 0.
+- bump 0.20.2 → 0.20.3 (chore, 反爬 UX hygiene).
+
 ## [0.20.2] - 2026-05-09
 
 ### Fix (chore)
