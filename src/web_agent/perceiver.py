@@ -185,5 +185,7 @@ def marks_to_text(marks: list[Mark]) -> str:
         s += ">"
         if m.text:
             s += f" {m.text!r}"
+        if m.href:
+            s += f" → {m.href}"  # V0.20.8: a[href] 暴露给 LLM (list extract 必须看到 link target)
         lines.append(s)
     return "\n".join(lines)

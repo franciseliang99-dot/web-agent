@@ -2,6 +2,38 @@
 
 All notable changes to web-agent. 版本号遵循 SemVer 简化形式（V<major>.<minor>.<patch>）。
 
+## [0.20.8] - 2026-05-09
+
+### Fix (audit — V0.20.7 commit message 描述 marks_to_text href 但 Edit silent fail 实际未改)
+
+V0.20.7 commit bf3cc2b 标 "改 `_schema.py:186` marks_to_text 加 href" 但实际 Edit **FAILED** — 主
+agent 误判 marks_to_text 定义文件: marks_to_text 实际在 **`perceiver.py:178`** 不在
+`llm/_schema.py` (后者只 `import marks_to_text` from perceiver). Edit "String to replace not found"
+silent skip, `git add` + `commit` 仍 succeeded (`git add` 对未改 file 无 op), 4 files
+(CHANGELOG/pyproject/__init__/uv.lock) bump 落档但 perceiver.py 未动, **root cause 仍在**.
+
+V0.20.6 list_extract 重跑同样 fail (Kimi 仍看不到 href, `_validate_jds` 全 drop, SystemExit).
+
+### Changed
+
+- `src/web_agent/perceiver.py:186` `marks_to_text` **真改**: 加 1 行 `if m.href: s += f" → {m.href}"`
+  在 text 之后输出 link target 给 LLM. **数据已在 `Mark.href`** (perceiver.py:88 SoM JS `el.href`),
+  V0.20.8 仅补序列化输出. 这次 Edit anchor 用 perceiver.py 真实行 (不再撞 _schema.py 镜像).
+
+### Compatibility
+
+- 行为变化跟 V0.20.7 commit message 描述完全一致 (这次真改了).
+- 影响: 所有 LLM 调用 (cli.py ReAct loop / jd_extract / list_extract) 看到的 marks 文本现含
+  href 字段. enhance 不 regression — LLM tool_use 输出 schema 不变.
+- 287+ tests, ruff 0, mypy strict 0.
+- bump 0.20.7 → 0.20.8 (audit 修正 V0.20.7 bug commit; 不 amend 保留诚实历史).
+
+### Why patch (V0.20.8) 不 amend V0.20.7
+
+按 CLAUDE.md "Always create NEW commits rather than amending" + "Trust but verify". V0.20.7 描述
+错文件路径但 commit 真落档了 (bump-only). amend 会污染单机 git 历史. V0.20.8 honest audit, 后人
+看 git log 能看到完整路径: V0.20.7 标了 patch 但 silent fail → V0.20.8 真改.
+
 ## [0.20.7] - 2026-05-09
 
 ### Fix (perceiver — `marks_to_text` 暴露 `a[href]` 让 LLM 看到 link target)
