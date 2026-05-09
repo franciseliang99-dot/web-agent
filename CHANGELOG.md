@@ -2,6 +2,22 @@
 
 All notable changes to web-agent. 版本号遵循 SemVer 简化形式（V<major>.<minor>.<patch>）。
 
+## [0.20.1] - 2026-05-09
+
+### Refactor (V0.20.0 simplify audit — 复用 captcha.wait_for_resolution + 提常量)
+
+V0.20.0 commit 12e87c5 落地后跑 /simplify 等价审计, 2 处可简化:
+
+- **`jd_extract.wait_captcha_resolution`** 内联 poll 循环替换为调 `captcha.wait_for_resolution`
+  (loop.py 出于 progress_cb 心跳需要保持内联, jd_extract 没此约束). 净减 ~5 行重复, 行为等价.
+- **常量 `DEFAULT_CAPTCHA_TIMEOUT_S = 300.0`** 提取出来, 替换 3 处字面量
+  (`wait_captcha_resolution` default / `extract_url` default / argparse default). 改 timeout 现只动 1 处.
+
+### Compatibility
+
+- 行为 0 改, 271 passed + 2 skipped, ruff 0, mypy strict 0 (22 source files).
+- bump: 0.20.0 → 0.20.1 (纯 refactor, 无新外部能力).
+
 ## [0.20.0] - 2026-05-09
 
 ### Add (路径 D MVP — Upwork JD extract entrypoint + jobscout-bot 评分桥)

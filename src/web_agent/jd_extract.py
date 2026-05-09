@@ -36,7 +36,7 @@ from dotenv import load_dotenv
 from playwright.async_api import Page, async_playwright
 
 from web_agent.browser import apply_stealth, connect
-from web_agent.captcha import detect as captcha_detect
+from web_agent.captcha import detect as captcha_detect, wait_for_resolution as captcha_wait
 from web_agent.chrome_launcher import ensure_chrome_running
 from web_agent.notify import notify
 from web_agent.perceiver import perceive
@@ -45,6 +45,7 @@ logger = logging.getLogger(__name__)
 
 DEFAULT_DB = Path("data/upwork.db")
 DEFAULT_MODEL = "claude-sonnet-4-6"
+DEFAULT_CAPTCHA_TIMEOUT_S = 300.0
 RATE_LIMIT_MIN_INTERVAL_S = 60.0
 RATE_LIMIT_SESSION_WINDOW_S = 1800.0
 RATE_LIMIT_SESSION_CAP = 30
@@ -156,7 +157,7 @@ def upsert_jd(conn: sqlite3.Connection, row: dict[str, Any]) -> None:
 # ===== captcha guard (deterministic 路径专用; 不写 trace.db, jd_extract 不用 trace 系统) =====
 
 async def wait_captcha_resolution(
-    page: Page, timeout_s: float = 300.0, poll_s: float = 3.0
+    page: Page, timeout_s: float = DEFAULT_CAPTCHA_TIMEOUT_S, poll_s: float = 3.0
 ) -> bool:
     """检测 → notify → poll 等用户手解. timeout False / 解决或无 captcha True."""
     info = await captcha_detect(page)
@@ -165,14 +166,12 @@ async def wait_captcha_resolution(
     logger.info("%s 命中 @ %s — 请在浏览器手动解决, 每 %ss 重检 (超时 %ss)",
                 info.vendor, info.url[:80], poll_s, timeout_s)
     notify("web-agent-jd captcha", f"{info.vendor} 命中, 请手解 ({info.url[:60]})")
-    t_start = time.monotonic()
-    while time.monotonic() - t_start < timeout_s:
-        if await captcha_detect(page) is None:
-            logger.info("%s 已清除", info.vendor)
-            return True
-        await asyncio.sleep(poll_s)
-    logger.warning("captcha %ss 未解, 中止", timeout_s)
-    return False
+    resolved = await captcha_wait(page, timeout_s=timeout_s, poll_s=poll_s)
+    if resolved:
+        logger.info("%s 已清除", info.vendor)
+    else:
+        logger.warning("captcha %ss 未解, 中止", timeout_s)
+    return resolved
 
 
 # ===== LLM extract (直调 SDK, 单 tool_use) =====
@@ -222,7 +221,7 @@ async def extract_url(
     db_path: Path = DEFAULT_DB,
     cdp_url: str | None = None,
     model: str = DEFAULT_MODEL,
-    captcha_timeout_s: float = 300.0,
+    captcha_timeout_s: float = DEFAULT_CAPTCHA_TIMEOUT_S,
     ignore_rate_limit: bool = False,
 ) -> dict[str, Any]:
     """主流程: rate-limit → spawn Chrome → connect → goto → captcha guard → perceive → LLM → upsert."""
@@ -294,7 +293,7 @@ def main() -> None:
     parser.add_argument("--db", default=str(DEFAULT_DB), help=f"SQLite path (默认 {DEFAULT_DB})")
     parser.add_argument("--cdp-url", default=None, help="覆盖 WEB_AGENT_CDP_URL")
     parser.add_argument("--model", default=DEFAULT_MODEL)
-    parser.add_argument("--captcha-timeout-s", type=float, default=300.0)
+    parser.add_argument("--captcha-timeout-s", type=float, default=DEFAULT_CAPTCHA_TIMEOUT_S)
     parser.add_argument(
         "--ignore-rate-limit",
         action="store_true",
