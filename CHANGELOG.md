@@ -2,6 +2,50 @@
 
 All notable changes to web-agent. 版本号遵循 SemVer 简化形式（V<major>.<minor>.<patch>）。
 
+## [0.20.6] - 2026-05-09
+
+### Add (路径 D 延伸 — list 页只读抽 JD URL 清单给用户手选)
+
+V0.20.5 跑通 3 条单 JD 后用户给 list URL `/nx/find-work/best-matches/`. V0.20.5 jd_extract
+schema 抽单 JD 9 字段, list 页 path 不 match (V0.20.5 SystemExit 安全失败). 用户拒 E 路径
+(agent 自动联跳), 选"agent 只 read list 页输出 URL 清单, 我手选 detail URL 跑 web-agent-jd".
+
+V0.20.6 加 `web-agent-list-jds` entrypoint: agent perceive list 页 1 步, LLM 抽出顶层 N 个 JD
+概览 (title/url/budget/posted_at) 写 stdout JSON array. **0 联跳, 0 写 db, 单 LLM call read-only,
+不触发 CF, 不违 ToS scraping**.
+
+### Changed
+
+- `src/web_agent/list_extract.py` 新文件 (~155 行) — 镜像 V0.20.5 jd_extract.py 半自动模式:
+  - `_LIST_EXTRACT_GOAL` prompt — 强制 url 必须真 a[href] 不要瞎编 `~01abc` 编号; 上限 30 条;
+    严禁 click/scroll/type/extract, 1 步完成.
+  - `_validate_jds(parsed)` — 校验 jds array + 相对路径 (`/jobs/~01a`) 补 host + drop 非
+    Upwork URL (防 sidebar 推荐外站链接); 全 drop SystemExit.
+  - `extract_list_url` — 复用 V0.20.5 半自动 (`_find_jd_page` / `_url_match` import 自
+    jd_extract); max_steps=1, max_wallclock_s=60s; 不写 db 直接 return jds list.
+  - `_LIST_URL_PATTERNS` 白名单 sanity warn (`/nx/find-work/` / `/search/jobs/` 等); 非 list
+    页 warn 但继续 (用户可能在新 path 上, 不强 block).
+  - `main` — argparse `web-agent-list-jds <list URL>`, stdout `json.dumps(jds, indent=2)`.
+- `src/web_agent/jd_extract.py` 不动 (单一职责); list_extract import 复用 `_find_jd_page` /
+  `parse_jd_result` (`_check_loop_error` / `_ensure_dict` / 三层 fallback 全自动 inherit).
+- `pyproject.toml` console_scripts 5 → 6 (加 `web-agent-list-jds = "web_agent.list_extract:main"`).
+- `tests/test_list_extract.py` 新文件 (5 测试: strict dict / relative URL 补全 / 非 Upwork drop /
+  空 array raise / 全 drop raise). 不测 LLM / Playwright.
+
+### Compatibility
+
+- 数据契约 100% 与 V0.20.0/3/4/5 兼容: list extract **不写 db**, 不进评分, 跟单 JD 路径正交.
+- 行为新增: console_scripts 加 `web-agent-list-jds` (默认 OFF, 不破现有 CLI; 用户须主动调).
+- 287 passed + 2 skipped (V0.20.5 baseline 282 + 5 V0.20.6 测试), ruff 0, mypy strict 0.
+- bump 0.20.5 → 0.20.6 (patch — 新功能但不破现有契约).
+
+### Why patch (V0.20.6) 不 minor
+
+- 新 entrypoint 但不破现有 entrypoint, 不改 jd_extract.py / db schema / score_upwork.py.
+- 是 V0.20.5 半自动模式延伸 (单 JD → list, 同套设计), 复用 80% 代码 (`_find_jd_page` /
+  `_url_match` / `parse_jd_result` import 自 jd_extract).
+- 真正 minor (V0.21+) 触发条件: list 页评分 / 联跳 detail 自动化 (E 路径若用户 reconsider).
+
 ## [0.20.5] - 2026-05-09
 
 ### Fix (路径 D 半自动 — 删 page.goto 绕开 Cloudflare 重激活)
