@@ -8,11 +8,16 @@
 - ~2% 概率打错相邻 QWERTY 键 + 真人 reaction time 200-400ms 后 backspace（仅 ASCII 字母 + 中速以上才触发）
 - 滚动按 sin 包络分 4-7 段，每段间停顿 50-120ms（避免段连发被反爬识别）
 - 点击坐标 std=max(3, min(w/6, 15))、截断 90% 内区（参考反爬研究 click heatmap 离散度）
+
+V0.19.0: 加 human_like_keyboard_shortcut (chord syntax 处理 modifier down/up) +
+  human_like_paste (execCommand insertText 主路径 / clipboard.writeText + Ctrl+V 备路径).
+  V0.16.31 + V0.18.5 spike-2 contenteditable 末尾追加 fail mode 由此修复.
 """
 
 from __future__ import annotations
 
 import asyncio
+import logging
 import math
 import random
 from collections import deque
@@ -22,6 +27,8 @@ from weakref import WeakKeyDictionary
 from playwright.async_api import Page
 
 from web_agent.types import Mark
+
+logger = logging.getLogger(__name__)
 
 # 上次鼠标视口坐标（per-page，避免 W3 multi-tab 串扰）。Page 关闭后自动 GC。
 _last_mouse_pos: WeakKeyDictionary[Page, tuple[float, float]] = WeakKeyDictionary()
@@ -179,3 +186,42 @@ async def scroll(page: Page, dy: int = 400) -> None:
         await page.mouse.wheel(0, seg)
         await asyncio.sleep(random.uniform(0.05, 0.12))  # 段间停顿，不要连发
     await asyncio.sleep(random.uniform(0.3, 0.8))  # 滚完看新内容
+
+
+async def human_like_keyboard_shortcut(page: Page, key: str) -> None:
+    """V0.19.0: 按键盘快捷键 (Control+End / Control+a / End / Tab 等).
+
+    LLM 偶尔写 'Ctrl+...', normalize 到 Playwright canonical 'Control+...'.
+    Playwright `page.keyboard.press` 直接接受 'Control+End' chord syntax 处理 modifier down/up.
+
+    拟人化: 0.2-0.6s 思考 + chord press + 0.05-0.15s 收尾停顿.
+    """
+    normalized = key.replace("Ctrl+", "Control+").replace("ctrl+", "Control+")
+    await think(0.2, 0.6)
+    await page.keyboard.press(normalized)
+    await asyncio.sleep(random.uniform(0.05, 0.15))
+
+
+async def human_like_paste(page: Page, text: str) -> None:
+    """V0.19.0: 把 text 粘贴到当前 focus 的 input/textarea/contenteditable.
+
+    主路径 document.execCommand('insertText', false, text):
+    - 触发 input 事件 (React/Vue 监听器响应) + 把光标推到插入文本之后
+    - 不需要 clipboard 权限, 在 file:// 也工作
+    - 在 textarea / input / contenteditable 都生效
+    备路径 navigator.clipboard.writeText + Ctrl+V:
+    - execCommand 失败时 fallback (站点 intercept execCommand)
+    - CDP-connected mode 不能 grant_permissions, 所以 clipboard API 可能被 deny
+    - deny 时 log warning, 不抛 (loop 看 obs 推断)
+
+    拟人化: 0.2-0.6s 思考 + paste + 0.1-0.3s 等 input event 异步触发.
+    """
+    await think(0.2, 0.6)
+    success = await page.evaluate("(t) => document.execCommand('insertText', false, t)", text)
+    if not success:
+        try:
+            await page.evaluate("async (t) => navigator.clipboard.writeText(t)", text)
+            await page.keyboard.press("Control+v")
+        except Exception as e:
+            logger.warning("human_like_paste fallback Ctrl+V 失败 (%r); execCommand 也未生效", e)
+    await asyncio.sleep(random.uniform(0.1, 0.3))

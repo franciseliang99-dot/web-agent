@@ -7,10 +7,10 @@ from __future__ import annotations
 
 from web_agent.llm._schema import TOOL_SCHEMAS, to_anthropic_tools, to_openai_tools
 
-EXPECTED_TOOL_NAMES = {"click", "type", "scroll", "extract", "done"}
+EXPECTED_TOOL_NAMES = {"click", "type", "scroll", "extract", "done", "keyboard_shortcut", "paste"}
 
 
-def test_neutral_schemas_have_5_tools_with_thought():
+def test_neutral_schemas_have_7_tools_with_thought():
     assert {s["name"] for s in TOOL_SCHEMAS} == EXPECTED_TOOL_NAMES
     for s in TOOL_SCHEMAS:
         assert "thought" in s["properties"], f"{s['name']} 缺 thought 字段"
@@ -19,7 +19,7 @@ def test_neutral_schemas_have_5_tools_with_thought():
 
 def test_to_anthropic_tools_shape():
     tools = to_anthropic_tools()
-    assert len(tools) == 5
+    assert len(tools) == 7
     for t in tools:
         assert set(t.keys()) == {"name", "description", "input_schema"}
         assert t["input_schema"]["type"] == "object"
@@ -35,7 +35,7 @@ def test_to_openai_tools_strict_mode_invariants():
     3. parameters.required 必须包含所有 properties（即便业务上是 optional）
     """
     tools = to_openai_tools(strict=True)
-    assert len(tools) == 5
+    assert len(tools) == 7
     for t in tools:
         assert t["type"] == "function"
         f = t["function"]

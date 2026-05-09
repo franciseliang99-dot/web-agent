@@ -18,7 +18,14 @@ from typing import Any, Awaitable, Callable
 
 from playwright.async_api import Page
 
-from web_agent.actuator import human_like_click, human_like_type, scroll, think
+from web_agent.actuator import (
+    human_like_click,
+    human_like_keyboard_shortcut,
+    human_like_paste,
+    human_like_type,
+    scroll,
+    think,
+)
 from web_agent.captcha import detect as captcha_detect
 from web_agent.llm import LLMClient
 from web_agent.notify import notify
@@ -30,7 +37,9 @@ from web_agent.types import (
     ClickAction,
     DoneAction,
     ExtractAction,
+    KeyboardShortcutAction,
     Mark,
+    PasteAction,
     ScrollAction,
     TypeAction,
 )
@@ -347,11 +356,11 @@ async def run_react_loop(
 
             # safety check：在 actuator 之前 intercept 敏感 action（send/pay/delete/密码字段...）
             # V0.17.0: isinstance 替 action.type 字符串比, mypy 自动 narrow ClickAction.mark_id
-            if isinstance(action, (ClickAction, TypeAction)):
+            if isinstance(action, (ClickAction, TypeAction, PasteAction)):
                 check_mark: Mark | None = None
                 if isinstance(action, ClickAction):
                     check_mark = _find_mark(marks, action.mark_id)
-                else:  # TypeAction
+                else:  # TypeAction or PasteAction (V0.19.0: paste 同 type 用 last_clicked_mark)
                     check_mark = last_clicked_mark
                 decision = safety_check(action, check_mark, marks)
                 if not decision.allow:
@@ -433,6 +442,12 @@ async def run_react_loop(
                 case DoneAction(result=res):
                     result = res
                     obs = res
+                case KeyboardShortcutAction(key=key):
+                    await human_like_keyboard_shortcut(page, key)
+                    obs = f"keyboard_shortcut {key!r}"
+                case PasteAction(text=text):
+                    await human_like_paste(page, text)
+                    obs = f"pasted {text!r}"
 
             action_args = _action_args_only(action)
             if elicited_approval_rule is not None:
