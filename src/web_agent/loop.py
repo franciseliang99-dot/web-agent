@@ -35,6 +35,14 @@ from web_agent.types import (
     TypeAction,
 )
 
+# V0.18.0 elicitation callback: 业务层接收 (rule, reason) → True 放行 / False 拦.
+# 组合根 (mcp_server.py) 注入 ctx.elicit 包装; CLI 模式 None → 维持 env-based 现状.
+SafetyApprovalCallback = Callable[[str, str], Awaitable[bool]]
+
+# V0.16.1 progress callback: (step_i, max_steps, message=None) → 注 mcp ctx.report_progress
+# 形参可选, 不传则 loop 行为 100% 同 V0.16.0; 传则主循环每步 + captcha poll 心跳触发
+ProgressCallback = Callable[[int, int, str | None], Awaitable[None]]
+
 
 def _action_args_only(action: Action) -> dict[str, Any]:
     """V0.17.0: 序列化 dataclass action 到 dict, 剔 type/thought (trace 兼容旧 schema).
@@ -47,9 +55,6 @@ def _action_args_only(action: Action) -> dict[str, Any]:
         if f.name not in ("type", "thought")
     }
 
-# V0.16.1 progress callback: (step_i, max_steps, message=None) → 注 mcp ctx.report_progress
-# 形参可选, 不传则 loop 行为 100% 同 V0.16.0; 传则主循环每步 + captcha poll 心跳触发
-ProgressCallback = Callable[[int, int, str | None], Awaitable[None]]
 
 logger = logging.getLogger(__name__)
 
@@ -252,6 +257,7 @@ async def run_react_loop(
     screenshots_dir: Path = Path("data/screenshots"),
     memories: str | None = None,
     progress_cb: ProgressCallback | None = None,
+    safety_approval_cb: SafetyApprovalCallback | None = None,
 ) -> str:
     """跑 ReAct 循环直到 done / max_steps / max_wallclock_s / 死循环 / LLM 失败。返回最终结果文本。
 
@@ -286,6 +292,7 @@ async def run_react_loop(
 
     try:
         for step_i in range(max_steps):
+            elicited_approval_rule: str | None = None  # V0.18.0: 每步重置, safety elicit accept 时设
             elapsed = time.time() - t_start
             if progress_cb is not None:
                 await progress_cb(step_i, max_steps, f"step {step_i + 1}/{max_steps}")
@@ -348,18 +355,32 @@ async def run_react_loop(
                     check_mark = last_clicked_mark
                 decision = safety_check(action, check_mark, marks)
                 if not decision.allow:
-                    result = f"SAFETY_BLOCK at step {step_i}: {decision.reason}"
-                    logger.info("safety %s", result)
-                    step = Step(
-                        step=step_i, ts=time.time(), thought=action.thought,
-                        action_type="safety_block",
-                        action_args={"original_type": action.type, "rule": decision.rule, **_action_args_only(action)},
-                        observation=result,
-                    )
-                    trace.append(step)
-                    write_step(conn, task_id, step, str(shot_path))
-                    end_task(conn, task_id, result)
-                    return result
+                    # V0.18.0: 若注入 elicitation callback (e.g. MCP server 模式), 询问用户是否放行.
+                    # accept → 在主 dispatch step 的 action_args 加 elicited_approval_rule 标记 + 继续;
+                    # decline/cancel/异常 → 维持原 SAFETY_BLOCK abort 路径 (安全 default).
+                    elicited = False
+                    if safety_approval_cb is not None:
+                        try:
+                            elicited = await safety_approval_cb(decision.rule, decision.reason)
+                        except Exception as e:
+                            logger.warning("safety_approval_cb failed (%r) → 视作 decline", e)
+                            elicited = False
+                    if elicited:
+                        elicited_approval_rule = decision.rule
+                        logger.info("safety ALLOWED rule=%r elicited approve → 继续", decision.rule)
+                    else:
+                        result = f"SAFETY_BLOCK at step {step_i}: {decision.reason}"
+                        logger.info("safety %s", result)
+                        step = Step(
+                            step=step_i, ts=time.time(), thought=action.thought,
+                            action_type="safety_block",
+                            action_args={"original_type": action.type, "rule": decision.rule, **_action_args_only(action)},
+                            observation=result,
+                        )
+                        trace.append(step)
+                        write_step(conn, task_id, step, str(shot_path))
+                        end_task(conn, task_id, result)
+                        return result
 
             # 死循环检测：连续 3 次完全相同 action（type + args）→ abort
             sig = _action_signature(action)
@@ -414,12 +435,15 @@ async def run_react_loop(
                     result = res
                     obs = res
 
+            action_args = _action_args_only(action)
+            if elicited_approval_rule is not None:
+                action_args["elicited_approval_rule"] = elicited_approval_rule  # V0.18.0
             step = Step(
                 step=step_i,
                 ts=time.time(),
                 thought=action.thought,
                 action_type=action.type,
-                action_args=_action_args_only(action),
+                action_args=action_args,
                 observation=obs,
             )
             trace.append(step)

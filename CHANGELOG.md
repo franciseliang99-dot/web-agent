@@ -2,6 +2,84 @@
 
 All notable changes to web-agent. 版本号遵循 SemVer 简化形式（V<major>.<minor>.<patch>）。
 
+## [0.18.0] - 2026-05-08
+
+### Add (MCP Elicitation API 落地 — 替代 WEB_AGENT_AUTO_APPROVE 的人在回路 path)
+
+V0.16.x README L144 已写 "Elicitation 替代 AUTO_APPROVE" 后续可选项, 上一轮 subagent WebSearch 确认 **MCP Elicitation 已 GA 2026-03-14** (Claude Code 2.1.76, Anthropic protocol-level 稳定). 本版本 ship 集成: MCP server 模式下 safety 阻拦 → `ctx.elicit()` 弹 client 询问用户 → accept 放行 / decline/cancel/旧 client 不支持 → 维持 abort.
+
+#### 设计 (按 CLAUDE.md 解耦优先, domain ← ports ← 业务层 ← 组合根)
+
+```
+loop.py (业务层)              — 接 SafetyApprovalCallback ports, safety check 失败 + cb → await
+  ↑
+cli.py (组合根 CLI)            — 透传 safety_approval_cb=None 默认 (维持 env-based)
+  ↑
+mcp_server.py (组合根 MCP)     — ctx 可用时构造 _elicit_safety wrapper 注入
+```
+
+- **`src/web_agent/loop.py`**:
+  - 新增 type alias `SafetyApprovalCallback = Callable[[str, str], Awaitable[bool]]` (rule, reason → approve)
+  - `run_react_loop` 加 `safety_approval_cb: SafetyApprovalCallback | None = None` 参数
+  - safety check 失败时, 若 cb 注入 → `await cb(rule, reason)`. accept → 设 `elicited_approval_rule` flag 继续主 dispatch; decline/cancel/异常 → 维持 abort
+  - 主 dispatch 写 trace step 时, 若 elicited_approval_rule 不 None → action_args 加 `"elicited_approval_rule": rule` 标记 (replay 可高亮)
+  - 异常兜底: cb 抛任何异常 (e.g. 旧 client 不支持 elicitation) → `视作 decline + log warning`, 不 break loop (安全 default)
+- **`src/web_agent/cli.py`**:
+  - `run_task` 加 safety_approval_cb 参数, 透传给 run_react_loop
+  - CLI 直跑 main() 不构造 cb, None 默认 → 维持 env-based 现状 (V0.17.1 一致)
+- **`src/web_agent/mcp_server.py`**:
+  - 加 `SafetyApproval(BaseModel)` Pydantic schema (单字段 `approve: bool`, primitive only — MCP elicitation schema 限制不允许嵌套 model)
+  - `web_agent_run` 在 `ctx is not None` 时构造 `_elicit_safety(rule, reason) -> bool` callback:
+    - `await ctx.elicit(message=..., schema=SafetyApproval)`
+    - `isinstance(result, AcceptedElicitation)` → return `result.data.approve`
+    - 其他 (DeclinedElicitation / CancelledElicitation / 抛异常) → return False
+  - import `mcp.server.elicitation.AcceptedElicitation` + `pydantic.BaseModel/Field`
+
+#### 测试 (4 case, 全 100% inline mock 不依赖真 Claude Desktop)
+
+- **`tests/test_safety_loop_integration.py`** 加 3 case:
+  - `test_safety_callback_accept_proceeds`: cb 返 True → 放行, click step action_args 含 `elicited_approval_rule=send-or-pay`, 后续 done 正常返
+  - `test_safety_callback_decline_blocks`: cb 返 False → 维持 SAFETY_BLOCK abort
+  - `test_safety_callback_exception_treated_as_decline`: cb raise → 视作 decline, abort
+- **`tests/test_mcp_server.py`** 加 1 case:
+  - `test_web_agent_run_passes_elicitation_callback`: ctx 注入下 cli_run_task 应收到非 None callable 的 safety_approval_cb (wire-up 测)
+
+#### env vs elicitation 优先级 (向后兼容)
+
+```
+1. env WEB_AGENT_AUTO_APPROVE=* / 命中规则 → safety 直接放行 (无 elicit 调用)
+2. env 未放行 + cb 可用 → 弹 elicit 询问
+3. env 未放行 + cb=None (CLI 模式) → 维持原 abort
+```
+
+dev 快速迭代仍可 `WEB_AGENT_AUTO_APPROVE=*` 全开; 生产 MCP 模式可不设 env, 让用户每次显式放行.
+
+#### 客户端支持矩阵
+
+| 客户端 | 状态 | fallback 行为 |
+|---|---|---|
+| Claude Code 2.1.76+ | ✅ 弹 elicit UI | 用户 yes/no |
+| Claude Desktop (Q1 2026 GA 推测) | ⏳ 待真账号 e2e 验证 | 同上 |
+| 旧 client / 不支持 elicitation | ❌ ctx.elicit 抛异常 | 兜底视作 decline (安全 default), 维持 abort |
+
+V0.18.0 后续 V0.18.1 真账号 e2e 验证 (用户本地 Claude Code/Desktop 跑 send 类 task, 确认 elicit UI 真出现) 留作 dogfooding 任务.
+
+### Compatibility
+- **行为 100% 与 V0.17.1 一致 (CLI 模式)**: cb=None 默认, 无任何调用方改动
+- **MCP 模式新增**: 自动注入 elicit 通道, 用户感知是新增 UI 弹窗 (友好)
+- 258 passed (255 + 3 + 1 - 1 重计) + 2 skipped, ruff 0, mypy strict 0 (21 source files)
+- bump: pyproject.toml + `__init__.py` `0.17.1` → `0.18.0`
+
+### Why minor bump (V0.18.0) 不 patch
+- 新外部能力 (人在回路 elicitation 协议层) — 用户感知层有新 UI, MCP 客户端行为变化
+- 闭合 README L144 backlog 项 (已知缺口列入"已 ship"), 标志一个完整 milestone
+- V0.18.x 后续可 patch (e.g. URL mode elicitation for OAuth / paste 类敏感数据)
+
+### Why now
+- subagent WebSearch 2026-05-08 三方新事实推翻上一轮"等 GA"假设 (实际 2026-03-14 已 GA)
+- README 已 backlog 不需重新设计, 解耦设计照搬 ProgressCallback 注入模式 (V0.16.4) 工程量低
+- V0.17 minor 周期已闭合 (V0.17.1 清债收尾), 自然进入 V0.18 新能力周期
+
 ## [0.17.1] - 2026-05-08
 
 ### Refactor (V0.17.0 自留 V0.18+ 清债收尾 — Action import 统一 + anthropic cast(Any) 消除)

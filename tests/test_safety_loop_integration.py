@@ -167,3 +167,99 @@ async def test_wildcard_auto_approve_also_allows_send(
     assert result == "ok"
     types = [s[1] for s in _read_trace_steps(db)]
     assert "safety_block" not in types
+
+
+# V0.18.0 elicitation callback path —————————————————————————————————————
+
+async def test_safety_callback_accept_proceeds(
+    monkeypatch, tmp_path, patch_loop_internals
+):
+    """V0.18.0: callback 返 True (用户 elicit accept) → 放行继续 + 落 safety_elicited_approve step。"""
+    monkeypatch.delenv("WEB_AGENT_AUTO_APPROVE", raising=False)
+    elicit_calls: list[tuple[str, str]] = []
+
+    async def approve_cb(rule: str, reason: str) -> bool:
+        elicit_calls.append((rule, reason))
+        return True
+
+    client = FakeLLMClient([
+        ClickAction(thought="点 Send", mark_id=1),
+        DoneAction(thought="完成", result="elicit-sent"),
+    ])
+    db = tmp_path / "trace.db"
+    shots = tmp_path / "shots"
+
+    result = await run_react_loop(
+        FakePage(), client, goal="测试 elicit accept",
+        max_steps=4, db_path=db, screenshots_dir=shots,
+        safety_approval_cb=approve_cb,
+    )
+
+    assert result == "elicit-sent", f"放行后应跑到 done, got {result!r}"
+    assert len(elicit_calls) == 1, f"safety 命中 1 次应触发 1 次 elicit, got {elicit_calls!r}"
+    assert elicit_calls[0][0] == "send-or-pay"
+
+    steps = _read_trace_steps(db)
+    types = [s[1] for s in steps]
+    assert "safety_block" not in types, f"放行后不应 abort: {types}"
+    assert "click" in types
+    assert "done" in types
+
+    # V0.18.0: elicit 放行的 click step 在 action_args 带 elicited_approval_rule 标记
+    click_step = next(s for s in steps if s[1] == "click")
+    assert click_step[2].get("elicited_approval_rule") == "send-or-pay", \
+        f"click step action_args 应含 elicit 放行标记: {click_step[2]!r}"
+
+
+async def test_safety_callback_decline_blocks(
+    monkeypatch, tmp_path, patch_loop_internals
+):
+    """V0.18.0: callback 返 False (用户 elicit decline) → 维持 abort + 落 safety_block step。"""
+    monkeypatch.delenv("WEB_AGENT_AUTO_APPROVE", raising=False)
+
+    async def decline_cb(rule: str, reason: str) -> bool:
+        return False
+
+    client = FakeLLMClient([
+        ClickAction(thought="点 Send", mark_id=1),
+    ])
+    db = tmp_path / "trace.db"
+    shots = tmp_path / "shots"
+
+    result = await run_react_loop(
+        FakePage(), client, goal="测试 elicit decline",
+        max_steps=3, db_path=db, screenshots_dir=shots,
+        safety_approval_cb=decline_cb,
+    )
+
+    assert result.startswith("SAFETY_BLOCK"), f"decline 应 abort: {result!r}"
+    types = [s[1] for s in _read_trace_steps(db)]
+    assert "safety_block" in types
+    assert "safety_elicited_approve" not in types
+
+
+async def test_safety_callback_exception_treated_as_decline(
+    monkeypatch, tmp_path, patch_loop_internals
+):
+    """V0.18.0: callback raise → 兜底视作 decline (安全 default), 不让 elicit 失败崩 loop。"""
+    monkeypatch.delenv("WEB_AGENT_AUTO_APPROVE", raising=False)
+
+    async def buggy_cb(rule: str, reason: str) -> bool:
+        raise RuntimeError("client 不支持 elicitation")
+
+    client = FakeLLMClient([
+        ClickAction(thought="点 Send", mark_id=1),
+    ])
+    db = tmp_path / "trace.db"
+    shots = tmp_path / "shots"
+
+    result = await run_react_loop(
+        FakePage(), client, goal="测试 elicit exception",
+        max_steps=3, db_path=db, screenshots_dir=shots,
+        safety_approval_cb=buggy_cb,
+    )
+
+    assert result.startswith("SAFETY_BLOCK"), f"callback 异常应等同 decline: {result!r}"
+    types = [s[1] for s in _read_trace_steps(db)]
+    assert "safety_block" in types
+    assert "safety_elicited_approve" not in types

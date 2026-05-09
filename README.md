@@ -141,7 +141,7 @@ uv run web-agent-memory wikipedia.org --db data/memory.db
 - V0.16.9 ✅ P1 解耦: `Mark`/`Action` 上提到 `web_agent.types`, 消除 safety/llm.base 反向依赖
 
 **后续可选** (不阻塞主流程):
-- Elicitation 替代 `WEB_AGENT_AUTO_APPROVE` (人在回路批准)
+- ~~Elicitation 替代 `WEB_AGENT_AUTO_APPROVE` (人在回路批准)~~ — V0.18.0 已 ship: safety 阻拦时 MCP server 走 `ctx.elicit()` 弹 client 询问 (Claude Desktop / Code 显式 yes/no), 用户拒绝/超时/旧 client 不支持 → 维持原 abort 行为 (安全 default). env `WEB_AGENT_AUTO_APPROVE=*` 仍优先 (向后兼容 + dev 快速迭代)
 - HTTP transport (替代 stdio, 便于远程 MCP client)
 
 跑 MCP server (Claude Desktop config 加 entry):

@@ -96,6 +96,27 @@ async def test_web_agent_run_forwards_args(monkeypatch, reset_run_lock, fake_chr
         assert captured == {"goal": "搜苹果价格", "start_url": "https://example.com", "max_steps": 5}
 
 
+# V0.18.0: ctx 注入时 safety_approval_cb 应 wire 通到 cli_run_task
+
+async def test_web_agent_run_passes_elicitation_callback(monkeypatch, reset_run_lock, fake_chrome_alive):
+    """V0.18.0 elicitation: ctx 可用 → web_agent_run 应构造 callback 透传给 cli_run_task."""
+    captured = {}
+
+    async def fake_run_task(goal, **kw):
+        captured["safety_approval_cb"] = kw.get("safety_approval_cb")
+        return "OK"
+
+    monkeypatch.setattr("web_agent.mcp_server.cli_run_task", fake_run_task)
+
+    async with create_connected_server_and_client_session(mcp) as session:
+        result = await session.call_tool("web_agent_run", {"goal": "test"})
+        assert not result.isError
+
+    cb = captured["safety_approval_cb"]
+    assert cb is not None, "ctx 可用时应注入 callback"
+    assert callable(cb), f"callback 应可调用, got {cb!r}"
+
+
 # ---------- Case 3: chrome_not_running ----------
 
 async def test_web_agent_run_chrome_not_running(reset_run_lock, fake_chrome_dead):

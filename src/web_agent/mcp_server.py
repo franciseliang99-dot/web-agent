@@ -30,7 +30,9 @@ import sys
 from pathlib import Path
 from typing import Any
 
+from mcp.server.elicitation import AcceptedElicitation
 from mcp.server.fastmcp import Context, FastMCP
+from pydantic import BaseModel, Field
 
 from web_agent.chrome_launcher import ensure_chrome_running
 
@@ -41,6 +43,19 @@ from web_agent.memory import (
     recall_by_domain,
 )
 from web_agent.replay import render_to_file as replay_render_to_file
+
+
+class SafetyApproval(BaseModel):
+    """V0.18.0 elicitation schema: 用户对 safety 阻拦的同意/拒绝.
+
+    MCP elicitation primitive 限制 (mcp.server.elicitation._validate_elicitation_schema):
+    只能用 str/int/float/bool 字段, 不能嵌套 model.
+    """
+
+    approve: bool = Field(
+        default=False,
+        description="是否放行此次敏感动作 (true=放行继续, false=拦截 abort task).",
+    )
 
 logger = logging.getLogger(__name__)
 
@@ -86,12 +101,35 @@ async def web_agent_run(
 
     # ctx.report_progress(progress, total, message) bound method 直接 1:1 对齐 ProgressCallback
     progress_cb = ctx.report_progress if ctx is not None else None
+
+    # V0.18.0 elicitation: ctx 可用时把 ctx.elicit 包成 SafetyApprovalCallback.
+    # safety check fail (env AUTO_APPROVE 未放行) → 弹 elicitation 让用户在 client 同意/拒绝.
+    # client 不支持 elicitation / 异常 → 视作 decline (loop 维持 abort 现状, 安全 default).
+    safety_approval_cb = None
+    if ctx is not None:
+        async def _elicit_safety(rule: str, reason: str) -> bool:
+            msg = (
+                f"web-agent 检测到敏感动作 (rule={rule}): {reason}\n"
+                f"是否放行本次动作? 拒绝将 abort task."
+            )
+            try:
+                result = await ctx.elicit(message=msg, schema=SafetyApproval)
+            except Exception as e:
+                logger.warning("ctx.elicit 失败 (%r) → 视作 decline", e)
+                return False
+            if isinstance(result, AcceptedElicitation):
+                return bool(result.data.approve)
+            return False
+
+        safety_approval_cb = _elicit_safety
+
     async with _RUN_LOCK:
         return await cli_run_task(
             goal=goal,
             start_url=url or None,
             max_steps=max_steps,
             progress_cb=progress_cb,
+            safety_approval_cb=safety_approval_cb,
         )
 
 

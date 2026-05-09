@@ -15,7 +15,7 @@ from playwright.async_api import async_playwright
 from web_agent.browser import apply_stealth, connect
 from web_agent.chrome_launcher import ensure_chrome_running
 from web_agent.llm import make_client
-from web_agent.loop import ProgressCallback, run_react_loop
+from web_agent.loop import ProgressCallback, SafetyApprovalCallback, run_react_loop
 from web_agent.memory import (
     DEFAULT_DB as _MEM_DB,
     extract_domain,
@@ -42,6 +42,7 @@ async def run_task(
     provider: str | None = None,
     model: str | None = None,
     progress_cb: ProgressCallback | None = None,
+    safety_approval_cb: SafetyApprovalCallback | None = None,
 ) -> str:
     load_dotenv()
     cdp_url = cdp_url or os.environ.get("WEB_AGENT_CDP_URL", "http://127.0.0.1:9222")
@@ -100,6 +101,7 @@ async def run_task(
             screenshots_dir=Path("data/screenshots"),
             memories=memories_str,
             progress_cb=progress_cb,
+            safety_approval_cb=safety_approval_cb,
         )
 
         # W5-D 长期记忆: 跨 session 持久化 task outcome by domain.
