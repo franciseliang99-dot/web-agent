@@ -2,6 +2,79 @@
 
 All notable changes to web-agent. 版本号遵循 SemVer 简化形式（V<major>.<minor>.<patch>）。
 
+## [0.18.2] - 2026-05-08
+
+### Verification (V0.18.0 elicit 真账号 dogfooding e2e — 双路径通过)
+
+V0.18.0 ship 时 CHANGELOG 留 "真账号 e2e 验证 (用户本地 Claude Code/Desktop 跑 send 类 task) 留作 dogfooding 任务". 本版本闭合.
+
+#### 验证环境
+
+- Claude Code 2.1.137 (≫ elicit GA 要求 2.1.76)
+- Chrome 9222 by `scripts/start_chrome.sh` auto-spawn (隔离 user-data-dir `~/.config/web-agent-chrome`, headless mode, SwiftShader GL)
+- Target: 本地 `file:///tmp/dogfood_publish.html` (zero-side-effect: input + Publish button + onclick 改 div#result text)
+- 无 `WEB_AGENT_AUTO_APPROVE` env (确保 elicit cb 路径触发, 不被 env-bypass 遮蔽)
+- 调用方: 本 Claude Code session 直接调 `mcp__web-agent__web_agent_run` (server stdio child auto-spawn)
+
+#### Run A — decline path ✅ (task `95175ad1fc63`)
+
+- LLM 推理: click input (step 0) → type 'hello' (step 1) → click Publish (step 2 想点)
+- safety check: rule=send-or-pay 拦截
+- `ctx.elicit()` 弹 Claude Code UI
+- 用户选 Decline → MCP `DeclinedElicitation` → cb 返 False → loop 视作 decline → abort
+- trace step 2: `safety_block {original_type:"click", rule:"send-or-pay", mark_id:2}`
+- tool result: `SAFETY_BLOCK at step 2: safety:send-or-pay (click on 'Publish')。 预授权: WEB_AGENT_AUTO_APPROVE=send-or-pay (或 *)`
+
+#### Run B — accept path ✅ (task `89a4be93e163`)
+
+- 前 2 步同 Run A
+- elicit 弹: 用户 Space 勾 ☑ `Approve` → `Accept` 提交
+- `AcceptedElicitation(data.approve=True)` → cb 返 True
+- loop 设 `elicited_approval_rule="send-or-pay"` 继续 dispatch click
+- Playwright actuator click → button onclick 改 `#result` text 含 ISO timestamp
+- step 3: LLM perceive 看到 div text → done
+- trace step 2: `click {mark_id:2, elicited_approval_rule:"send-or-pay"}` ← V0.18.0 设计的 trace flag 落档
+- tool result: `任务已完成：已在 id=msg 的输入框中输入 'hello'，并点击了 'Publish' 按钮。页面已响应，显示点击时间戳 clicked at 2026-05-09T05:21:25.408Z。`
+
+#### UI 操作语义 (人工 sticky point, 文档化)
+
+Claude Code 2.1.137 elicit UI 双层结构, 操作不直观, dogfooding 中误踩:
+
+```
+❯ ✔ Approve: ☐                  ← schema 字段 (Space 切换 ☐/☑)
+       ...
+   Accept    Decline             ← form 提交动作 (Tab/Enter)
+```
+
+| 意图 | 操作 | cb 收到 |
+|---|---|---|
+| 放行 (Run B) | Space 勾 ☑ + `Accept` | True |
+| 拦截 (Run A) | `Decline` (checkbox 无关) | False |
+| 拦截 (等价) | ☐ 不勾 + `Accept` | False |
+| ⚠️ Esc 是陷阱 | Esc 触发 MCP error -32001 user-cancel | tool fail, trace 半死 (e.g. task `96118978d12b`: step 2 含 `elicited_approval_rule` 但 `task.result=NULL`) |
+
+**早期 dogfooding 误判 V0.18.0 bug 实为 Esc 误操作** — `mcp-logs/2026-05-09T04-43-44-496Z.jsonl` 显示 "Elicitation response: {action:accept, content:{approve:true}}" 后 13 秒 "Tool failed: MCP error -32001: user-cancel", 即 cb 真返 True 但 tool 被 Esc cancel. 修正 UI 操作后双路径干净通过.
+
+#### 客户端支持矩阵更新
+
+| 客户端 | 状态 | 验证细节 |
+|---|---|---|
+| Claude Code 2.1.137 | ✅ 已验 | Run A/B 双路径双轮通过 (本版本) |
+| Claude Desktop | ⏳ 待真账号 e2e | 用户暂未测 |
+| 旧 client / 不支持 elicitation | ❌ ctx.elicit 抛异常, 维持 abort | 设计兜底, 未真账号验 |
+
+### Compatibility
+
+- **行为 100% 与 V0.18.1 一致** — 纯 dogfooding 验证, 无代码改动
+- 259 passed + 2 skipped (与 V0.18.1 baseline 一致)
+- bump: pyproject.toml + `__init__.py` `0.18.1` → `0.18.2` (patch, dogfooding verify 落档)
+
+### Why patch (V0.18.2) 不 bump V0.19
+
+- 是 V0.18.0 自承"留 dogfooding"的 follow-up, 性质是 V0.18 minor 周期内闭合, 不开新 minor
+- 无新外部能力 / 无 API 变化 / 测试基线一致
+- V0.19+ 留给真正能力跃迁 (e.g. actuator 扩 keyboard_shortcut/paste — 仍需 V0.16.31 触发条件 ≥2 真实任务失败)
+
 ## [0.18.1] - 2026-05-08
 
 ### Refactor (/simplify pass — 测试 dead assertion + dead-store + 显式类型注解)
