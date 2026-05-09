@@ -98,7 +98,7 @@ def check(action: Action, mark: Mark | None, marks: list[Mark] | None = None) ->
     Returns:
         SafetyDecision.allow=True → 放行；False → loop 写 trace + abort
     """
-    if action.type in ("scroll", "extract", "done") or mark is None:
+    if action.type in ("scroll", "extract", "done", "keyboard_shortcut") or mark is None:
         return SafetyDecision(allow=True)
 
     if action.type == "click":
@@ -127,6 +127,17 @@ def check(action: Action, mark: Mark | None, marks: list[Mark] | None = None) ->
                 return d
         if mark.name and _DANGER_INPUT_NAME_RE.search(mark.name):
             d = _block("type-into-sensitive-name", f"safety: type 到敏感字段 (name={mark.name!r})。")
+            if d:
+                return d
+
+    elif action.type == "paste":
+        # V0.19.0: paste 同 type 检查 — 复用敏感 input_type / name 规则; mark 是上次 click 的元素
+        if mark.input_type and mark.input_type.lower() in _DANGER_INPUT_TYPES:
+            d = _block("paste-into-sensitive-type", f"safety: paste 到敏感输入框 (type={mark.input_type!r}, name={mark.name!r})。")
+            if d:
+                return d
+        if mark.name and _DANGER_INPUT_NAME_RE.search(mark.name):
+            d = _block("paste-into-sensitive-name", f"safety: paste 到敏感字段 (name={mark.name!r})。")
             if d:
                 return d
 

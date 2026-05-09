@@ -11,6 +11,10 @@ V0.17.0: Action 拆 5 dataclass discriminated union (`ClickAction` / `TypeAction
   ClickAction(...)` 让 mypy 自动 narrow, 删 V0.16.12 留下的 2 处 `cast(dict[str, Any], ...)`.
   V0.16.11 的 `ActionArgs` union TypedDict 删除 (不再需要). LLM provider parse 后调
   `action_from_tool_call(name, raw)` factory dispatch 到对应 dataclass.
+V0.19.0: Action union 扩 KeyboardShortcutAction (key) + PasteAction (text) 共 7 dataclass.
+  V0.16.31 + V0.18.5 spike-2 复刻 contenteditable 末尾追加 fail mode (anti-loop on click 试光标定位)
+  根因 = actuator 缺 keyboard chord + paste action. V0.19.0 actuator 加 page.keyboard.press chord
+  syntax + execCommand insertText 主路径.
 """
 
 from __future__ import annotations
@@ -43,6 +47,7 @@ class Mark:
 
 
 # ===== V0.17.0: Action discriminated union (5 dataclass + Literal type) =====
+# V0.19.0: 扩 KeyboardShortcutAction + PasteAction (共 7 个).
 # 每个 dataclass 有 `type: Literal[...]` 字段 (放最后, dataclass 要求 default 字段在后),
 # `thought: str` 是公共字段 (每个 dataclass 重写而非继承 — explicit-better-than-implicit + frozen 子类坑).
 # `frozen=True` 防意外 mutate (Action 在短期记忆 deque 里被多次 ref); `slots=True` 省内存.
@@ -95,13 +100,48 @@ class DoneAction:
     type: Literal["done"] = "done"
 
 
-Action = ClickAction | TypeAction | ScrollAction | ExtractAction | DoneAction
+@dataclass(frozen=True, slots=True)
+class KeyboardShortcutAction:
+    """V0.19.0: 按键盘快捷键 (e.g. Control+End 跳到 textarea/contenteditable 末尾, Tab 切焦点).
+
+    Playwright key syntax: 修饰符 + '+' + 主键 (e.g. 'Control+End', 'Control+a', 'End', 'PageDown').
+    actuator 接 LLM 偶尔写 'Ctrl+...' 时 normalize 到 'Control+...' (Playwright canonical).
+    """
+
+    thought: str
+    key: str
+    type: Literal["keyboard_shortcut"] = "keyboard_shortcut"
+
+
+@dataclass(frozen=True, slots=True)
+class PasteAction:
+    """V0.19.0: 把文本粘贴到当前 focus 的 input/textarea/contenteditable.
+
+    比 type 快且不触发反爬键盘指纹. 主路径 document.execCommand('insertText') 避 clipboard 权限,
+    备路径 navigator.clipboard.writeText + Ctrl+V (CDP-connected mode 不能 grant_permissions).
+    paste 前必须先 click 把焦点放到目标输入框.
+    """
+
+    thought: str
+    text: str
+    type: Literal["paste"] = "paste"
+
+
+Action = (
+    ClickAction
+    | TypeAction
+    | ScrollAction
+    | ExtractAction
+    | DoneAction
+    | KeyboardShortcutAction
+    | PasteAction
+)
 
 
 def action_from_tool_call(name: str, raw: dict[str, Any]) -> Action:
     """V0.17.0: LLM provider parse 用. `raw` 是 tool_use input dict (含 thought+args).
 
-    `thought` 必须在调用前已 pop 出, 或 raw 含 thought 由本函数 pop. 5 type 之一不匹配抛 RuntimeError.
+    `thought` 必须在调用前已 pop 出, 或 raw 含 thought 由本函数 pop. 7 type 之一不匹配抛 RuntimeError.
     """
     thought = raw.pop("thought", "") if "thought" in raw else ""
     match name:
@@ -115,6 +155,10 @@ def action_from_tool_call(name: str, raw: dict[str, Any]) -> Action:
             return ExtractAction(thought=thought, query=str(raw["query"]), answer=str(raw["answer"]))
         case "done":
             return DoneAction(thought=thought, result=str(raw["result"]))
+        case "keyboard_shortcut":
+            return KeyboardShortcutAction(thought=thought, key=str(raw["key"]))
+        case "paste":
+            return PasteAction(thought=thought, text=str(raw["text"]))
         case _:
             raise RuntimeError(f"action_from_tool_call: unknown tool name {name!r}")
 
@@ -122,6 +166,7 @@ def action_from_tool_call(name: str, raw: dict[str, Any]) -> Action:
 # ===== ActionArgs 兼容 stub (TypedDict 保留 schema 文档, 但不再用于 union) =====
 # V0.17.0 删除 ActionArgs union, 但留 5 个 TypedDict 是因为 `_schema.py` 里某些参考 schema 文档
 # 仍引用这些 type. 实际 LLM tool schema 是 hand-written JSON, 这 5 个 TypedDict 仅作 IDE 提示作用.
+# V0.19.0 加 KeyboardShortcutArgs + PasteArgs 同模式.
 
 
 class ClickArgs(TypedDict):
@@ -144,3 +189,11 @@ class ExtractArgs(TypedDict):
 
 class DoneArgs(TypedDict):
     result: str
+
+
+class KeyboardShortcutArgs(TypedDict):
+    key: str
+
+
+class PasteArgs(TypedDict):
+    text: str

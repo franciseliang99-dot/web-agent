@@ -4,7 +4,16 @@ from __future__ import annotations
 
 import pytest
 
-from web_agent.types import Action, ClickAction, DoneAction, ExtractAction, ScrollAction, TypeAction
+from web_agent.types import (
+    Action,
+    ClickAction,
+    DoneAction,
+    ExtractAction,
+    KeyboardShortcutAction,
+    PasteAction,
+    ScrollAction,
+    TypeAction,
+)
 from web_agent.perceiver import Mark
 from web_agent.safety import check
 
@@ -190,3 +199,48 @@ def test_case_insensitive_match(monkeypatch):
     assert not check(_click(), _btn("SEND"), []).allow
     assert not check(_click(), _btn("send"), []).allow
     assert not check(_click(), _btn("SeNd"), []).allow
+
+
+# --- V0.19.0: paste / keyboard_shortcut ---
+
+
+def _paste(text: str = "hello") -> Action:
+    return PasteAction(thought="x", text=text)
+
+
+def _keyboard(key: str = "Control+End") -> Action:
+    return KeyboardShortcutAction(thought="x", key=key)
+
+
+def test_paste_into_password_blocked(monkeypatch):
+    """V0.19.0: paste 到敏感 input_type 同 type 拦截."""
+    monkeypatch.delenv("WEB_AGENT_AUTO_APPROVE", raising=False)
+    d = check(_paste("secret"), _input(input_type="password"), [])
+    assert not d.allow
+    assert d.rule == "paste-into-sensitive-type"
+
+
+def test_paste_into_amount_input_blocked(monkeypatch):
+    """V0.19.0: paste 到敏感 name (amount/cvv/...) 同 type 拦截."""
+    monkeypatch.delenv("WEB_AGENT_AUTO_APPROVE", raising=False)
+    d = check(_paste("100"), _input(input_type="text", name="amount"), [])
+    assert not d.allow
+    assert d.rule == "paste-into-sensitive-name"
+
+
+def test_paste_into_search_input_allowed(monkeypatch):
+    """V0.19.0: 普通文本框 paste 放行."""
+    monkeypatch.delenv("WEB_AGENT_AUTO_APPROVE", raising=False)
+    d = check(_paste("query"), _input(input_type="text", name="search"), [])
+    assert d.allow
+
+
+def test_keyboard_shortcut_always_allowed(monkeypatch):
+    """V0.19.0: keyboard_shortcut 无明确 target text 映射, 一律放行 (无 useful safety signal).
+
+    含 sensitive mark 时也不 block — Ctrl+End 在 password 输入框不构成额外风险.
+    """
+    monkeypatch.delenv("WEB_AGENT_AUTO_APPROVE", raising=False)
+    assert check(_keyboard("Control+End"), None, []).allow
+    assert check(_keyboard("Control+a"), _input(input_type="password"), []).allow
+    assert check(_keyboard("Tab"), _btn("Send"), []).allow  # 即使 mark.text 命中 send-or-pay 也不拦
