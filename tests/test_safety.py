@@ -44,6 +44,80 @@ def _type(text: str = "hi") -> Action:
     return TypeAction(thought="x", text=text)
 
 
+# --- V0.23.2 UploadAction sensitive path 黑名单 ---
+
+
+@pytest.mark.parametrize("path,should_block", [
+    ("~/.ssh/id_rsa", True),
+    ("~/.ssh/known_hosts", True),
+    ("~/.aws/credentials", True),
+    ("~/.gnupg/secring.gpg", True),
+    ("~/Downloads/photo.jpg", False),
+    ("~/Documents/report.pdf", False),
+    ("/tmp/vacation.png", False),
+    ("/home/user/Desktop/data.xlsx", False),
+    ("~/projects/repo/key.pem", True),
+    ("~/work/aws-credentials.json", True),
+    ("~/code/.env", True),
+    ("~/code/.env.local", True),
+    ("~/code/.env.production", True),
+    ("~/notes/secret-recipe.txt", True),
+    ("/etc/passwd", True),
+    ("/etc/hosts", True),
+    ("~/source/auth_token.json", True),
+])
+def test_upload_path_blacklist_block(monkeypatch, path, should_block):
+    """V0.23.2: upload paths 黑名单 fnmatch glob 标准化匹配."""
+    from web_agent.types import UploadAction
+    monkeypatch.delenv("WEB_AGENT_AUTO_APPROVE", raising=False)
+    action = UploadAction(thought="x", mark_id=1, paths=(path,))
+    decision = check(action, mark=None, marks=None)
+    if should_block:
+        assert not decision.allow, f"{path} 应被 block"
+        assert decision.rule == "upload-sensitive-path"
+    else:
+        assert decision.allow, f"{path} 应放行 got reason={decision.reason}"
+
+
+def test_upload_multi_paths_one_match_blocks_all(monkeypatch):
+    """V0.23.2: paths 多元素其一命中 → 整 action block (短路第一命中)."""
+    from web_agent.types import UploadAction
+    monkeypatch.delenv("WEB_AGENT_AUTO_APPROVE", raising=False)
+    action = UploadAction(thought="x", mark_id=1, paths=(
+        "/tmp/safe.pdf", "~/.ssh/id_rsa", "/tmp/another.txt",
+    ))
+    decision = check(action, mark=None, marks=None)
+    assert not decision.allow
+    assert decision.rule == "upload-sensitive-path"
+
+
+def test_upload_empty_paths_allowed(monkeypatch):
+    """V0.23.2: 空 paths edge → safety allow (actuator/loop ERROR obs 兜底)."""
+    from web_agent.types import UploadAction
+    monkeypatch.delenv("WEB_AGENT_AUTO_APPROVE", raising=False)
+    action = UploadAction(thought="x", mark_id=1, paths=())
+    decision = check(action, mark=None, marks=None)
+    assert decision.allow
+
+
+def test_upload_auto_approve_sensitive_path(monkeypatch):
+    """V0.23.2: WEB_AGENT_AUTO_APPROVE=upload-sensitive-path 显式放行."""
+    from web_agent.types import UploadAction
+    monkeypatch.setenv("WEB_AGENT_AUTO_APPROVE", "upload-sensitive-path")
+    action = UploadAction(thought="x", mark_id=1, paths=("~/.ssh/id_rsa",))
+    decision = check(action, mark=None, marks=None)
+    assert decision.allow
+
+
+def test_upload_auto_approve_wildcard(monkeypatch):
+    """V0.23.2: WEB_AGENT_AUTO_APPROVE=* 通配符放行."""
+    from web_agent.types import UploadAction
+    monkeypatch.setenv("WEB_AGENT_AUTO_APPROVE", "*")
+    action = UploadAction(thought="x", mark_id=1, paths=("/etc/passwd",))
+    decision = check(action, mark=None, marks=None)
+    assert decision.allow
+
+
 # --- click 按钮文本黑名单 ---
 
 @pytest.mark.parametrize("text,should_block", [

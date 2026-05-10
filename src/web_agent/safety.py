@@ -9,15 +9,18 @@
 依赖方向（按 CLAUDE.md 解耦）：domain (web_agent.types: Mark, Action) ← safety.py (本文件，纯函数) ← loop.py (业务层调用)
 
 V0.16.9: 改从 `web_agent.types` import Mark/Action，消除 domain 反向依赖 port (llm.base) 和 业务层 (perceiver)。
+V0.23.2: 加 UploadAction sensitive path 黑名单 (~/.ssh/ /.aws/ *.pem id_rsa* .env etc).
 """
 
 from __future__ import annotations
 
+import fnmatch
 import os
 import re
 from dataclasses import dataclass
+from pathlib import Path
 
-from web_agent.types import Action, Mark
+from web_agent.types import Action, Mark, UploadAction
 
 
 @dataclass
@@ -66,6 +69,55 @@ _DANGER_INPUT_NAME_RE = re.compile(
     re.IGNORECASE,
 )
 
+# V0.23.2: UploadAction 路径黑名单 — fnmatch glob 模式, Path expanduser+resolve 标准化后匹配.
+# symlink 跟到真实路径 (Path.resolve 默认 strict=False) 防 ~/safe/key.pem → ~/.ssh/id_rsa 绕过.
+# 黑名单 (而非白名单) 因合法上传目录太散 (Downloads/Documents/Desktop/Projects/repo 内...),
+# 敏感路径模式稳定 + 失败模式漏拦 (用户 elicit 兜底) > 白名单误拦体验差.
+_DANGEROUS_UPLOAD_PATTERNS: list[str] = [
+    "*/.ssh/*",         # SSH 私钥 / authorized_keys
+    "*/.ssh",
+    "*/.aws/*",         # AWS 凭证
+    "*/.aws",
+    "*/.gnupg/*",       # GPG 密钥
+    "*/.gnupg",
+    "*/.docker/config.json",  # Docker registry 凭证
+    "*/.netrc",         # FTP/curl 凭证
+    "*/Library/Keychains/*",  # macOS keychain
+    "/etc/*",           # 系统配置 (含 shadow/passwd 等)
+    "*.pem",            # 任意目录 PEM 私钥
+    "*.key",            # 任意目录私钥
+    "*id_rsa*",         # SSH 私钥常见命名 (含 id_rsa.pub)
+    "*credentials*",    # 凭证文件常见命名
+    "*.env",            # 环境变量含 secret
+    "*.env.*",          # .env.local / .env.production etc
+    "*token*",          # token 类文件
+    "*secret*",         # secret 类文件
+]
+
+
+def _check_upload_paths(paths: tuple[str, ...]) -> SafetyDecision | None:
+    """V0.23.2: UploadAction.paths 黑名单检查. 返 None 表全 paths 都过, SafetyDecision 表 block.
+
+    Path expanduser+resolve 标准化跟 symlink (~/safe/key.pem → ~/.ssh/id_rsa 防绕过);
+    任一 path 命中 _DANGEROUS_UPLOAD_PATTERNS 立即返 _block (不继续检查后续 path).
+    """
+    if not paths:
+        return None  # 空 paths 由 actuator/loop ERROR obs 兜底, 不归 safety 管
+    for p in paths:
+        try:
+            normalized = str(Path(p).expanduser().resolve())
+        except (OSError, RuntimeError):
+            normalized = p  # resolve 失败 (无效 path / 跨设备 symlink) → 用原串匹配
+        for pattern in _DANGEROUS_UPLOAD_PATTERNS:
+            if fnmatch.fnmatch(normalized, pattern):
+                return _block(
+                    "upload-sensitive-path",
+                    f"safety: upload 命中敏感路径 (path={p!r} matches {pattern!r})。"
+                    f"系统/凭证文件不可上传; 如确需放行, set "
+                    f"WEB_AGENT_AUTO_APPROVE=upload-sensitive-path",
+                )
+    return None
+
 
 def _auto_approved(rule: str) -> bool:
     """检查 WEB_AGENT_AUTO_APPROVE env 是否预授权了某个规则。`*` = 全开。"""
@@ -97,8 +149,18 @@ def check(action: Action, mark: Mark | None, marks: list[Mark] | None = None) ->
 
     Returns:
         SafetyDecision.allow=True → 放行；False → loop 写 trace + abort
+
+    V0.23.2: 加 UploadAction arm — paths 黑名单匹配 (mark 是 file input 不敏感, paths 才敏感).
+    DragAction 不 check (拖动行为本身风险低; 真敏感是 click 到 delete/send 已被 click arm 拦).
     """
-    if action.type in ("scroll", "extract", "done", "keyboard_shortcut") or mark is None:
+    # V0.23.2: UploadAction 优先处理 — paths 是 action 自带字段, 不依赖 mark
+    if isinstance(action, UploadAction):
+        decision = _check_upload_paths(action.paths)
+        if decision is not None:
+            return decision
+        return SafetyDecision(allow=True)
+
+    if action.type in ("scroll", "extract", "done", "keyboard_shortcut", "drag") or mark is None:
         return SafetyDecision(allow=True)
 
     if action.type == "click":

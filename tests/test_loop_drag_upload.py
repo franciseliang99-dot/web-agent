@@ -118,6 +118,53 @@ async def test_upload_file_input_real_chromium_set_files(tmp_path):
             await browser.close()
 
 
+_DOWNLOAD_HTML = (
+    "<html><body>"
+    "<a id=dl href=\"data:text/plain;base64,aGVsbG8gdjAuMjMuMg==\" download=\"v0232.txt\">Download</a>"
+    "</body></html>"
+)
+_DOWNLOAD_URL = "data:text/html," + urllib.parse.quote(_DOWNLOAD_HTML)
+
+
+async def test_download_listener_real_chromium_saves_file(tmp_path, monkeypatch):
+    """V0.23.2 端到端: connect 装 download listener + click <a download> 真触发 → 文件落 download_dir.
+
+    用 task_id=test_v0232 + ctx attr 注入 download_dir = tmp_path/downloads/test_v0232.
+    """
+    import asyncio
+    from playwright.async_api import async_playwright
+    from web_agent.browser import _attach_download_listeners
+
+    download_dir = tmp_path / "downloads" / "test_v0232"
+    download_dir.mkdir(parents=True, exist_ok=True)
+
+    async with async_playwright() as p:
+        browser = await p.chromium.launch(headless=True)
+        try:
+            ctx = await browser.new_context(accept_downloads=True)
+            _attach_download_listeners(ctx)
+            ctx._web_agent_download_dir = download_dir
+            page = await ctx.new_page()
+            # _attach_download_listeners 已 attach 给 initial pages, new_page 走 ctx.on('page') 路径
+            # ctx.on('page') 是 sync emit 但 _ctx_page_handler_with_download 是 async create_task
+            # → 等一拍让 listener 装上
+            await asyncio.sleep(0.1)
+            await page.goto(_DOWNLOAD_URL)
+            await page.wait_for_load_state("domcontentloaded")
+            await page.click("#dl")
+            # 等 download listener handler save_as 异步完成
+            await asyncio.sleep(1.0)
+            saved = download_dir / "v0232.txt"
+            assert saved.exists(), f"download 应落 {saved}; got {list(download_dir.iterdir())}"
+            assert saved.read_text() == "hello v0.23.2"
+            recent = getattr(ctx, "_web_agent_recent_downloads", None)
+            assert recent and any("v0232.txt" in line for line in recent), (
+                f"obs deque 应含 download 元信息; got {recent}"
+            )
+        finally:
+            await browser.close()
+
+
 async def test_upload_button_dom_walk_real_chromium_finds_hidden_input(tmp_path):
     """V0.23.1: button mark + hidden file input → DOM walk 找到 input + 投递文件 (端到端).
 

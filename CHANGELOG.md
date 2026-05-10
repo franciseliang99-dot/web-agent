@@ -2,6 +2,85 @@
 
 All notable changes to web-agent. 版本号遵循 SemVer 简化形式（V<major>.<minor>.<patch>）。
 
+## [0.23.2] - 2026-05-09
+
+### Add (V0.23 第 3 commit — loop dispatch + safety upload + download listener 端到端闭环)
+
+V0.23.0/1 schema/actuator 落档后, V0.23.2 跨 3 模块联动 (loop+safety+browser) 真接派发:
+LLM 现真能 drag/upload, download 自动落 task-scoped 目录 + obs 注入下一步 trace.
+
+### Sanity 推翻 Plan B5 多 task 并发顾虑
+
+Plan B5 顾虑 download_dir ctx-level 注入会被多 task 互相覆盖. V0.23.2 sanity 实地查
+`mcp_server.py:65 _RUN_LOCK = asyncio.Lock()` 已串行化 web_agent_run, ctx 同时只 1 task
+持有 → **直接 ctx attr 安全, 不需 task_id 锁**. 跟 V0.21.3 popup 同模式.
+
+### Changed
+
+- `src/web_agent/safety.py`:
+  - 加 `_DANGEROUS_UPLOAD_PATTERNS` fnmatch glob 黑名单 18 条 (~/.ssh/* /.aws/* /.gnupg/*
+    /.docker/config.json /.netrc /Library/Keychains/* /etc/* *.pem *.key *id_rsa*
+    *credentials* *.env *.env.* *token* *secret*).
+  - 加 `_check_upload_paths(paths) -> SafetyDecision | None` helper: Path expanduser+resolve
+    标准化 (跟 symlink 真路径防 ~/safe/key.pem → ~/.ssh/id_rsa 绕过); fnmatch.fnmatch
+    匹配; 任一命中短路返 _block; 全过返 None.
+  - `check(action, mark, marks)` 加 `isinstance(action, UploadAction)` 优先 arm 调
+    helper (paths 是 action 自带字段不依赖 mark; DragAction allow drag 当前不 check).
+- `src/web_agent/browser.py`:
+  - 加 `_max_download_mb()` env 可调 (`WEB_AGENT_MAX_DOWNLOAD_MB` 默认 100MB) 防 LLM 误下
+    GB 级文件填满磁盘.
+  - 加 `_resolve_download_path(download_dir, suggested) -> Path` 同名加 _2/_3/... 后缀去重
+    (timestamp 不可读 / _N 后缀人眼可读).
+  - 加 `_save_download_async(download, target, max_bytes)` 异步 save_as + 后置 size 检查
+    (Playwright Download 无 pre-check size API), 超限删 + warn; 失败不抛.
+  - 加 `_make_download_handler(ctx) -> Callable` 工厂闭包持 ctx; handler 同步 append 元信息
+    到 ctx._web_agent_recent_downloads deque (loop 顶部读), `asyncio.create_task(_save_download_async)`
+    fire-and-forget 不 block 主 loop.
+  - 加 `_attach_page_download(page, ctx)` 单 page 装 handler + 幂等 flag.
+  - 加 `_ctx_page_handler_with_download(page, ctx)` 复合 handler — 既装 download listener 也跑
+    popup 拟人延迟 (V0.21.3 popup handler 升级).
+  - 加 `_attach_download_listeners(ctx)` 跨 entry 一次性装 + 幂等 flag; initial pages walk +
+    ctx.on('page') 复合 handler. `connect()` 末尾调.
+- `src/web_agent/loop.py`:
+  - 入口 `download_dir = Path("data/downloads") / task_id` mkdir + ctx attr 注入
+    `_web_agent_download_dir` + 初始化 `_web_agent_recent_downloads = deque(maxlen=10)`.
+  - 每 step 顶部读 ctx._web_agent_recent_downloads, 任何 download 触发的 obs 追加到上一步
+    trace.steps[-1].observation (mutate trace, 类似 W5-A reflect hint), pop_all 防下一步
+    重复 (注入幂等).
+  - dispatch 替 V0.23.0 placeholder ERROR:
+    - `DragAction(from_mark_id=fid, to_mark_id=tid)`: 找 from/to 2 mark + 校验同 frame_path
+      (跨 frame ERROR obs) + resolve frame + actuator + reset last_clicked_mark + obs.
+    - `UploadAction(mark_id, paths)`: 找 mark + actuator (safety 已在 isinstance 分支前
+      check 过) + RuntimeError catch (DOM walk fail 兜底 ERROR obs) + reset last_clicked_mark.
+  - `isinstance(action, (ClickAction, TypeAction, PasteAction, UploadAction))` 加 UploadAction
+    走 safety check arm (paths 黑名单).
+- `tests/test_safety.py` 加 22 V0.23.2 测 (17 参数化 path block/allow + multi-path 短路 +
+  empty paths + auto_approve 单 + auto_approve wildcard).
+- `tests/test_loop_main.py` 加 4 V0.23.2 测 (drag dispatch / drag 跨 frame ERROR / upload
+  dispatch / upload safety abort).
+- `tests/test_browser.py` `_mk_page` helper 加 .on() (V0.23.2 download listener 装 page.on);
+  现有 popup listener 测更新 — 现 connect 装 2 个 ctx.on('page') (popup + download).
+- `tests/test_loop_drag_upload.py` 加 1 V0.23.2 真 chromium download smoke
+  `test_download_listener_real_chromium_saves_file` — `<a download>` click 真触发 listener +
+  文件落 download_dir + obs deque append.
+
+### Compatibility
+
+- 主 frame 路径 100% 兼容 V0.23.1; 旧 fixture FakeContext.on noop (V0.21.3 已加) 接住
+  download listener 装载不抛.
+- DragAction 当前 safety 不 check (拖动行为本身风险低); UploadAction safety 走 paths 黑名单
+  (mark 不参与决策).
+- mcp_server._RUN_LOCK 串行化保证 ctx attr 注入安全 — 不修架构, 跟 V0.21.3 popup 同模式.
+- mypy strict 0; ruff 0; pytest 363 → **389 + 8 skip** (V0.23.2 +22 safety + 4 loop dispatch);
+  真 chromium 8 个 slow smoke 全过 (popup 2 + iframe 2 + V0.23.1 drag/upload 3 + V0.23.2 download 1).
+
+### Why patch (V0.23.2) 不 minor
+
+- LLM tool surface (V0.23.0 schema) 零变化 — 内部 dispatch wire-up + safety 加 rule + browser
+  加 listener.
+- 跟 V0.21.1 (loop 改 ctx) / V0.22.2 (actuator iframe 路由) 同档.
+- SemVer "向后兼容的 enhance → patch", 0.23.1 → 0.23.2.
+
 ## [0.23.1] - 2026-05-09
 
 ### Add (V0.23 第 2 commit — actuator human_like_drag + upload_file + DOM walk JS)

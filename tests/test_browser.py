@@ -16,10 +16,17 @@ from web_agent.browser import apply_stealth, connect
 
 # ---------- connect ----------
 
+def _mk_page(**extra):
+    """V0.23.2: page mock 必须含 .on(event, handler) (connect _attach_download_listeners 装 page.on('download'))."""
+    ns = SimpleNamespace(_on_calls=[], **extra)
+    ns.on = lambda event, handler: ns._on_calls.append((event, handler))
+    return ns
+
+
 def _mk_ctx(pages, **extra):
     """V0.21.3: ctx mock 必须含 .on(event, handler) noop (connect 装 popup listener).
 
-    on() 副作用记录到 _on_calls list 让单测可断言.
+    on() 副作用记录到 _on_calls list 让单测可断言. V0.23.2: pages 元素也需 .on() (download listener).
     """
     ns = SimpleNamespace(pages=pages, _on_calls=[], **extra)
     ns.on = lambda event, handler: ns._on_calls.append((event, handler))
@@ -27,7 +34,7 @@ def _mk_ctx(pages, **extra):
 
 
 async def test_connect_returns_browser_ctx_page_triple():
-    fake_page = SimpleNamespace()
+    fake_page = _mk_page()
     fake_ctx = _mk_ctx([fake_page])
     fake_browser = SimpleNamespace(contexts=[fake_ctx])
 
@@ -68,27 +75,31 @@ async def test_connect_no_pages_creates_new_page():
 
 
 async def test_connect_attaches_popup_listener_on_page_event():
-    """V0.21.3: connect 末尾装 ctx.on('page', _popup_notice_handler)."""
+    """V0.21.3: connect 装 ctx.on('page', _popup_notice_handler).
+    V0.23.2: connect 也装 download listener (第 2 个 ctx.on('page')) — 总共 2 个 ctx.on call.
+    """
     import inspect
     from web_agent.browser import _popup_notice_handler
-    fake_ctx = _mk_ctx([SimpleNamespace()])
+    fake_ctx = _mk_ctx([_mk_page()])
     fake_browser = SimpleNamespace(contexts=[fake_ctx])
     p = SimpleNamespace(chromium=SimpleNamespace(
         connect_over_cdp=AsyncMock(return_value=fake_browser),
     ))
     await connect(p, cdp_url="http://x:1")
-    assert len(fake_ctx._on_calls) == 1, f"应装 1 次 listener, got {fake_ctx._on_calls}"
-    event, handler = fake_ctx._on_calls[0]
-    assert event == "page"
-    assert handler is _popup_notice_handler
-    assert inspect.iscoroutinefunction(handler), "handler 必须 async (pyee 自动调度)"
+    # V0.23.2: popup listener (1) + download listener 用 ctx.on('page') 装新 page handler (1) = 2
+    assert len(fake_ctx._on_calls) == 2, f"应装 2 个 ctx listener (popup + download), got {fake_ctx._on_calls}"
+    events = [e for e, _ in fake_ctx._on_calls]
+    assert events == ["page", "page"]
+    assert fake_ctx._on_calls[0][1] is _popup_notice_handler
+    assert inspect.iscoroutinefunction(_popup_notice_handler), "popup handler 必须 async"
     # 幂等 flag 已落
     assert getattr(fake_ctx, "_web_agent_popup_listener", False) is True
+    assert getattr(fake_ctx, "_web_agent_download_listener", False) is True
 
 
 async def test_connect_popup_listener_idempotent_across_multiple_connects():
-    """V0.21.3: cli/jd_extract/list_extract 各 connect 一次 → listener 只装 1 次, 不叠装."""
-    fake_ctx = _mk_ctx([SimpleNamespace()])
+    """V0.21.3+V0.23.2: cli/jd_extract/list_extract 各 connect 一次 → 各 listener 只装 1 次."""
+    fake_ctx = _mk_ctx([_mk_page()])
     fake_browser = SimpleNamespace(contexts=[fake_ctx])
     p = SimpleNamespace(chromium=SimpleNamespace(
         connect_over_cdp=AsyncMock(return_value=fake_browser),
@@ -96,7 +107,8 @@ async def test_connect_popup_listener_idempotent_across_multiple_connects():
     await connect(p)
     await connect(p)
     await connect(p)
-    assert len(fake_ctx._on_calls) == 1, "幂等 flag 应防多次叠装"
+    # V0.23.2: 仍是 popup + download 各 1 次共 2 个 ctx.on call
+    assert len(fake_ctx._on_calls) == 2, "幂等 flag 应防多次叠装"
 
 
 async def test_popup_notice_handler_sleeps_in_range_and_does_not_steal_focus(monkeypatch):

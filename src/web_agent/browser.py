@@ -4,9 +4,13 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import os
 import random
+from collections import deque
+from collections.abc import Callable
+from pathlib import Path
 
-from playwright.async_api import Browser, BrowserContext, Page, Playwright
+from playwright.async_api import Browser, BrowserContext, Download, Page, Playwright
 
 logger = logging.getLogger(__name__)
 
@@ -41,6 +45,108 @@ def _attach_popup_listener(ctx: BrowserContext) -> None:
     ctx._web_agent_popup_listener = True  # type: ignore[attr-defined]
 
 
+def _max_download_mb() -> int:
+    """V0.23.2: env 可调 download size 上限 (默认 100MB), 防 LLM 误下载 GB 级文件填满磁盘."""
+    try:
+        return int(os.environ.get("WEB_AGENT_MAX_DOWNLOAD_MB", "100"))
+    except ValueError:
+        return 100
+
+
+def _resolve_download_path(download_dir: Path, suggested: str) -> Path:
+    """V0.23.2: 同名 download 加 _2/_3/... 后缀去重. timestamp 不可读 / _N 后缀人眼可读."""
+    target = download_dir / suggested
+    if not target.exists():
+        return target
+    stem, dot, ext = suggested.partition(".")
+    suffix = f".{ext}" if dot else ""
+    for i in range(2, 1000):
+        candidate = download_dir / f"{stem}_{i}{suffix}"
+        if not candidate.exists():
+            return candidate
+    return download_dir / f"{stem}_overflow_{random.randint(1000, 9999)}{suffix}"
+
+
+async def _save_download_async(download: Download, target_path: Path, max_bytes: int) -> None:
+    """V0.23.2: 异步 save_as + size 后置检查 (Playwright Download 无 pre-check size API).
+
+    超限删除文件 + log warning. 失败不抛 (download 是 fire-and-forget, 主 loop 不该被打断).
+    """
+    try:
+        await download.save_as(str(target_path))
+        if target_path.exists():
+            actual_bytes = target_path.stat().st_size
+            if actual_bytes > max_bytes:
+                logger.warning(
+                    "download %r size %d MB 超 max %d MB, 删除", target_path.name,
+                    actual_bytes // (1024 * 1024), max_bytes // (1024 * 1024),
+                )
+                target_path.unlink(missing_ok=True)
+    except Exception as e:
+        logger.warning("download save_as %r 失败: %r", target_path, e)
+
+
+def _make_download_handler(ctx: BrowserContext) -> Callable[[Download], None]:
+    """V0.23.2: 工厂返 page.on('download') handler, 闭包持有 ctx 拿 task-scoped download_dir.
+
+    handler 同步 append 元信息到 ctx._web_agent_recent_downloads (loop 顶部读), save_as 异步
+    fire-and-forget (不 block 主 loop). 元信息 instant 可读, save 完成与否对 obs 文本无影响.
+    """
+    def handler(download: Download) -> None:
+        download_dir = getattr(ctx, "_web_agent_download_dir", None)
+        if download_dir is None:
+            logger.warning("download 触发但 ctx._web_agent_download_dir 未设, drop %r", download.url[:80])
+            return
+        suggested = download.suggested_filename or "download.bin"
+        target = _resolve_download_path(download_dir, suggested)
+        recent = getattr(ctx, "_web_agent_recent_downloads", None)
+        if recent is None:
+            recent = deque(maxlen=10)
+            ctx._web_agent_recent_downloads = recent  # type: ignore[attr-defined]
+        # instant 元信息追加, save 异步 fire-and-forget
+        recent.append(f"downloaded: {target.name} ({download.url[:80]})")
+        max_bytes = _max_download_mb() * 1024 * 1024
+        asyncio.create_task(_save_download_async(download, target, max_bytes))
+    return handler
+
+
+def _attach_page_download(page: Page, ctx: BrowserContext) -> None:
+    """V0.23.2: 给单个 page 装 page.on('download') handler, 幂等 flag 防同 page 叠装."""
+    if getattr(page, "_web_agent_download_listener", False):
+        return
+    page.on("download", _make_download_handler(ctx))
+    page._web_agent_download_listener = True  # type: ignore[attr-defined]
+
+
+async def _ctx_page_handler_with_download(page: Page, ctx: BrowserContext) -> None:
+    """V0.23.2: ctx.on('page') 复合 handler — 既跑 popup 拟人延迟也给新 page 装 download listener."""
+    _attach_page_download(page, ctx)
+    await _popup_notice_handler(page)
+
+
+def _attach_download_listeners(ctx: BrowserContext) -> None:
+    """V0.23.2: 给 ctx 装 download listener, 跟 popup 同模式幂等 + 跨 entry 一次性.
+
+    Playwright `download` 事件只在 page 级别 (ctx 无), 必须每个 page 装. ctx.on('page')
+    新弹 popup 时也再装一次 (V0.21.3 popup handler 升级为复合 handler 同时装 download).
+    initial pages (ctx.pages 已有) 也 walk 装一次.
+
+    download_dir 由 loop 入口写 ctx._web_agent_download_dir attr (task-scoped); listener
+    handler 闭包读. mcp_server._RUN_LOCK 串行化 web_agent_run, ctx 同时只 1 task 持有 →
+    attr 注入安全 (sanity 推翻 Plan B5 多 task 并发顾虑).
+    """
+    if getattr(ctx, "_web_agent_download_listener", False):
+        return
+    # initial pages 立即装
+    for p in ctx.pages:
+        _attach_page_download(p, ctx)
+    # 新弹 page (popup) 装载: ctx.on('page') 升级到复合 handler
+    # 注意: V0.21.3 popup listener 已用 _popup_notice_handler 直接注 ctx.on('page'),
+    # 这里覆盖掉旧 popup-only handler 用复合 handler (同时装 download + 跑 popup 拟人).
+    ctx.on("page", lambda p: asyncio.create_task(_ctx_page_handler_with_download(p, ctx)))
+    ctx._web_agent_download_listener = True  # type: ignore[attr-defined]
+
+
 async def connect(
     p: Playwright,
     cdp_url: str = "http://127.0.0.1:9222",
@@ -64,6 +170,7 @@ async def connect(
         )
     ctx = browser.contexts[0]
     _attach_popup_listener(ctx)
+    _attach_download_listeners(ctx)  # V0.23.2: 跟 popup 同模式 (跨 entry 一次性)
     page = ctx.pages[0] if ctx.pages else await ctx.new_page()
     return browser, ctx, page
 

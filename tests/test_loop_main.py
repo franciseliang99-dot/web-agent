@@ -562,6 +562,152 @@ def test_gather_tab_titles_fallback_url_on_empty_title():
     assert "example.com" in result[0][1] or "/very/long/path/segment" in result[0][1]
 
 
+async def test_dispatch_drag_calls_human_like_drag_with_resolved_marks(
+    monkeypatch, tmp_path, patch_loop_internals
+):
+    """V0.23.2: DragAction 找 from/to mark + 校验同 frame + actuator 派发 + reset last_clicked."""
+    from web_agent.types import DragAction
+    monkeypatch.delenv("WEB_AGENT_AUTO_APPROVE", raising=False)
+    from_m = Mark(id=1, tag="div", role="", text="src", bbox={"x": 10, "y": 10, "w": 30, "h": 30})
+    to_m = Mark(id=2, tag="div", role="", text="dst", bbox={"x": 100, "y": 100, "w": 50, "h": 50})
+
+    async def perceive_two(page):
+        return [from_m, to_m], _FAKE_SHOT, []
+
+    monkeypatch.setattr("web_agent.loop.perceive", perceive_two)
+    drag_calls: list[tuple] = []
+
+    async def fake_drag(page, fm, tm, frame=None):
+        drag_calls.append((fm.id, tm.id, frame))
+
+    monkeypatch.setattr("web_agent.loop.human_like_drag", fake_drag)
+
+    client = FakeLLMClient([
+        DragAction(thought="拖", from_mark_id=1, to_mark_id=2),
+        DoneAction(thought="完成", result="ok"),
+    ])
+    db = tmp_path / "trace.db"
+    result = await run_react_loop(
+        _ctx(), client, goal="测 drag dispatch",
+        max_steps=3, db_path=db, screenshots_dir=tmp_path / "shots",
+    )
+    assert result == "ok"
+    assert drag_calls == [(1, 2, None)]
+    steps = _read_trace_steps(db)
+    drag_step = next(s for s in steps if s[1] == "drag")
+    assert drag_step[1] == "drag"
+    assert drag_step[2].get("from_mark_id") == 1
+    assert drag_step[2].get("to_mark_id") == 2
+
+
+async def test_dispatch_drag_cross_frame_returns_error_obs(
+    monkeypatch, tmp_path, patch_loop_internals
+):
+    """V0.23.2: drag from.frame_path != to.frame_path → ERROR obs, 不调 actuator."""
+    from web_agent.types import DragAction
+    monkeypatch.delenv("WEB_AGENT_AUTO_APPROVE", raising=False)
+    from_m = Mark(id=1, tag="div", role="", text="src", bbox={"x": 10, "y": 10, "w": 30, "h": 30}, frame_path="")
+    to_m = Mark(id=2, tag="div", role="", text="dst", bbox={"x": 100, "y": 100, "w": 50, "h": 50}, frame_path="0")
+
+    async def perceive_cross(page):
+        return [from_m, to_m], _FAKE_SHOT, []
+
+    monkeypatch.setattr("web_agent.loop.perceive", perceive_cross)
+    drag_called = {"n": 0}
+
+    async def spy_drag(*a, **kw):
+        drag_called["n"] += 1
+
+    monkeypatch.setattr("web_agent.loop.human_like_drag", spy_drag)
+
+    client = FakeLLMClient([
+        DragAction(thought="跨帧", from_mark_id=1, to_mark_id=2),
+        DoneAction(thought="完成", result="ok"),
+    ])
+    db = tmp_path / "trace.db"
+    result = await run_react_loop(
+        _ctx(), client, goal="测 drag cross frame",
+        max_steps=3, db_path=db, screenshots_dir=tmp_path / "shots",
+    )
+    assert result == "ok"
+    assert drag_called["n"] == 0, "跨 frame drag 不应调用 actuator"
+    import sqlite3
+    conn = sqlite3.connect(db)
+    obs = conn.execute("SELECT observation FROM steps WHERE action_type='drag'").fetchone()[0]
+    conn.close()
+    assert "ERROR" in obs and "跨 frame" in obs
+
+
+async def test_dispatch_upload_calls_upload_file_with_paths(
+    monkeypatch, tmp_path, patch_loop_internals
+):
+    """V0.23.2: UploadAction 找 mark + safety pass + actuator upload_file 接 paths tuple."""
+    from web_agent.types import UploadAction
+    monkeypatch.delenv("WEB_AGENT_AUTO_APPROVE", raising=False)
+    file_input = Mark(
+        id=5, tag="input", role="", text="", bbox={"x": 0, "y": 0, "w": 1, "h": 1},
+        input_type="file",
+    )
+
+    async def perceive_input(page):
+        return [file_input], _FAKE_SHOT, []
+
+    monkeypatch.setattr("web_agent.loop.perceive", perceive_input)
+    upload_calls: list[tuple] = []
+
+    async def fake_upload(page, mark, paths, frame=None):
+        upload_calls.append((mark.id, paths, frame))
+
+    monkeypatch.setattr("web_agent.loop.upload_file", fake_upload)
+
+    client = FakeLLMClient([
+        UploadAction(thought="传文件", mark_id=5, paths=("/tmp/safe.pdf",)),
+        DoneAction(thought="完成", result="ok"),
+    ])
+    db = tmp_path / "trace.db"
+    result = await run_react_loop(
+        _ctx(), client, goal="测 upload dispatch",
+        max_steps=3, db_path=db, screenshots_dir=tmp_path / "shots",
+    )
+    assert result == "ok"
+    assert upload_calls == [(5, ("/tmp/safe.pdf",), None)]
+
+
+async def test_dispatch_upload_safety_blocks_sensitive_path(
+    monkeypatch, tmp_path, patch_loop_internals
+):
+    """V0.23.2: upload paths 命中黑名单 → safety abort 不调 actuator."""
+    from web_agent.types import UploadAction
+    monkeypatch.delenv("WEB_AGENT_AUTO_APPROVE", raising=False)
+    file_input = Mark(
+        id=1, tag="input", role="", text="", bbox={"x": 0, "y": 0, "w": 1, "h": 1},
+        input_type="file",
+    )
+
+    async def perceive_input(page):
+        return [file_input], _FAKE_SHOT, []
+
+    monkeypatch.setattr("web_agent.loop.perceive", perceive_input)
+    upload_called = {"n": 0}
+
+    async def spy_upload(*a, **kw):
+        upload_called["n"] += 1
+
+    monkeypatch.setattr("web_agent.loop.upload_file", spy_upload)
+
+    client = FakeLLMClient([
+        UploadAction(thought="试敏感", mark_id=1, paths=("~/.ssh/id_rsa",)),
+    ])
+    db = tmp_path / "trace.db"
+    result = await run_react_loop(
+        _ctx(), client, goal="测 upload safety",
+        max_steps=2, db_path=db, screenshots_dir=tmp_path / "shots",
+    )
+    assert "SAFETY_BLOCK" in result
+    assert "upload-sensitive-path" in result
+    assert upload_called["n"] == 0, "safety abort 不应调 actuator"
+
+
 async def test_plan_called_with_cross_origin_hosts_kwarg(
     monkeypatch, tmp_path, patch_loop_internals
 ):

@@ -20,11 +20,13 @@ from playwright.async_api import BrowserContext, Frame, Page
 
 from web_agent.actuator import (
     human_like_click,
+    human_like_drag,
     human_like_keyboard_shortcut,
     human_like_paste,
     human_like_type,
     scroll,
     think,
+    upload_file,
 )
 from web_agent.captcha import detect as captcha_detect
 from web_agent.llm import LLMClient
@@ -357,6 +359,16 @@ async def run_react_loop(
     start_task(conn, task_id, goal)
     screenshots_dir.mkdir(parents=True, exist_ok=True)
 
+    # V0.23.2: download_dir task-scoped + ctx attr 注入 (browser.py download listener 闭包读).
+    # mcp_server._RUN_LOCK 串行化 web_agent_run, ctx 同时只 1 task 持有 → attr 注入安全
+    # (sanity 推翻 Plan B5 多 task 并发顾虑). mkdir 在 perceive 第一步前完成防 listener save_as
+    # 写到不存在目录抛异常被 silent swallow.
+    download_dir = Path("data/downloads") / task_id
+    download_dir.mkdir(parents=True, exist_ok=True)
+    ctx._web_agent_download_dir = download_dir  # type: ignore[attr-defined]
+    if not getattr(ctx, "_web_agent_recent_downloads", None):
+        ctx._web_agent_recent_downloads = deque(maxlen=10)  # type: ignore[attr-defined]
+
     trace = Trace(task_id=task_id, goal=goal)
     recent_actions: deque[str] = deque(maxlen=3)
     recent_pages: deque[str] = deque(maxlen=3)  # W5-A 反思: 页面 fingerprint 跟踪
@@ -406,6 +418,17 @@ async def run_react_loop(
                 active_idx = len(step_pages) - 1
             page = step_pages[active_idx]
 
+            # V0.23.2: 上一步 step 完成后, 任何 download 触发的 listener 已 append 到
+            # ctx._web_agent_recent_downloads deque. 把这些 obs 追加到上一步 trace.steps[-1]
+            # observation (类似 W5-A reflect hint mutate). pop_all 防下一步重复读.
+            recent_dl = getattr(ctx, "_web_agent_recent_downloads", None)
+            if recent_dl and trace.steps:
+                downloads_text = "\n".join(recent_dl)
+                trace.steps[-1].observation = (
+                    trace.steps[-1].observation + "\n" + downloads_text
+                ).strip()
+                recent_dl.clear()  # 防下一步重复 append (注入幂等)
+
             captcha_abort = await _handle_captcha(
                 page, step_i, trace, conn, task_id,
                 max_steps=max_steps, progress_cb=progress_cb,
@@ -454,9 +477,14 @@ async def run_react_loop(
 
             # safety check：在 actuator 之前 intercept 敏感 action（send/pay/delete/密码字段...）
             # V0.17.0: isinstance 替 action.type 字符串比, mypy 自动 narrow ClickAction.mark_id
-            if isinstance(action, (ClickAction, TypeAction, PasteAction)):
+            # V0.23.2: UploadAction 也走 safety check (paths 黑名单), elicit 流程一致
+            if isinstance(action, (ClickAction, TypeAction, PasteAction, UploadAction)):
                 check_mark: Mark | None = None
                 if isinstance(action, ClickAction):
+                    check_mark = _find_mark(marks, action.mark_id)
+                elif isinstance(action, UploadAction):
+                    # V0.23.2: UploadAction safety 看 paths 不看 mark; mark 仅传给 obs 用,
+                    # safety.check 内 isinstance(UploadAction) 分支不读 mark 直接走 paths 黑名单.
                     check_mark = _find_mark(marks, action.mark_id)
                 else:  # TypeAction or PasteAction (V0.19.0: paste 同 type 用 last_clicked_mark)
                     check_mark = last_clicked_mark
@@ -568,12 +596,49 @@ async def run_react_loop(
                         await step_pages[tab_idx].bring_to_front()
                         last_clicked_mark = None  # 切 tab 旧 mark 失效, 防 type safety 误判
                         obs = f"switched to tab [{tab_idx}] {step_pages[tab_idx].url[:80]}"
-                case DragAction(from_mark_id=_fid, to_mark_id=_tid):
-                    # V0.23.0 placeholder: actuator 在 V0.23.1 接入, dispatch 在 V0.23.2 wire.
-                    # mypy strict match exhaustive 要求每个 union arm 都要有 case, 此处先 ERROR obs.
-                    obs = "ERROR: drag V0.23.0 not wired yet (V0.23.2 完成派发)"
-                case UploadAction(mark_id=_uid):
-                    obs = "ERROR: upload V0.23.0 not wired yet (V0.23.2 完成派发)"
+                case DragAction(from_mark_id=fid, to_mark_id=tid):
+                    # V0.23.2: 找 from/to 2 mark; 校验同 frame_path; resolve frame; 派发 actuator.
+                    from_m = _find_mark(marks, fid)
+                    to_m = _find_mark(marks, tid)
+                    if from_m is None or to_m is None:
+                        missing = [str(i) for i, m in [(fid, from_m), (tid, to_m)] if m is None]
+                        obs = f"ERROR: drag mark_id={','.join(missing)} 不在当前 marks 里"
+                    elif from_m.frame_path != to_m.frame_path:
+                        obs = (
+                            f"ERROR: drag 跨 frame 不允许 — from @{from_m.frame_path!r} "
+                            f"to @{to_m.frame_path!r}; 主流 builder/Trello 都在同 frame 内拖"
+                        )
+                    else:
+                        drag_frame = _resolve_frame(page, from_m.frame_path)
+                        await human_like_drag(page, from_m, to_m, frame=drag_frame)
+                        last_clicked_mark = None  # drag 不该污染后续 type focus
+                        try:
+                            await page.wait_for_load_state("domcontentloaded", timeout=5000)
+                        except Exception:
+                            pass
+                        frame_suffix = f" @{from_m.frame_path}" if from_m.frame_path else ""
+                        obs = (
+                            f"dragged [{from_m.id}] {from_m.tag} {from_m.text!r} → "
+                            f"[{to_m.id}] {to_m.tag} {to_m.text!r}{frame_suffix}"
+                        )
+                case UploadAction(mark_id=uid, paths=upload_paths):
+                    # V0.23.2: 找 mark; resolve frame; safety 已在 dispatch 前 (上面 isinstance 分支)
+                    # 检过 paths 黑名单 — 此处只校 mark 存在 + actuator 调用.
+                    upload_m = _find_mark(marks, uid)
+                    if upload_m is None:
+                        obs = f"ERROR: upload mark_id={uid} 不在当前 marks 里"
+                    else:
+                        upload_frame = _resolve_frame(page, upload_m.frame_path)
+                        try:
+                            await upload_file(page, upload_m, upload_paths, frame=upload_frame)
+                            last_clicked_mark = None  # upload 不污染后续 type focus
+                            obs = (
+                                f"uploaded {len(upload_paths)} file(s) to [{upload_m.id}] "
+                                f"{upload_m.tag} {upload_m.text!r}"
+                            )
+                        except RuntimeError as e:
+                            # actuator DOM walk 失败 (button 找不到关联 input) → 兜底 ERROR obs
+                            obs = f"ERROR: upload {e}"
                 case CloseTabAction(idx=tab_idx):
                     # V0.21.1: 2 道 guard — len==1 拒 + idx==active_idx 拒 (强迫先 switch 再 close).
                     if tab_idx < 0 or tab_idx >= len(step_pages):
