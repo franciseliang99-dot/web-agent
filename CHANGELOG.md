@@ -2,6 +2,66 @@
 
 All notable changes to web-agent. 版本号遵循 SemVer 简化形式（V<major>.<minor>.<patch>）。
 
+## [0.21.3] - 2026-05-09
+
+### Add (V0.21 multi-tab 系列收尾 — popup auto-register listener, **4 commit 全闭环**)
+
+V0.21 系列闭环: V0.21.0 schema 解锁 → V0.21.1 loop dispatch 解锁 → V0.21.2 tabs header
+反馈解锁 → V0.21.3 popup auto-register 完成. LLM 现完整看到/操作多 tab 环境包括新弹 tab.
+
+V0.21.3 让 target=_blank / window.open() 弹的子 tab 自动出现在下一步 LLM tabs header 里 —
+之前 LLM 不知道新 tab 存在, 必须手动猜 idx; V0.21.3 后 listener 装在 connect 一次性,
+所有 callsite (cli / jd_extract / list_extract) 自动受益.
+
+### Changed
+
+- `src/web_agent/browser.py` 加 `_popup_notice_handler(page)` async — random.uniform(0.3, 0.8)
+  asyncio.sleep 模拟"人注意到新 tab"延迟 + logger.info popup detected. **不抢焦点** (不调
+  bring_to_front, 不改 active_idx) — 拟人 target=_blank 行为是"tab 在后台开, 我继续读".
+- `browser.py` 加 `_attach_popup_listener(ctx)` — 幂等 (用 `_web_agent_popup_listener` flag),
+  防 cli/jd_extract/list_extract 各 connect 时叠装 listener.
+- `browser.py connect()` 末尾调 `_attach_popup_listener(ctx)` — listener 装组合根侧
+  (不在 loop.py), loop 完全不感知 popup 注册逻辑, 解耦更干净.
+- **关键决策: 不装 page.on('popup')** — Playwright `_browser_context.py:228-232` `_on_page` 已先
+  `_pages.append(page)` 后 emit, ctx.on('page') 一次接住就够; 双装会让拟人 sleep 跑两遍.
+  V0.21.3 sanity check 实测确认.
+- pyee `AsyncIOEventEmitter` 自动 `ensure_future` 把 async handler 调度成独立 task — 不需要
+  asyncio.create_task 包装 sleep, 不阻塞主 loop.
+- `pyproject.toml [tool.pytest.ini_options].markers` 加 `slow` marker 配置: "real browser test
+  (chromium.launch), opt-in via WEB_AGENT_RUN_SLOW=1; default skip" 抑 PytestUnknownMarkWarning.
+- `tests/test_browser.py` 加 `_mk_ctx(pages, **extra)` helper (SimpleNamespace ctx 必须有 .on
+  noop 否则 connect AttributeError); 加 3 个 V0.21.3 test:
+  - `test_connect_attaches_popup_listener_on_page_event` — 验装 1 次 + handler 是
+    _popup_notice_handler + iscoroutinefunction + 幂等 flag.
+  - `test_connect_popup_listener_idempotent_across_multiple_connects` — 3 次 connect 仅 1 次 .on.
+  - `test_popup_notice_handler_sleeps_in_range_and_does_not_steal_focus` — sleep 0.3-0.8
+    + 不调 bring_to_front (拟人 target=_blank 不抢焦).
+- `tests/test_loop_multitab.py` **新建** — 2 个真 chromium smoke (slow + skipif env):
+  - target=_blank click 真触发 ctx.on('page') + ctx.pages 自动 append.
+  - _attach_popup_listener 幂等 vs 真 BrowserContext.
+- 4 个测试文件 (test_loop_main / test_safety_loop_integration / test_captcha /
+  test_loop_reflect) `FakeContext` 各加 `def on(event, handler)` noop 兼容 (loop 不直接调
+  ctx.on 但 V0.22+ 可能加 listener; 本 PR 加纯属对称兼容). **不抽 conftest** — V0.21.1 已判
+  YAGNI 对称冗余 (4 处独立加未来变更不传染), 留 TODO V0.22+ 真共享化时一起抽.
+
+### Compatibility
+
+- 老 callsite (cli / jd_extract / list_extract) 不受影响 — listener 装在 connect 透明; 只多
+  一个 0.3-0.8s 拟人 sleep, 在独立 task 跑不阻塞主 loop.
+- Anthropic / OpenAI / Kimi / 任何 provider 的 LLM tabs header (V0.21.2) 现自动看到新弹 tab —
+  无需任何 prompt / schema / 业务代码改动.
+- mypy strict 0; ruff 0; pytest 314 + 3 (test_browser V0.21.3) = 317 + 1 skip + 2 slow skip
+  全绿 (slow 默认跳过).
+- V0.22 候选: iframe 感知 / drag&drop + file upload / dialog auto-handle / smart retry+backtrack
+  (subagent V0.21 plan 早列, 见 V0.21.0 CHANGELOG 路线图).
+
+### Why patch (V0.21.3) 不 minor
+
+- 仅 browser.py 加 listener (15 行) + 测试; 对外 API 零变化.
+- LLM 行为感知层面: V0.21.2 已让 LLM 看 tabs header, V0.21.3 只让 popup 自动出现在 header
+  里 — 是 V0.21.2 的自然延伸不是新 capability surface.
+- SemVer "向后兼容的 enhance → patch", 0.21.2 → 0.21.3 + V0.21 minor 系列收尾.
+
 ## [0.21.2] - 2026-05-09
 
 ### Add (V0.21 multi-tab 系列第 3 commit — tabs header 进 user_text, LLM 真看到 tab 状态)

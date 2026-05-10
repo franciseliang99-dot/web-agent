@@ -82,10 +82,14 @@ class FakePage:
 
 
 class FakeContext:
-    """V0.21.1: loop 改读 ctx; reflect 测试单 tab."""
+    """V0.21.1: loop 改读 ctx; reflect 测试单 tab. V0.21.3: 加 .on() noop."""
 
     def __init__(self, pages: list[FakePage]) -> None:
         self.pages = pages
+        self._handlers: dict[str, object] = {}
+
+    def on(self, event: str, handler: object) -> None:
+        self._handlers[event] = handler
 
 
 def _ctx() -> FakeContext:

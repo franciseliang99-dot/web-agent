@@ -65,10 +65,14 @@ class FakePage:
 
 
 class FakeContext:
-    """V0.21.1: loop 改读 ctx; 单 tab 场景 wrap 1 个 FakePage."""
+    """V0.21.1: loop 改读 ctx; 单 tab 场景 wrap 1 个 FakePage. V0.21.3: 加 .on() noop 兼容 listener 装."""
 
     def __init__(self, pages: list[FakePage]) -> None:
         self.pages = pages
+        self._handlers: dict[str, object] = {}
+
+    def on(self, event: str, handler: object) -> None:
+        self._handlers[event] = handler
 
 
 def _ctx() -> FakeContext:

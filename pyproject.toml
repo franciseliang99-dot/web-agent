@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "web-agent"
-version = "0.21.2"
+version = "0.21.3"
 description = "MultiOn-style 高度拟人 AI web agent (Python + Playwright + VLM/SoM + stealth, multi-LLM)"
 readme = "README.md"
 license = "MIT"
@@ -58,6 +58,9 @@ dev = [
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
 testpaths = ["tests"]
+markers = [
+    "slow: real browser test (chromium.launch), opt-in via WEB_AGENT_RUN_SLOW=1; default skip",
+]
 
 [tool.ruff]
 line-length = 110

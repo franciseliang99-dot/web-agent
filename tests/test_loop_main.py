@@ -73,10 +73,18 @@ class FakePage:
 
 
 class FakeContext:
-    """V0.21.1: loop 接 ctx 不接 page; 简单 list[FakePage] wrapper."""
+    """V0.21.1: loop 接 ctx 不接 page; 简单 list[FakePage] wrapper.
+
+    V0.21.3: 加 .on(event, handler) 模拟 Playwright BrowserContext listener API,
+    测试可主动 await self._handlers[event](new_page) 触发 popup 路径而不真 launch chromium.
+    """
 
     def __init__(self, pages: list[FakePage]) -> None:
         self.pages = pages
+        self._handlers: dict[str, object] = {}
+
+    def on(self, event: str, handler: object) -> None:
+        self._handlers[event] = handler
 
 
 def _ctx(pages: list[FakePage] | None = None) -> FakeContext:
