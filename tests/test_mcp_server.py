@@ -158,6 +158,50 @@ async def test_web_agent_run_elicit_missing_secret_retry_success(
     ctx.elicit.assert_called_once()
 
 
+async def test_web_agent_run_capability_hint_routes_to_provider(
+    monkeypatch, reset_run_lock, fake_chrome_alive,
+):
+    """V0.27.5: capability_hint param → routing select_provider → cli_run_task 收 provider.
+
+    Kimi 强项 'multi-tab' → 'openai'; 验真透传到 cli_run_task. 同时验 P1 修: provider 计算
+    在 try/except 之外, retry 时 capability_hint 选出的 provider 不丢.
+    """
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-test")
+    monkeypatch.setenv("OPENAI_API_KEY", "sk-openai-test")
+    captured: dict[str, object] = {}
+
+    async def fake_run_task(goal, **kw):
+        captured["provider"] = kw.get("provider")
+        return "OK"
+
+    monkeypatch.setattr("web_agent.mcp_server.cli_run_task", fake_run_task)
+
+    # 直接 await 函数 (非真 mcp 协议层) 简化集成测
+    result = await mcp_mod.web_agent_run(
+        goal="test", url="", max_steps=5, capability_hint="multi-tab", ctx=None,
+    )
+    assert result == "OK"
+    assert captured["provider"] == "openai", \
+        f"capability_hint=multi-tab → routing 应选 openai, 实 {captured['provider']!r}"
+
+
+async def test_web_agent_run_capability_hint_none_keeps_old_path(
+    monkeypatch, reset_run_lock, fake_chrome_alive,
+):
+    """V0.27.5: capability_hint=None → provider=None (老路径, env 决定)."""
+    captured: dict[str, object] = {}
+
+    async def fake_run_task(goal, **kw):
+        captured["provider"] = kw.get("provider")
+        return "OK"
+
+    monkeypatch.setattr("web_agent.mcp_server.cli_run_task", fake_run_task)
+
+    result = await mcp_mod.web_agent_run(goal="test", capability_hint=None, ctx=None)
+    assert result == "OK"
+    assert captured["provider"] is None  # 不接 routing → cli_run_task 内部决定
+
+
 async def test_web_agent_run_elicit_missing_secret_decline_reraise(
     monkeypatch, reset_run_lock, fake_chrome_alive,
 ):

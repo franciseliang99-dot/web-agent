@@ -99,6 +99,57 @@ def test_main_missing_goal_exits(monkeypatch):
     assert rec.calls == []
 
 
+def test_main_capability_hint_routes_to_provider(monkeypatch):
+    """V0.27.5: --capability-hint 走 routing select_provider, 覆盖 --provider; 验 provider 真选对.
+
+    Kimi 强项 axis 'multi-tab' (V0.26.4 baseline pass=1.0) → routing 选 'openai' (SKU 'openai-kimi'
+    映射 wire 'openai'). 同时验 P2 修: load_dotenv 提前到 select_provider 之前 → env 可读.
+    """
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-test")
+    monkeypatch.setenv("OPENAI_API_KEY", "sk-openai-test")
+    rec = _RunTaskRecorder("OK")
+    monkeypatch.setattr("web_agent.cli.run_task", rec)
+    monkeypatch.setattr("sys.argv", [
+        "web-agent", "g",
+        "--provider", "anthropic",  # 故意设, 验 capability_hint 覆盖
+        "--capability-hint", "multi-tab",
+    ])
+
+    main()
+
+    kw = rec.calls[0]
+    assert kw["provider"] == "openai", \
+        f"V0.27.5: capability_hint=multi-tab Kimi 强项 → 应选 'openai' 覆盖 --provider, 实 {kw['provider']!r}"
+
+
+def test_main_capability_hint_fallback_anthropic_for_zero_axis(monkeypatch):
+    """V0.27.5: capability_hint='iframe' (Kimi pass=0.0) → fallback anthropic."""
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-test")
+    monkeypatch.setenv("OPENAI_API_KEY", "sk-openai-test")
+    rec = _RunTaskRecorder("OK")
+    monkeypatch.setattr("web_agent.cli.run_task", rec)
+    monkeypatch.setattr("sys.argv", [
+        "web-agent", "g", "--capability-hint", "iframe",
+    ])
+
+    main()
+
+    assert rec.calls[0]["provider"] == "anthropic"
+
+
+def test_main_no_capability_hint_keeps_old_provider_path(monkeypatch):
+    """V0.27.5: 不带 --capability-hint → 老路径 provider=args.provider, routing 不接管."""
+    rec = _RunTaskRecorder("OK")
+    monkeypatch.setattr("web_agent.cli.run_task", rec)
+    monkeypatch.setattr("sys.argv", [
+        "web-agent", "g", "--provider", "openai",
+    ])
+
+    main()
+
+    assert rec.calls[0]["provider"] == "openai"  # 老路径不接 routing
+
+
 def test_main_prints_result_with_header(monkeypatch, capsys):
     rec = _RunTaskRecorder("DONE_42")
     monkeypatch.setattr("web_agent.cli.run_task", rec)

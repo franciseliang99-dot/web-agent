@@ -137,7 +137,24 @@ def main() -> None:
     parser.add_argument("--cdp-url", default=None, help="覆盖 WEB_AGENT_CDP_URL（默认 http://localhost:9222）")
     parser.add_argument("--provider", default=None, help="覆盖 WEB_AGENT_LLM_PROVIDER（anthropic/openai）")
     parser.add_argument("--model", default=None, help="覆盖 WEB_AGENT_MODEL")
+    parser.add_argument(
+        "--capability-hint",
+        default=None,
+        help="V0.27.5 routing hint (eval.types.CapabilityAxis: multi-tab/iframe/drag/upload/"
+             "download/dialog/keyboard-nav/failure-recovery/baseline/...). 提供时数据驱动 "
+             "select_provider 选 baseline 强项 provider, 覆盖 --provider.",
+    )
     args = parser.parse_args()
+
+    # V0.27.5 隐藏 P2 修: load_dotenv 提前到 select_provider 之前 (现 run_task 内才 load,
+    # 顺序错 → available_providers_from_env() 读不到 .env 的 ANTHROPIC_API_KEY/OPENAI_API_KEY).
+    # load_dotenv 默 override=False, run_task 内再调一次也安全 (幂等).
+    load_dotenv()
+    provider = args.provider
+    if args.capability_hint:
+        from web_agent.routing import select_provider
+        provider = select_provider(args.capability_hint)
+        logger.info("V0.27.5 routing: capability_hint=%r → provider=%r", args.capability_hint, provider)
 
     result = asyncio.run(
         run_task(
@@ -146,7 +163,7 @@ def main() -> None:
             max_steps=args.max_steps,
             max_wallclock_s=args.max_wallclock_s,
             cdp_url=args.cdp_url,
-            provider=args.provider,
+            provider=provider,
             model=args.model,
         )
     )

@@ -97,6 +97,7 @@ async def web_agent_run(
     goal: str,
     url: str = "",
     max_steps: int = 20,
+    capability_hint: str | None = None,
     ctx: Context[Any, Any] | None = None,
 ) -> str:
     """跑一个 web-agent task: 用 ReAct loop 在 Chrome 里完成 goal.
@@ -105,14 +106,28 @@ async def web_agent_run(
         goal: 自然语言任务描述 (e.g. "在维基百科搜量子纠缠并提取首段")
         url: 起始 URL, 空则从 Chrome 当前 tab 开始
         max_steps: 最大步数 (默认 20, ReAct loop 上限)
+        capability_hint: V0.27.5 routing hint — eval.types.CapabilityAxis Literal 12 项
+          (multi-tab/iframe/drag/upload/download/dialog/retry/backtrack/keyboard-nav/
+          failure-recovery/real-world/baseline). 提供时数据驱动 select_provider 选 baseline
+          矩阵 pass rate 最高的 provider. 缺数据 / 全 0 → fallback anthropic. None → 老路径
+          (provider 由 env / 默 anthropic 决定).
 
     Returns: 最终结果文本 (如 "result: ...", 或 SAFETY_BLOCK / WALLCLOCK_EXCEEDED 等错误).
 
     Raises:
         RuntimeError: Chrome 9222 不可达 (用户没起 Chrome).
+        MissingSecretError: 选出的 provider 缺 API key 且 ctx 不可用 (cli 模式) 或 ctx.elicit
+          decline / 异常.
     """
     cdp_url = os.environ.get("WEB_AGENT_CDP_URL", "http://127.0.0.1:9222")
     await asyncio.to_thread(_check_chrome_alive, cdp_url)
+
+    # V0.27.5: capability_hint 走 routing select_provider; None → 不接 routing 走老路径.
+    # select_provider 内部 fallback anthropic, str type 喂 Literal 类型用 type: ignore (runtime 自然 fallback).
+    provider: str | None = None
+    if capability_hint:
+        from web_agent.routing import select_provider
+        provider = select_provider(capability_hint)  # type: ignore[arg-type]
 
     # ctx.report_progress(progress, total, message) bound method 直接 1:1 对齐 ProgressCallback
     progress_cb = ctx.report_progress if ctx is not None else None
@@ -144,6 +159,7 @@ async def web_agent_run(
                 goal=goal,
                 start_url=url or None,
                 max_steps=max_steps,
+                provider=provider,
                 progress_cb=progress_cb,
                 safety_approval_cb=safety_approval_cb,
             )
@@ -166,11 +182,14 @@ async def web_agent_run(
                 logger.info("用户 decline 提供 %s → abort task", e.key)
                 raise
             # 用户输入 → InMemorySecretStore 注入 retry 一次 (绑 V0.27.3 secret_store 透传链).
+            # V0.27.5 隐藏 P1 修: retry 必须保 capability_hint 选出的 provider, 否则 routing 错配
+            # (e.g. routing 选 openai 但 retry 走 anthropic default, 用户填的 OPENAI_API_KEY 浪费).
             store = InMemorySecretStore({e.key: result.data.value})
             return await cli_run_task(
                 goal=goal,
                 start_url=url or None,
                 max_steps=max_steps,
+                provider=provider,
                 progress_cb=progress_cb,
                 safety_approval_cb=safety_approval_cb,
                 secret_store=store,

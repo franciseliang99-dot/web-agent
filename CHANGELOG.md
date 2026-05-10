@@ -2,6 +2,133 @@
 
 All notable changes to web-agent. 版本号遵循 SemVer 简化形式（V<major>.<minor>.<patch>）。
 
+## [0.27.5] - 2026-05-10
+
+### Add (V0.27 vault 系列 commit 5/5 — capability_hint 真接入 + 修 V0.27.4 elicit retry 隐藏 P1)
+
+V0.27 系列收尾, 真把 V0.27.3 routing.py select_provider + V0.27.1 vault default_store +
+V0.27.4 InMemorySecretStore retry 三链路接到 mcp_server + cli 入口. Plan subagent 缩 scope
+到最小 + 揭 2 隐藏 bug (P1: V0.27.4 elicit retry 不透传 provider 跟 routing 错配; P2: cli
+main load_dotenv 顺序错位 → select_provider 读不到 .env API key).
+
+### subagent 审决 D scope 缩到极小 (强烈推荐采纳)
+
+主 agent 原 plan 5 处入口 + corpus task + eval/runner --routing flag + 复测, 全被 subagent
+审推迟:
+
+1. **mcp_server**: ✅ 加 capability_hint (真消费者 — Claude Desktop LLM 调 web_agent_run 时
+   推 axis hint, 这是 routing.py 设计意图 "AI calling AI" 上下文 hint)
+2. **cli**: ✅ 加 --capability-hint (主要价值是**集成测入口**, 让 test_cli.py 验 routing 链
+   通顺; cli 用户场景次要 — 用户大概率不知 12 axis 名)
+3. **jd_extract / list_extract**: ⏸ SKIP (capability_axis 永远是 'baseline' / 'iframe' 固定,
+   加 flag 是 dead UI + 测试维护成本; 应硬走 default_store)
+4. **eval/runner --routing flag**: ⏸ V0.27.0 (Kimi-only baseline + 9 axis 7 个全 0.0 →
+   routing 全 fallback anthropic, 跟 --providers anthropic 等价, V0.27.5 加 = placebo flag)
+5. **routing-aware corpus task**: ⏸ SKIP (10 task 已覆 12 axis, 加 task 0 axis 信号增量 +
+   关注点分离 — corpus 不该承担 routing 验证职责, test_routing.py 21 测已稳)
+6. **复测 baseline**: ⏸ V0.27.0 (Kimi-only 数据 → 跟 V0.26.4 等价, 无新信号)
+
+### subagent 审揭隐藏 bug (主 agent 原 plan 漏)
+
+**P1: V0.27.4 elicit retry capability_hint 错配**:
+
+V0.27.4 mcp_server.web_agent_run 在 try/except MissingSecretError 后 retry call hardcode 不
+传 provider. V0.27.5 引入 capability_hint 后, retry 必须保 routing 选出的 provider, 否则:
+- routing 选 'openai' (Kimi 强项 axis) → cli_run_task → 缺 OPENAI_API_KEY raise
+- elicit 提示用户填 OPENAI_API_KEY → 用户填了
+- retry 走 hardcode `provider=None` → cli_run_task 内 make_client 默 anthropic →
+  用户填的 OPENAI_API_KEY 浪费, 且 InMemorySecretStore 含 OPENAI_API_KEY 但 anthropic
+  client 找 ANTHROPIC_API_KEY → 又 raise MissingSecretError (无限循环避不及, 因 retry 只 1 次)
+
+修: `provider = select_provider(capability_hint)` 计算放 try/except 之外, 主 + retry 两 call
+都透传同 provider.
+
+**P2: cli main() load_dotenv 顺序错位**:
+
+V0.27.4 cli.run_task 内调 load_dotenv (line 47), 但 V0.27.5 main() 早调 select_provider
+(走 routing.available_providers_from_env()) → 此时 .env 的 ANTHROPIC_API_KEY/OPENAI_API_KEY
+还没 load → routing 误以为 0 provider 可用 → 全 fallback anthropic 即使用户两 key 都装.
+
+修: cli.py main() 早 load_dotenv (在 select_provider 之前). load_dotenv 默 override=False,
+run_task 内再调一次幂等安全.
+
+### Changed
+
+- `src/web_agent/mcp_server.py` web_agent_run:
+  - 加 `capability_hint: str | None = None` 参数 (FastMCP 自动 schema, 默 None 老路径).
+  - 入口 lazy `from web_agent.routing import select_provider` → `provider = select_provider(hint)`.
+    None hint → provider=None (cli_run_task 内 make_client 走 env / 默 anthropic).
+  - 主 try call + retry call (V0.27.4 P1 修) 都透传 `provider=provider`.
+  - docstring 加 capability_hint 用法 + 12 axis Literal 列举 + MissingSecretError raise 条件.
+- `src/web_agent/cli.py` main():
+  - 加 `--capability-hint` flag (12 axis CapabilityAxis Literal 提示, 自由 str argparse 兼容).
+  - 加 `load_dotenv()` 提前调 (V0.27.5 P2 修).
+  - 加 `select_provider(args.capability_hint)` if hint else `args.provider` (覆盖 --provider 优先).
+  - logger.info 输出 routing 选择决策 (debug 价值 + 用户透明).
+- `tests/test_cli.py` +3 测:
+  - `test_main_capability_hint_routes_to_provider`: --capability-hint=multi-tab → 'openai' 覆 --provider
+  - `test_main_capability_hint_fallback_anthropic_for_zero_axis`: 'iframe' Kimi 0.0 → fallback anthropic
+  - `test_main_no_capability_hint_keeps_old_provider_path`: 不带 flag → 老路径不接 routing
+- `tests/test_mcp_server.py` +2 测:
+  - `test_web_agent_run_capability_hint_routes_to_provider`: capability_hint param → provider 真透传
+  - `test_web_agent_run_capability_hint_none_keeps_old_path`: None → provider=None 老路径
+
+### V0.27 系列总结 (5 commit, V0.27.0 推迟)
+
+| ver | 状态 | 节点 |
+|-----|------|------|
+| V0.27.0 | ⏸ 推迟 | Anthropic baseline (用户拿到 ANTHROPIC_API_KEY 时跑) |
+| V0.27.1 | ✅ | vault framework: SecretStore Protocol + EnvSecretStore + Keyring stub + AnthropicClient/OpenAIClient 注入 |
+| V0.27.2 | ✅ | bug fix make_client API drift (V0.27.1 设计承诺空头支票, **V0.27.1 simplify subagent 实测发现**) |
+| V0.27.3 | ✅ | routing.py select_provider 纯函数 + frozen baseline dict (Plan subagent 发现 baseline JSON 不在 wheel) |
+| V0.27.4 | ✅ | mcp_server elicit retry (E 路径 — Plan subagent 推翻原 ABCD 4 路径) |
+| V0.27.5 | ✅ | 本提交 — capability_hint 真接入 + V0.27.4 P1 修 + cli load_dotenv P2 修 |
+
+### V0.27 系列总 subagent 价值统计
+
+5 commit 累计 subagent 真发现 / 推翻主 agent 原 plan 的关键决策点:
+1. V0.27.2: simplify subagent 发 V0.27.1 设计承诺空头支票 (make_client 没加 kwarg)
+2. V0.27.3: Plan subagent 发 baseline JSON 不在 wheel (hatch.build packages 未含 data/) +
+   推 D 砍 cli/mcp/jd/list flag dead code
+3. V0.27.4: Plan subagent 推翻 ABCD 4 路径 (SecretStore async 化撞 __init__ 同步) → E 路径
+4. V0.27.4 simplify: 删 MissingSecretError(message=None) YAGNI 参数 + 自费测
+5. V0.27.5: Plan subagent 缩 scope 6 → 2 + 揭 P1 (V0.27.4 retry hardcode 错配) + P2 (cli
+   load_dotenv 顺序)
+
+5 处 subagent 真发现 = 100% 价值证明 — 不是走形式.
+
+### Compatibility
+
+- 老 caller / fixture 0 改 — 不带 --capability-hint / capability_hint=None 100% 走 V0.27.4
+  老路径 (provider 由 env / args.provider / 默 anthropic 决定).
+- mypy strict 0 (41 src); ruff 0; pytest **549 + 17 skip** (V0.27.4 544+17 → +5 V0.27.5 测).
+- 真 chromium 15/15 全过 (无新).
+
+### 路径示例 (V0.27 完整 vault 链通)
+
+```bash
+# cli mode + routing
+web-agent "搜量子纠缠" --capability-hint multi-tab
+# → routing 选 openai (Kimi multi-tab 强项) → make_client(provider='openai',
+#   secret_store=default_store()) → EnvSecretStore 读 OPENAI_API_KEY
+```
+
+```python
+# mcp mode + routing + elicit retry (V0.27.4+V0.27.5 协同)
+# Claude Desktop 调 web_agent_run(goal=..., capability_hint='iframe')
+# → routing 选 anthropic (Kimi iframe 弱 → fallback) → cli_run_task(provider='anthropic')
+# → AnthropicClient 缺 ANTHROPIC_API_KEY → raise MissingSecretError
+# → mcp_server catch → ctx.elicit('请输入 ANTHROPIC_API_KEY')
+# → 用户填 sk-ant-... → InMemorySecretStore({'ANTHROPIC_API_KEY': ...})
+# → cli_run_task(provider='anthropic', secret_store=that) retry → 成功
+```
+
+### Why patch (V0.27.5) 不 minor
+
+- 入口加 1 flag + 1 mcp param + 修 2 隐藏 bug, 老 caller 0 改 (默 None 兼容).
+- V0.27.x 内统一 patch 表系列内嵌增量 (跟 V0.21.x/V0.22.x/V0.25.x 风格一致, V0.27 minor
+  bump 已发生在 V0.27.0 推迟前).
+
 ## [0.27.4] - 2026-05-10
 
 ### Add (V0.27 vault 系列 commit 4/5 — mcp_server elicit retry 缺 API key 当场补)
