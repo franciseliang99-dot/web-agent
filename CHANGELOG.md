@@ -2,6 +2,68 @@
 
 All notable changes to web-agent. 版本号遵循 SemVer 简化形式（V<major>.<minor>.<patch>）。
 
+## [0.25.3] - 2026-05-09
+
+### Add (V0.25 smart retry+backtracking 系列收尾 — SYSTEM_PROMPT 加第 14 条失败恢复策略)
+
+V0.25 闭环: V0.25.0 transient retry → V0.25.1 failure_hints deque (兑现 V0.24.1 承诺) →
+V0.25.2 backtracking → V0.25.3 SYSTEM_PROMPT 失败恢复 (本). LLM 现完整知道:
+- transient 失败系统已 retry 不焦虑
+- ERROR obs 主动换 mark 不死磕
+- [reflect] / [backtrack] 信号触发换思路
+- dialog auto-handle 后果
+
+### Changed
+
+- `src/web_agent/llm/_schema.py` SYSTEM_PROMPT 加第 14 条 (失败恢复策略):
+  - `ERROR: ...` → 上一步失败 (mark_id 越界 / 跨 frame drag / DOM walk null), 换 mark / 重 perceive
+  - `[reflect] 页面 3 步无变化` → W5-A 软提示, 换 scroll/后退/换 mark
+  - `[backtrack] 已回退到上一页` → V0.25.2 硬纠正, 重读截图找新 mark, 再触发同样卡死会硬 abort
+  - `LLM_FAILED ... transient` → 系统已自动 retry 不要担心
+  - `dialog confirm: ... (auto-dismissed)` / `dialog prompt: ...` → 浏览器 dialog 已 auto handle;
+    需 accept 用户可设 env `WEB_AGENT_DIALOG_POLICY=auto-accept`
+- `tests/test_llm_schema.py` 加 `test_system_prompt_includes_failure_recovery_clauses`
+  assert SYSTEM_PROMPT 含 5 关键词 (ERROR / [reflect] / [backtrack] / LLM_FAILED / transient)
+  + "换思路"|"换策略" 应对动词.
+
+### V0.25 系列总结 (4 commit / V0.25.0-3)
+
+| ver | commit | 解锁节点 |
+|-----|--------|---------|
+| V0.25.0 | eb369ec | _classify_failure (isinstance + status_code 跨 SDK 兜底) + transient retry budget (env WEB_AGENT_TRANSIENT_RETRY_MAX 默认 3) |
+| V0.25.1 | 771d272 | _PRE_STEP_DRAIN_ATTRS 元组 +1 failure_hints (兑现 V0.24.1 helper 承诺, 0 行 helper 改动) |
+| V0.25.2 | 80d35c3 | backtracking — anti_loop 第 1 次 trigger page.go_back + reset + hint, 第 2 次 abort |
+| V0.25.3 | 本 | SYSTEM_PROMPT 第 14 条失败恢复策略 (ERROR/reflect/backtrack 信号应对) |
+
+### 设计承诺兑现链 (V0.23.2 → V0.25.2)
+
+V0.23.2 simplify subagent TODO 第 (2) 条: "loop pre-step mutation 第 3 处出现时抽 helper".
+V0.24.0 dialog obs 是第 3 处 → V0.24.1 抽 `_drain_pre_step_observations` helper 时承诺
+"V0.25+ 加新 deque 类型只动常量元组" → V0.25.1 加 failure_hints 元组 +1 项 0 行 helper
+改动 (开闭原则证明) → V0.25.2 真消费 hint 通道写 "已回退" hint → 自然被 V0.24.1 helper
+drain 注入下一步 obs 让 LLM 看到. **跨 4 commit 的设计意图全程兑现**.
+
+净增 ~25 单元测. V0.24.2 → V0.25.3 跨度 4 个版本号, 单元测 407 → 431 (+24).
+真 chromium slow smoke 不变 15 (smart retry/backtrack 全模拟可达).
+
+### V0.26 候选
+
+按用户场景"通用浏览器助手 + 完全无人值守":
+- **eval golden corpus** (V0.25 plan, 无人值守硬前置) — 5 commit
+- **iframe 反检测 CDP 路径** (V0.22.2 留 TODO) — 2 commit
+- **iframe a11y tree fallback** (V0.22.4 留 TODO) — 3 commit
+- **dialog elicit 路径** (V0.24.0 留 TODO) — 1-2 commit
+- **README + ARCHITECTURE 文档 sweep** (V0.16.23 stale → V0.25.3, 9 个 minor) — 1-2 commit
+- **TypedDict stubs** (V0.23.0 simplify TODO) — 1 commit
+- **键盘导航/失败恢复 LLM 行为 eval** (V0.24.2/V0.25.3 加 prompt 但没 eval 真用上) — 进 eval corpus
+
+### Why patch (V0.25.3) 不 minor
+
+- 仅 SYSTEM_PROMPT 加 1 条 + 1 单测; 对外 LLM tool surface (V0.23.0 schema) 零变化.
+- LLM 行为可能轻微变化 (看到 ERROR/[reflect]/[backtrack] 后更倾向换思路而不是死磕),
+  但跟 V0.24.2 SYSTEM_PROMPT prompt 改同档.
+- SemVer "向后兼容的 enhance → patch", 0.25.2 → 0.25.3.
+
 ## [0.25.2] - 2026-05-09
 
 ### Add (V0.25 第 3 commit — backtracking: anti_loop 替 page.go_back + retry once + abort)

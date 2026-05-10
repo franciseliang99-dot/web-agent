@@ -120,6 +120,21 @@ def test_system_prompt_includes_keyboard_navigation_clauses():
     assert "modal" in SYSTEM_PROMPT or "popover" in SYSTEM_PROMPT
 
 
+def test_system_prompt_includes_failure_recovery_clauses():
+    """V0.25.3: SYSTEM_PROMPT 第 14 条失败恢复策略 — LLM 看到 ERROR/reflect/backtrack 主动换思路.
+
+    V0.25 系列 (smart retry + backtracking) 落档后 LLM 会看到新 obs 信号 (transient retry /
+    [backtrack] 已回退 / 既有 [reflect]). 第 14 条显式说明每种信号的应对策略, 防 LLM 不知
+    [backtrack] 后该换思路.
+    """
+    from web_agent.llm._schema import SYSTEM_PROMPT
+    # 失败信号关键词
+    for keyword in ("ERROR", "[reflect]", "[backtrack]", "LLM_FAILED", "transient"):
+        assert keyword in SYSTEM_PROMPT, f"V0.25.3: SYSTEM_PROMPT 应含 {keyword!r} 失败信号"
+    # 应对策略动词
+    assert "换思路" in SYSTEM_PROMPT or "换策略" in SYSTEM_PROMPT
+
+
 # ---------- V0.21.2 build_user_text tabs header 渲染 ----------
 
 
