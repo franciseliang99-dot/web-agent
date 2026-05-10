@@ -611,13 +611,51 @@ async def run_react_loop(
                         end_task(conn, task_id, result)
                         return result
 
-            # 死循环检测：连续 3 次完全相同 action（type + args）→ abort
+            # 死循环检测：连续 3 次完全相同 action（type + args）→ V0.25.2 backtrack 或 abort
             sig = _action_signature(action)
             if len(recent_actions) == 3 and all(s == sig for s in recent_actions):
+                # V0.25.2: 第 1 次 trigger → page.go_back + reset 状态 + 注入 hint + retry once
+                # 第 2 次 trigger (backtrack 后又卡) → abort 维持 V0.5.0 兼容防 infinite loop
+                already_backtracked = getattr(ctx, "_web_agent_anti_loop_backtracked", False)
+                if not already_backtracked:
+                    try:
+                        await page.go_back()
+                        await page.wait_for_load_state("domcontentloaded", timeout=5000)
+                    except Exception as e:
+                        logger.warning("V0.25.2 backtrack page.go_back 失败 (%r), 走原 abort 路径", e)
+                    else:
+                        # 成功 backtrack: reset 防 W5-A reflect 误判 + reset last_clicked +
+                        # clear recent_actions 让重 loop 检测从头算 + 注 hint 让 LLM 看到
+                        ctx._web_agent_anti_loop_backtracked = True  # type: ignore[attr-defined]
+                        recent_actions.clear()
+                        recent_pages.clear()
+                        last_clicked_mark = None
+                        hint = (
+                            f"[backtrack] 已回退到上一页 (上次连续 3 次同 action {sig[:80]} 卡住). "
+                            f"换思路: 重新读截图找新 mark / scroll / 用 keyboard_shortcut. "
+                            f"再触发同样卡死会硬 abort 不再回退."
+                        )
+                        recent_dl = getattr(ctx, "_web_agent_recent_failure_hints", None)
+                        if recent_dl is None:
+                            recent_dl = deque(maxlen=10)
+                            ctx._web_agent_recent_failure_hints = recent_dl  # type: ignore[attr-defined]
+                        recent_dl.append(hint)
+                        # 写 backtrack step trace + 跳过本 action 派发, 进下一 step 重 perceive
+                        bt_step = Step(
+                            step=step_i, ts=time.time(), thought=action.thought,
+                            action_type="backtrack",
+                            action_args={"sig": sig[:200], "trigger": "anti_loop"},
+                            observation=f"backtracked: {hint[:200]}",
+                        )
+                        trace.append(bt_step)
+                        write_step(conn, task_id, bt_step, str(shot_path))
+                        continue  # 跳到下一 step 重 perceive (新 fp 自然变, W5-A 不误 fire)
+                # 已 backtrack 过 / go_back 失败 → 走原 abort 路径 (V0.5.0 兼容)
                 result = (
                     f"LOOP_DETECTED 在 step {step_i}：连续 3+ 次同一 action {sig[:200]}。"
                     f"agent 卡死, 已强制中止。常见原因：SoM 没标到目标元素 / "
                     f"页面状态未按 LLM 预期变化 / system prompt 没说服 LLM 换策略。"
+                    + (" (V0.25.2 backtrack 后第 2 次 trigger, 不再回退)" if already_backtracked else "")
                 )
                 logger.warning("anti-loop %s", result)
                 step = Step(

@@ -269,6 +269,130 @@ async def test_fatal_exception_aborts_immediately_no_retry(monkeypatch, tmp_path
     assert error_step[2]["transient_retries"] == 0
 
 
+# --- V0.25.2 backtracking ---
+
+
+class _GoBackPage(_FakePage):
+    """V0.25.2: spy page.go_back 调用 (其他 method 复用 _FakePage)."""
+
+    def __init__(self):
+        super().__init__()
+        self.go_back_calls = 0
+
+    async def go_back(self):
+        self.go_back_calls += 1
+
+
+class _GoBackContext:
+    def __init__(self):
+        self.pages = [_GoBackPage()]
+        self._handlers = {}
+
+    def on(self, event, handler):
+        self._handlers[event] = handler
+
+
+async def test_anti_loop_first_trigger_calls_go_back_and_resets_state(
+    monkeypatch, tmp_path, patch_loop_internals
+):
+    """V0.25.2: 连续 3 次同 ClickAction → 第 1 次 trigger backtrack: go_back called once,
+    failure_hints deque 含 "已回退", recent_actions cleared, 不 abort 进入下一 step."""
+    monkeypatch.delenv("WEB_AGENT_AUTO_APPROVE", raising=False)
+    from web_agent.types import ClickAction
+
+    class RepeatClient:
+        name = "fake"
+        model = "fake"
+        attempts = 0
+
+        async def plan(self, *a, **kw) -> Action:
+            type(self).attempts += 1
+            if type(self).attempts <= 4:  # 4 次同 click 触发 anti_loop trigger
+                return ClickAction(thought="重复点", mark_id=1)
+            return DoneAction(thought="done after backtrack", result="ok-after-backtrack")
+
+    ctx = _GoBackContext()
+    db = tmp_path / "trace.db"
+    result = await run_react_loop(
+        ctx, RepeatClient(), goal="测 anti_loop backtrack",
+        max_steps=10, db_path=db, screenshots_dir=tmp_path / "shots",
+    )
+    page = ctx.pages[0]
+    assert page.go_back_calls == 1, f"V0.25.2 第 1 次 trigger 应调 go_back 一次; got {page.go_back_calls}"
+    assert getattr(ctx, "_web_agent_anti_loop_backtracked", False) is True
+    # backtrack 后 LLM 返 done → result OK (不是 LOOP_DETECTED)
+    assert result == "ok-after-backtrack", f"backtrack 后应继续; got {result}"
+    steps = _read_steps(db)
+    assert any(s[1] == "backtrack" for s in steps), f"应写 backtrack step; got {[s[1] for s in steps]}"
+
+
+async def test_anti_loop_second_trigger_after_backtrack_aborts(
+    monkeypatch, tmp_path, patch_loop_internals
+):
+    """V0.25.2: backtrack 后再次 3 次同 action 卡死 → 不再回退, 走原 LOOP_DETECTED abort."""
+    monkeypatch.delenv("WEB_AGENT_AUTO_APPROVE", raising=False)
+    from web_agent.types import ClickAction
+
+    class ForeverRepeatClient:
+        name = "fake"
+        model = "fake"
+
+        async def plan(self, *a, **kw) -> Action:
+            return ClickAction(thought="一直点", mark_id=1)
+
+    ctx = _GoBackContext()
+    db = tmp_path / "trace.db"
+    result = await run_react_loop(
+        ctx, ForeverRepeatClient(), goal="测 anti_loop second trigger",
+        max_steps=15, db_path=db, screenshots_dir=tmp_path / "shots",
+    )
+    page = ctx.pages[0]
+    # 第 1 次 trigger backtrack go_back, 第 2 次 trigger abort 不再 go_back
+    assert page.go_back_calls == 1, f"go_back 应只调 1 次 (第 2 次 trigger 不回退); got {page.go_back_calls}"
+    assert "LOOP_DETECTED" in result
+    assert "V0.25.2 backtrack 后第 2 次 trigger" in result, "abort msg 应注明 backtrack 已用过"
+
+
+class _FailingGoBackPage(_FakePage):
+    """V0.25.2: page.go_back 抛异常模拟 (无 history / 网络断)."""
+
+    async def go_back(self):
+        raise RuntimeError("no history to go back to")
+
+
+async def test_go_back_failure_falls_through_to_abort(
+    monkeypatch, tmp_path, patch_loop_internals
+):
+    """V0.25.2: page.go_back 抛 → log warning, 不 backtrack, 直接走原 LOOP_DETECTED abort."""
+    monkeypatch.delenv("WEB_AGENT_AUTO_APPROVE", raising=False)
+    from web_agent.types import ClickAction
+
+    class RepeatClient:
+        name = "fake"
+        model = "fake"
+
+        async def plan(self, *a, **kw):
+            return ClickAction(thought="x", mark_id=1)
+
+    class _FailCtx:
+        def __init__(self):
+            self.pages = [_FailingGoBackPage()]
+            self._handlers = {}
+
+        def on(self, event, handler):
+            self._handlers[event] = handler
+
+    ctx = _FailCtx()
+    db = tmp_path / "trace.db"
+    result = await run_react_loop(
+        ctx, RepeatClient(), goal="测 go_back 失败",
+        max_steps=10, db_path=db, screenshots_dir=tmp_path / "shots",
+    )
+    assert "LOOP_DETECTED" in result
+    # backtrack flag 未设 (go_back 失败前置 reset 不执行)
+    assert getattr(ctx, "_web_agent_anti_loop_backtracked", False) is False
+
+
 async def test_env_disables_retry_acts_like_v0242(monkeypatch, tmp_path, patch_loop_internals):
     """V0.25.0: WEB_AGENT_TRANSIENT_RETRY_MAX=0 → 等同 V0.24.2 行为 (transient 也立即 abort)."""
     monkeypatch.setenv("WEB_AGENT_TRANSIENT_RETRY_MAX", "0")

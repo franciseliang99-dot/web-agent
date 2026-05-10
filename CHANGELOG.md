@@ -2,6 +2,59 @@
 
 All notable changes to web-agent. 版本号遵循 SemVer 简化形式（V<major>.<minor>.<patch>）。
 
+## [0.25.2] - 2026-05-09
+
+### Add (V0.25 第 3 commit — backtracking: anti_loop 替 page.go_back + retry once + abort)
+
+V0.5.0 anti_loop 当前连续 3 次同 action 直接 abort. V0.25.2 改第 1 次 trigger 走
+backtrack: page.go_back + reset 状态 + 注 hint 让 LLM 看到 → 重 perceive 进下一 step;
+第 2 次 trigger (backtrack 后又卡死) 走原 LOOP_DETECTED abort 防 infinite loop.
+
+V0.25.1 加的 `_web_agent_recent_failure_hints` deque 在 V0.25.2 写入 "已回退" hint
+被 V0.24.1 helper drain 注入下一步 trace.steps[-1].observation — **设计承诺兑现链
+V0.23.2 simplify TODO → V0.24.1 抽 helper → V0.25.1 元组扩展 → V0.25.2 真消费 hint 通道**.
+
+### Changed
+
+- `src/web_agent/loop.py` anti_loop trigger 路径升级:
+  - 第 1 次 trigger (`not ctx._web_agent_anti_loop_backtracked`):
+    - `await page.go_back()` + `wait_for_load_state("domcontentloaded", timeout=5000)`
+    - 失败 catch → log warning 走原 abort 路径 (跟 V0.5.0 兼容)
+    - 成功: set `ctx._web_agent_anti_loop_backtracked = True` + reset (`recent_actions.clear`/
+      `recent_pages.clear`/`last_clicked_mark = None` 防 W5-A 误判)
+    - 注 hint `"[backtrack] 已回退到上一页 (上次连续 3 次同 action X 卡住). 换思路: ...
+      再触发同样卡死会硬 abort 不再回退."` append 到 `_web_agent_recent_failure_hints` deque
+    - 写 backtrack step trace (`action_type="backtrack"`, action_args 含 sig + trigger)
+    - `continue` 跳到下一 step 重 perceive (新 fp 自然变, W5-A 不误 fire)
+  - 第 2 次 trigger (`ctx._web_agent_anti_loop_backtracked == True`) → 走原 LOOP_DETECTED
+    abort + msg 注明 "(V0.25.2 backtrack 后第 2 次 trigger, 不再回退)" 让运维诊断清楚.
+- `tests/test_loop_smart_retry.py` 加 3 V0.25.2 集成测:
+  - `test_anti_loop_first_trigger_calls_go_back_and_resets_state` — 4 次同 ClickAction 后
+    返 DoneAction → 验 go_back 调一次 + backtrack flag 落 + result 是 DoneAction.result 非
+    LOOP_DETECTED + trace 含 backtrack step.
+  - `test_anti_loop_second_trigger_after_backtrack_aborts` — 永远同 action 客户端 → 第 1 次
+    backtrack go_back, 第 2 次 trigger abort + msg 含 "V0.25.2 backtrack 后第 2 次 trigger".
+  - `test_go_back_failure_falls_through_to_abort` — page.go_back raise → flag 不落, 走原
+    LOOP_DETECTED abort.
+
+### Compatibility
+
+- 老 caller / 老 fixture 不受影响 — backtrack flag 默认 False, anti_loop 行为对单步任务等价
+  V0.5.0 (从未触发 anti_loop 的 task 完全不走 backtrack 路径).
+- `test_loop_main.py:_max_steps_exhausted` 等老测仍过 (它们用 ScrollAction varied dy 避
+  anti_loop, V0.25.2 无影响).
+- 现有 spike metrics `_SPIKE_FAILURE_OBS_MARKERS` 含 "LOOP_DETECTED" 字符串不变 —
+  backtrack step 用 `action_type="backtrack"` 不在 marker 里, 不污染 W5-C.2 spike 数据.
+- mypy strict 0; ruff 0; pytest 427 → **430 + 16 skip** (V0.25.2 +3 backtrack 集成测).
+- 真 chromium 15/15 全过 (无新增).
+
+### Why patch (V0.25.2) 不 minor
+
+- 行为变化集中在 anti_loop trigger 路径: 之前直接 abort, 现先 backtrack 再 abort. 本质是
+  V0.5.0 abort 阈值的"软化"(给 LLM 一次自救机会), 不破坏 abort 兜底语义.
+- env 无新开关 (默认开启 backtrack); 但行为更鲁棒不更激进 (页面状态回退是 reversible 操作).
+- SemVer "向后兼容的 enhance → patch", 0.25.1 → 0.25.2.
+
 ## [0.25.1] - 2026-05-09
 
 ### Refactor (兑现 V0.24.1 helper 设计承诺 — _PRE_STEP_DRAIN_ATTRS 元组 +1 项 failure_hints)
