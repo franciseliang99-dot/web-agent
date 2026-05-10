@@ -129,3 +129,23 @@ class OpenAIClient:
         call = msg.tool_calls[0]
         # V0.17.0: action_from_tool_call dispatch 到 5 dataclass union, 删 cast(dict[str, Any])
         return action_from_tool_call(call.function.name, json.loads(call.function.arguments))
+
+    async def reflect(self, prompt: str) -> str:
+        """V0.28.1: W6-A 失败反思 — 单次 raw text completion (无 tools / 无 image / 无 system).
+
+        max_tokens=512 (反思 root_cause + hint 1-2 句够); Kimi 也不带 thinking_disabled 因为
+        反思场景 thinking 反而帮助 (复杂 trace 分析); 不更 self.last_usage.
+        """
+        kwargs: dict[str, Any] = {
+            "model": self.model,
+            "messages": [{"role": "user", "content": prompt}],
+        }
+        if self._is_kimi:
+            kwargs["max_tokens"] = 512
+        else:
+            kwargs["max_completion_tokens"] = 512
+        resp = await self._client.chat.completions.create(**kwargs)
+        content = resp.choices[0].message.content
+        if not content:
+            raise RuntimeError(f"{self.name}({self.model}) reflect 没返 content: {resp!r}")
+        return str(content)

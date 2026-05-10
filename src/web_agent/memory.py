@@ -113,6 +113,108 @@ def record_task(
         conn.close()
 
 
+# V0.28.1: W6-A reflections 表 — 跟 memories 表分开 (subagent 决, schema 演进独立).
+# 同 db 文件 (data/memory.db) 减一次 connect, V0.28.2 cli inject 时一次 connect 读两表方便.
+
+
+@dataclass
+class ReflectionEntry:
+    """V0.28.1: W6-A 反思记录, V0.28.2 cli 启动时 recall_reflections_by_domain 拉来 inject memories_str."""
+
+    ts: float
+    task_id: str
+    domain: str
+    goal: str
+    final_result: str
+    root_cause: str
+    hint: str
+
+
+def init_reflections_db(db_path: Path) -> sqlite3.Connection:
+    """V0.28.1: 建 reflections 表 + index. 跟 init_memory_db 同模式."""
+    db_path.parent.mkdir(parents=True, exist_ok=True)
+    conn = sqlite3.connect(db_path)
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS reflections (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            ts REAL NOT NULL,
+            task_id TEXT NOT NULL,
+            domain TEXT NOT NULL,
+            goal TEXT NOT NULL,
+            final_result TEXT NOT NULL,
+            root_cause TEXT NOT NULL,
+            hint TEXT NOT NULL
+        )
+        """
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_reflections_domain_ts ON reflections(domain, ts DESC)"
+    )
+    conn.commit()
+    return conn
+
+
+def record_reflection(
+    db_path: Path,
+    task_id: str,
+    domain: str,
+    goal: str,
+    final_result: str,
+    root_cause: str,
+    hint: str,
+) -> None:
+    """V0.28.1: 写一条反思记录. 跟 record_task 同模式 (truncate + try/finally close)."""
+    conn = init_reflections_db(db_path)
+    try:
+        conn.execute(
+            "INSERT INTO reflections (ts, task_id, domain, goal, final_result, root_cause, hint) "
+            "VALUES (?,?,?,?,?,?,?)",
+            (
+                time.time(),
+                task_id,
+                domain,
+                goal[:RESULT_TRUNC],
+                final_result[:RESULT_TRUNC],
+                root_cause[:RESULT_TRUNC],
+                hint[:RESULT_TRUNC],
+            ),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def recall_reflections_by_domain(
+    db_path: Path,
+    domain: str,
+    limit: int = 3,
+) -> list[ReflectionEntry]:
+    """V0.28.1: 查 domain 下最近 N 条反思 (DESC by ts). db 不存在返 [] (跟 recall_by_domain 同).
+
+    V0.28.2 cli inject 时调, 默 limit=3 比 recall_by_domain (5) 少 — 反思 hint 比 task outcome
+    更精炼, 3 条够给 LLM 上下文不污染.
+    """
+    if not db_path.exists():
+        return []
+    conn = sqlite3.connect(db_path)
+    try:
+        rows = conn.execute(
+            "SELECT ts, task_id, domain, goal, final_result, root_cause, hint FROM reflections "
+            "WHERE domain = ? ORDER BY ts DESC LIMIT ?",
+            (domain, limit),
+        ).fetchall()
+    finally:
+        conn.close()
+    return [
+        ReflectionEntry(
+            ts=r[0], task_id=r[1], domain=r[2], goal=r[3],
+            final_result=r[4], root_cause=r[5], hint=r[6],
+        )
+        for r in rows
+    ]
+
+
 def recall_by_domain(
     db_path: Path,
     domain: str,

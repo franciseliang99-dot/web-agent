@@ -111,3 +111,22 @@ class AnthropicClient:
                 return action_from_tool_call(block.name, dict(block.input))
 
         raise RuntimeError(f"Anthropic 没返回 tool_use: {resp.content!r}")
+
+    async def reflect(self, prompt: str) -> str:
+        """V0.28.1: W6-A 失败反思 — 单次 raw text completion (无 tools / 无 image / 无 cache_control).
+
+        max_tokens=512 (反思 root_cause + hint 1-2 句够用); 不带 system prompt (反思 prompt 自含
+        指令); 不带 cache (反思一次性 cache 命中率 0); 不更 self.last_usage (V0.28.3 再单独算).
+        """
+        resp = await self._client.messages.create(
+            model=self.model,
+            max_tokens=512,
+            messages=cast(
+                list[MessageParam],
+                [{"role": "user", "content": [{"type": "text", "text": prompt}]}],
+            ),
+        )
+        for block in resp.content:
+            if block.type == "text":
+                return block.text
+        raise RuntimeError(f"Anthropic reflect 没返 text block: {resp.content!r}")

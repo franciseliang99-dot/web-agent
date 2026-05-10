@@ -30,6 +30,7 @@ from web_agent.actuator import (
 )
 from web_agent.captcha import detect as captcha_detect
 from web_agent.llm import LLMClient
+from web_agent.memory import record_reflection
 from web_agent.notify import notify
 from web_agent.perceiver import perceive
 from web_agent.safety import check as safety_check
@@ -395,6 +396,44 @@ async def _handle_captcha(
     return result
 
 
+async def _maybe_reflect_on_failure(
+    client: LLMClient,
+    goal: str,
+    trace: Trace,
+    final_result: str,
+    task_id: str,
+    domain: str,
+    memory_db_path: Path,
+) -> None:
+    """V0.28.1: W6-A 失败反思 helper — final_result 触发 should_reflect 时调 client.reflect +
+    record_reflection 持久化. LLM raise / parse fail 都 graceful (logger.warning), 不阻塞 task return.
+
+    跟 W5-A `_maybe_inject_reflect_hint` (intra-step deterministic) 边界分明: 本 helper 是
+    inter-task LLM-driven, 仅 task 终结时调一次, 写 reflections 表 (V0.28.2 cli inject 给下次启动看).
+    """
+    from web_agent.reflect import build_reflect_prompt, parse_reflection, should_reflect
+
+    if not should_reflect(final_result):
+        return
+    try:
+        prompt = build_reflect_prompt(goal, trace.for_llm(), final_result)
+        response = await client.reflect(prompt)
+        reflection = parse_reflection(response)
+        record_reflection(
+            db_path=memory_db_path,
+            task_id=task_id,
+            domain=domain,
+            goal=goal,
+            final_result=final_result,
+            root_cause=reflection.root_cause,
+            hint=reflection.hint,
+        )
+        logger.info("W6-A reflect 已写入: task_id=%s domain=%r hint=%r",
+                    task_id, domain, reflection.hint[:80])
+    except Exception as e:
+        logger.warning("W6-A reflect failed (non-fatal): %r", e)
+
+
 async def run_react_loop(
     ctx: BrowserContext,
     client: LLMClient,
@@ -407,6 +446,8 @@ async def run_react_loop(
     progress_cb: ProgressCallback | None = None,
     safety_approval_cb: SafetyApprovalCallback | None = None,
     initial_active_idx: int = 0,
+    domain: str = "",
+    memory_db_path: Path | None = None,
 ) -> str:
     """跑 ReAct 循环直到 done / max_steps / max_wallclock_s / 死循环 / LLM 失败。返回最终结果文本。
 
@@ -424,6 +465,9 @@ async def run_react_loop(
     - 死循环（连续 3 次同 action）→ 同上
     """
     task_id = uuid.uuid4().hex[:12]
+    # V0.28.1 W6-A: reflect 写入 memory.db (跟 W5-D record_task 同 db, schema 不同表).
+    # caller (cli/eval/mcp) 不传 memory_db_path 时 fallback 默 data/memory.db.
+    _resolved_mem_db: Path = memory_db_path or Path("data/memory.db")
     conn = init_db(db_path)
     start_task(conn, task_id, goal)
     screenshots_dir.mkdir(parents=True, exist_ok=True)
@@ -666,6 +710,10 @@ async def run_react_loop(
                 trace.append(step)
                 write_step(conn, task_id, step, str(shot_path))
                 end_task(conn, task_id, result)
+                # V0.28.1 W6-A: LOOP_DETECTED 路径触发 reflect (subagent A 决: plan 缺陷类失败)
+                await _maybe_reflect_on_failure(
+                    client, goal, trace, result, task_id, domain, _resolved_mem_db,
+                )
                 return result
             recent_actions.append(sig)
 
@@ -813,6 +861,10 @@ async def run_react_loop(
         result = "(max_steps 耗尽未完成)"
         end_task(conn, task_id, result)
         logger.warning("max_steps %s", result)
+        # V0.28.1 W6-A: max_steps 路径触发 reflect (subagent A 决: plan 缺陷类失败)
+        await _maybe_reflect_on_failure(
+            client, goal, trace, result, task_id, domain, _resolved_mem_db,
+        )
         return result
     finally:
         conn.close()

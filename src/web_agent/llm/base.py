@@ -43,3 +43,19 @@ class LLMClient(Protocol):
         current_idx: int = 0,
         cross_origin_hosts: list[str] | None = None,
     ) -> Action: ...
+
+    async def reflect(self, prompt: str) -> str:
+        """V0.28.1: W6-A 失败反思 — 单次 raw text completion (无 tools / 无 image / 无 cache).
+
+        给 reflect.build_reflect_prompt 输出的纯文本 prompt, 返 LLM raw text response.
+        caller (loop._maybe_reflect_on_failure) 用 reflect.parse_reflection 解析返值成
+        Reflection dataclass + record_reflection 持久化.
+
+        跟 plan() 正交:
+        - plan(): ReAct loop 内 SoM marks + screenshot + trace + tools (Action 输出)
+        - reflect(): 失败 task 后 trace 文本反思 + 无 tools (raw str 输出)
+
+        token 不更 self.last_usage (eval/runner 只累加 plan() 成本, reflect 是 task 级 overhead;
+        V0.28.3 eval --reflect flag 时再加 last_reflect_usage 单独累加, YAGNI).
+        """
+        ...

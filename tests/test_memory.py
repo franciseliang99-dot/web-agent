@@ -200,3 +200,97 @@ def test_format_memories_renders_ok_fail_and_truncates():
     # 长 goal 截到 60, 长 result 截到 80 (default trunc)
     assert "x" * 60 in out and "x" * 61 not in out
     assert "y" * 80 in out and "y" * 81 not in out
+
+
+# ---------- V0.28.1 W6-A: reflections 表 + record_reflection / recall_reflections_by_domain ----------
+
+
+def test_init_reflections_db_creates_table_and_index_when_missing(tmp_path):
+    """V0.28.1: db 不存在时, init_reflections_db 自动建 reflections 表 + idx_reflections_domain_ts."""
+    from web_agent.memory import init_reflections_db
+
+    db = tmp_path / "fresh.db"
+    assert not db.exists()
+    conn = init_reflections_db(db)
+    try:
+        # 表存在
+        rows = conn.execute(
+            "SELECT name FROM sqlite_master WHERE type='table' AND name='reflections'"
+        ).fetchall()
+        assert len(rows) == 1
+        # index 存在
+        rows = conn.execute(
+            "SELECT name FROM sqlite_master WHERE type='index' AND name='idx_reflections_domain_ts'"
+        ).fetchall()
+        assert len(rows) == 1
+    finally:
+        conn.close()
+
+
+def test_record_reflection_round_trip(tmp_path):
+    """V0.28.1: record_reflection 写 → recall_reflections_by_domain 读对称."""
+    from web_agent.memory import record_reflection, recall_reflections_by_domain
+
+    db = tmp_path / "memory.db"
+    record_reflection(
+        db_path=db, task_id="t1", domain="x.test",
+        goal="抓取首页 H1", final_result="(max_steps 耗尽未完成)",
+        root_cause="页面加载慢", hint="下次先 wait_for_selector",
+    )
+    rows = recall_reflections_by_domain(db, "x.test")
+    assert len(rows) == 1
+    r = rows[0]
+    assert r.task_id == "t1"
+    assert r.domain == "x.test"
+    assert r.goal == "抓取首页 H1"
+    assert r.final_result == "(max_steps 耗尽未完成)"
+    assert r.root_cause == "页面加载慢"
+    assert r.hint == "下次先 wait_for_selector"
+
+
+def test_recall_reflections_by_domain_returns_desc_by_ts(tmp_path):
+    """V0.28.1: recall_reflections_by_domain 按 ts DESC 排, 限 limit."""
+    from web_agent.memory import record_reflection, recall_reflections_by_domain
+
+    db = tmp_path / "memory.db"
+    for i in range(5):
+        record_reflection(
+            db_path=db, task_id=f"t{i}", domain="x.test",
+            goal=f"goal {i}", final_result="r",
+            root_cause=f"rc {i}", hint=f"hint {i}",
+        )
+        time.sleep(0.001)  # ts 递增防 tie
+
+    rows = recall_reflections_by_domain(db, "x.test", limit=3)
+    assert len(rows) == 3
+    # DESC: 最新的 t4 在 [0]
+    assert rows[0].task_id == "t4"
+    assert rows[1].task_id == "t3"
+    assert rows[2].task_id == "t2"
+
+
+def test_recall_reflections_by_domain_db_missing_returns_empty(tmp_path):
+    """V0.28.1: db 不存在 → 返 [] (不抛, 跟 recall_by_domain 同模式)."""
+    from web_agent.memory import recall_reflections_by_domain
+
+    db = tmp_path / "nonexistent.db"
+    assert not db.exists()
+    assert recall_reflections_by_domain(db, "any.test") == []
+
+
+def test_record_reflection_truncates_long_fields(tmp_path):
+    """V0.28.1: RESULT_TRUNC=200 字段防 LLM 万言反思撑爆 db."""
+    from web_agent.memory import record_reflection, recall_reflections_by_domain
+
+    db = tmp_path / "memory.db"
+    long_str = "x" * 500
+    record_reflection(
+        db_path=db, task_id="t", domain="x.test",
+        goal=long_str, final_result=long_str,
+        root_cause=long_str, hint=long_str,
+    )
+    r = recall_reflections_by_domain(db, "x.test")[0]
+    assert len(r.goal) == 200
+    assert len(r.final_result) == 200
+    assert len(r.root_cause) == 200
+    assert len(r.hint) == 200

@@ -2,6 +2,105 @@
 
 All notable changes to web-agent. 版本号遵循 SemVer 简化形式（V<major>.<minor>.<patch>）。
 
+## [0.28.1] - 2026-05-10
+
+### Add (V0.28 W6 reflective 系列 commit 2/4 — LLMClient.reflect Protocol + loop wire + reflections 表)
+
+V0.28.0 reflect.py 纯函数之上, 真把 W6-A 反思链接到 loop.py 失败路径 + AnthropicClient/OpenAIClient
+实现 reflect() Protocol 方法 + memory.py 加 reflections 表持久化. cli.py 传 domain + memory_db_path
+让 loop helper 知道写哪. V0.28.2 cli inject 时按 domain 拉 reflections 给下次 task 启动看.
+
+### subagent B 决: 加 LLMClient.reflect Protocol 方法 (推翻原 ABC 选项)
+
+主 agent V0.28.0 留 LLM 接口选 V0.28.1 决. 3 选项:
+- A. 复用 plan(): 难 enforce JSON schema, plan 返 Action union 不是 str (倒错 schema 直觉)
+- B. 加 LLMClient.reflect(prompt) -> str Protocol 方法: 表面破 +1 方法但语义清晰
+- C. 绕 Protocol 直调 client._client SDK: V0.28.0 已拒 (反 V0.21.2 Protocol 设计原则)
+
+Plan subagent 决 **B**: reflect 跟 plan 正交 (无 SoM marks/无 trace 角色, 输入纯文本 prompt 输出
+raw str), 复用 plan 既要骗 Action union 又要 mock 时 hack done(result=hint) 倒错 schema 直觉.
+B 在 Anthropic/OpenAI 各加 ~25 行 messages.create (无 tools/无 image/无 cache, max_tokens=512).
+
+**反方风险缓解**: FakeLLMClient (test_loop_reflect.py / test_loop_main.py 等 3 处) 不加 reflect
+方法 — Protocol structural runtime_checkable 不验缺方法 + 现存测 goal 全 success 不触发 reflect
+(should_reflect=False), 安全. 新加 RecordingLLMClientWithReflect 覆盖 W6 触发路径.
+
+### Changed
+
+- `src/web_agent/llm/base.py` LLMClient Protocol 加 `async def reflect(self, prompt: str) -> str`,
+  docstring 强调跟 plan() 正交 + token 不更 last_usage (V0.28.3 加 last_reflect_usage 单独累)
+- `src/web_agent/llm/anthropic.py` AnthropicClient 加 `reflect(prompt) -> str`:
+  `messages.create(model, max_tokens=512, messages=[{role:user, content:[{type:text, text:prompt}]}])`,
+  无 tools/image/cache/system. 返 resp.content[0] text block.
+- `src/web_agent/llm/openai.py` OpenAIClient 加 `reflect(prompt) -> str`:
+  `chat.completions.create(model, max_tokens=512, messages=[{role:user, content:prompt}])`,
+  Kimi 分支 max_tokens=512 (不限 thinking — 反思场景 reasoning 反而帮忙). 返 resp.choices[0].message.content.
+- `src/web_agent/memory.py` 加 reflections 表 + 函数 (subagent 决: schema 演进独立, 不复用 init_memory_db):
+  - `ReflectionEntry` dataclass (ts/task_id/domain/goal/final_result/root_cause/hint)
+  - `init_reflections_db(db_path)` 建表 + idx_reflections_domain_ts
+  - `record_reflection(db_path, task_id, domain, goal, final_result, root_cause, hint)` (RESULT_TRUNC=200 防长 LLM 撑爆)
+  - `recall_reflections_by_domain(db_path, domain, limit=3)` 默 limit=3 (比 recall_by_domain 5 少, 反思 hint 更精炼不污染上下文)
+- `src/web_agent/loop.py`:
+  - 加 `_maybe_reflect_on_failure(client, goal, trace, final_result, task_id, domain, memory_db_path)`
+    helper (~25 行) — should_reflect 触发 → build_reflect_prompt → client.reflect → parse_reflection
+    → record_reflection. try/except graceful (LLM raise / parse fail 都不阻塞 task return,
+    logger.warning + parse 自带 "(reflect_parse_failed)" fallback 双重保险).
+  - `run_react_loop` 加 `domain: str = ""` + `memory_db_path: Path | None = None` 参数 (默 None →
+    fallback Path("data/memory.db")). 顶部 resolve `_resolved_mem_db` 一次复用 2 注入点.
+  - max_steps 路径 (line 853 后) + LOOP_DETECTED 路径 (line 708 后) 各注 1 行 helper 调用. 触发
+    集中 2 marker (subagent A 决: 排除 WALLCLOCK/SAFETY/CAPTCHA/LLM_FAILED 外因 reflect 给不出 hint).
+- `src/web_agent/cli.py` `run_task` 内 run_react_loop 调用加 `domain=extract_domain(start_url)` +
+  `memory_db_path=Path(env.WEB_AGENT_MEMORY_DB or _MEM_DB)` 透传.
+- `tests/test_loop_reflect.py` 加 4 V0.28.1 W6 集成测:
+  - `test_w6_reflect_triggered_on_max_steps_writes_db` max_steps + reflect 调 1 次 + 写表 验
+  - `test_w6_reflect_not_triggered_on_done_result` 成功不触发 reflect 调用计数 == 0
+  - `test_w6_reflect_llm_raise_does_not_block_task_return` LLM raise → graceful + caplog warning
+  - `test_w6_reflect_parse_failed_still_writes_fallback` invalid JSON → parse fallback 仍写表
+  - `RecordingLLMClientWithReflect` 复用 RecordingLLMClient + reflect mock + reflect_calls 记录
+- `tests/test_memory.py` 加 5 V0.28.1 单测:
+  - init_reflections_db 自动建表 + idx_reflections_domain_ts
+  - record_reflection round-trip 写读
+  - recall_reflections_by_domain DESC by ts + limit
+  - DB 不存在返 [] (跟 recall_by_domain 同模式)
+  - record_reflection RESULT_TRUNC=200 字段截断防长 LLM 撑爆
+
+### V0.28 W6 系列进度 (2/4)
+
+| ver | 状态 | 节点 |
+|-----|------|------|
+| V0.28.0 | ✅ | reflect.py 纯函数 + 16 单测 (含 simplify lstrip bug fix 回归测) |
+| V0.28.1 | ✅ | 本提交 — LLMClient.reflect Protocol + loop wire + reflections 表 |
+| V0.28.2 | 待 | cli inject reflections 进 memories_str (W6-B) |
+| V0.28.3 | 待 | eval --reflect flag + reflective_uplift metric (W6 验证) |
+
+### 隐藏风险 / 边界 case (subagent 提前识别)
+
+1. MissingSecretError on reflect: AnthropicClient/OpenAIClient init 阶段已 raise, reflect
+   走不到; 但 base_url proxy fail / API key 中途 revoke → AuthenticationError. helper Exception
+   包 catch 任意类型 (跟 cli.py L91 memory recall fail 同模式 logger.warning).
+2. reflect 在 record_task 之前 / 之后: helper 在 loop.py 内调 (end_task 后立即), record_task
+   在 cli.py 内调 (run_react_loop 返后) — 物理顺序自然 reflect 先 / record_task 后, V0.28.2
+   inject 时拉历史 reflections (当前 task reflection 是给下次启动看), 不撞.
+3. reflect token 单独算: 不进 self.last_usage. eval/runner 累加 plan() 成本跟 step count 同维度;
+   reflect 是 task 级一次性 overhead. V0.28.3 eval --reflect flag 时再加 last_reflect_usage YAGNI.
+4. Trace.for_llm() 已截 obs 200 char: build_reflect_prompt 通过 trace.for_llm() 自然截断,
+   max_steps=20 × 200 char ≈ 4000 char + prompt header < 8K token 安全, max_tokens=512 输出.
+5. memory.db 并发: mcp_server._RUN_LOCK 已 serialize, sqlite default isolation 顺序写无冲突.
+
+### Compatibility
+
+- 老 caller 0 改 — run_react_loop 加 KW-only domain="" + memory_db_path=None 默全兼容.
+  cli.py 透传新增 (V0.28.1 内同 commit), test_cli.py 等老 fixture 不接 reflect 触发条件不影响.
+- mypy strict 0 (42 src); ruff 0; pytest **574 + 17 skip** (V0.28.0 565+17 → +9 V0.28.1 测
+  [4 集成 + 5 unit]).
+- 真 chromium 15/15 全过 (无新).
+- FakeLLMClient 未加 reflect 方法但 Protocol structural 仍过 + 测 goal 全 success 不触发, 安全.
+
+### Why patch (V0.28.1) 不 minor
+
+- V0.28 主题 (W6 reflective) minor bump 已发生在 V0.28.0, V0.28.1+ patch 累加 wire / inject / 验证.
+- 跟 V0.21.x / V0.27.x 系列 patch 风格一致 (主题开篇 minor + 后续累加 patch).
+
 ## [0.28.0] - 2026-05-10
 
 ### Add (V0.28 W6 reflective 系列 commit 1/4 — reflect.py 纯函数开篇)

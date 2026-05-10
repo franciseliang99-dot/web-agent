@@ -214,3 +214,144 @@ async def test_reflect_idempotent_no_double_append(
     final_trace = client.observed_traces[-1]
     for obs in final_trace:
         assert obs.count("[reflect]") <= 1, f"{obs!r} 含多个 [reflect]"
+
+
+# ---------- V0.28.1 W6-A: inter-task LLM-driven 反思 (跟 W5-A intra-step 正交) ----------
+
+
+class RecordingLLMClientWithReflect(RecordingLLMClient):
+    """V0.28.1: 在 RecordingLLMClient 之上加 reflect() mock 验 W6-A wire."""
+
+    def __init__(self, actions: list[Action], reflect_response: str = '{"root_cause": "rc", "hint": "h"}',
+                 reflect_raises: Exception | None = None) -> None:
+        super().__init__(actions)
+        self._reflect_response = reflect_response
+        self._reflect_raises = reflect_raises
+        self.reflect_calls: list[str] = []  # 记录每次 reflect prompt
+
+    async def reflect(self, prompt: str) -> str:
+        self.reflect_calls.append(prompt)
+        if self._reflect_raises is not None:
+            raise self._reflect_raises
+        return self._reflect_response
+
+
+async def test_w6_reflect_triggered_on_max_steps_writes_db(
+    monkeypatch, tmp_path, patch_loop_internals,
+):
+    """V0.28.1: max_steps 耗尽 → reflect 触发 + 写 reflections 表."""
+    monkeypatch.setattr("web_agent.loop.perceive", _stuck_perceive)
+    client = RecordingLLMClientWithReflect(
+        # 每步 dy 不同 避 anti_loop, 永不 done → max_steps 耗尽
+        [ScrollAction(thought="t", dy=i * 100) for i in range(1, 10)],
+        reflect_response='{"root_cause": "页面卡死", "hint": "下次先 wait_for_selector"}',
+    )
+
+    mem_db = tmp_path / "memory.db"
+    result = await run_react_loop(
+        _ctx(), client, goal="测 W6-A max_steps",
+        max_steps=3, db_path=tmp_path / "trace.db",
+        screenshots_dir=tmp_path / "shots",
+        domain="stuck.test",
+        memory_db_path=mem_db,
+    )
+
+    assert "max_steps" in result
+    # reflect 应被调 1 次 (max_steps 触发)
+    assert len(client.reflect_calls) == 1, f"应 reflect 一次, 实 {len(client.reflect_calls)}"
+    # prompt 应含 goal + final_result
+    assert "测 W6-A max_steps" in client.reflect_calls[0]
+    assert "max_steps" in client.reflect_calls[0]
+    # reflections 表应有 1 行
+    from web_agent.memory import recall_reflections_by_domain
+    rows = recall_reflections_by_domain(mem_db, "stuck.test")
+    assert len(rows) == 1
+    assert rows[0].root_cause == "页面卡死"
+    assert rows[0].hint == "下次先 wait_for_selector"
+    assert rows[0].domain == "stuck.test"
+    assert rows[0].goal == "测 W6-A max_steps"
+
+
+async def test_w6_reflect_not_triggered_on_done_result(
+    monkeypatch, tmp_path, patch_loop_internals,
+):
+    """V0.28.1: success result (DoneAction) → reflect 不触发, reflections 表空."""
+    monkeypatch.setattr("web_agent.loop.perceive", _stuck_perceive)
+    client = RecordingLLMClientWithReflect([
+        DoneAction(thought="收尾", result="抓到答案"),
+    ])
+
+    mem_db = tmp_path / "memory.db"
+    result = await run_react_loop(
+        _ctx(), client, goal="测 W6-A done",
+        max_steps=5, db_path=tmp_path / "trace.db",
+        screenshots_dir=tmp_path / "shots",
+        domain="ok.test",
+        memory_db_path=mem_db,
+    )
+
+    assert result == "抓到答案"
+    assert len(client.reflect_calls) == 0, "成功 result 不应触发 reflect"
+    # mem_db 不存在 (record_reflection 没调过)
+    from web_agent.memory import recall_reflections_by_domain
+    assert recall_reflections_by_domain(mem_db, "ok.test") == []
+
+
+async def test_w6_reflect_llm_raise_does_not_block_task_return(
+    monkeypatch, tmp_path, patch_loop_internals, caplog,
+):
+    """V0.28.1: reflect LLM raise → graceful degrade, task return 不阻塞 (subagent fallback 决)."""
+    import logging
+
+    monkeypatch.setattr("web_agent.loop.perceive", _stuck_perceive)
+    client = RecordingLLMClientWithReflect(
+        [ScrollAction(thought="t", dy=i * 100) for i in range(1, 10)],
+        reflect_raises=RuntimeError("api down"),
+    )
+
+    mem_db = tmp_path / "memory.db"
+    with caplog.at_level(logging.WARNING):
+        result = await run_react_loop(
+            _ctx(), client, goal="测 W6-A graceful",
+            max_steps=3, db_path=tmp_path / "trace.db",
+            screenshots_dir=tmp_path / "shots",
+            domain="api-down.test",
+            memory_db_path=mem_db,
+        )
+
+    # task 仍正常返 max_steps result, 不抛
+    assert "max_steps" in result
+    # reflect 调过但 raise → mem_db 没写
+    assert len(client.reflect_calls) == 1
+    from web_agent.memory import recall_reflections_by_domain
+    assert recall_reflections_by_domain(mem_db, "api-down.test") == []
+    # caplog 应有 "reflect failed (non-fatal)"
+    assert any("W6-A reflect failed" in r.message for r in caplog.records), \
+        f"应 logger.warning W6-A reflect failed, caplog: {[r.message for r in caplog.records]}"
+
+
+async def test_w6_reflect_parse_failed_still_writes_fallback(
+    monkeypatch, tmp_path, patch_loop_internals,
+):
+    """V0.28.1: LLM 返 invalid JSON → parse_reflection fallback "(reflect_parse_failed)" → 仍写表."""
+    monkeypatch.setattr("web_agent.loop.perceive", _stuck_perceive)
+    client = RecordingLLMClientWithReflect(
+        [ScrollAction(thought="t", dy=i * 100) for i in range(1, 10)],
+        reflect_response="not JSON at all",
+    )
+
+    mem_db = tmp_path / "memory.db"
+    await run_react_loop(
+        _ctx(), client, goal="测 parse fallback",
+        max_steps=3, db_path=tmp_path / "trace.db",
+        screenshots_dir=tmp_path / "shots",
+        domain="parse-fail.test",
+        memory_db_path=mem_db,
+    )
+
+    from web_agent.memory import recall_reflections_by_domain
+    rows = recall_reflections_by_domain(mem_db, "parse-fail.test")
+    assert len(rows) == 1
+    # parse fallback: root_cause = "(reflect_parse_failed)", hint = raw text
+    assert rows[0].root_cause == "(reflect_parse_failed)"
+    assert "not JSON" in rows[0].hint

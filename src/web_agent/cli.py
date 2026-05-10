@@ -96,6 +96,8 @@ async def run_task(
             memories_str = merge_into_memories(memories_str, build_subgoal_hint_text())
             logger.info("subgoal hint injected (W5-C: 长任务 / 带序号触发)")
 
+        # V0.28.1 W6-A: 传 domain + memory_db_path 让 loop _maybe_reflect_on_failure 在 max_steps
+        # / LOOP_DETECTED 触发时按 domain 写 reflections 表 (V0.28.2 cli 启动 inject 给下次看).
         result = await run_react_loop(
             ctx=ctx,
             client=client,
@@ -107,6 +109,8 @@ async def run_task(
             memories=memories_str,
             progress_cb=progress_cb,
             safety_approval_cb=safety_approval_cb,
+            domain=extract_domain(start_url),
+            memory_db_path=Path(os.environ.get("WEB_AGENT_MEMORY_DB", str(_MEM_DB))),
         )
 
         # W5-D 长期记忆: 跨 session 持久化 task outcome by domain.
