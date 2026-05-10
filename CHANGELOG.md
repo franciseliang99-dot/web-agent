@@ -2,6 +2,84 @@
 
 All notable changes to web-agent. 版本号遵循 SemVer 简化形式（V<major>.<minor>.<patch>）。
 
+## [0.26.0] - 2026-05-10
+
+### Add (V0.26 eval golden corpus 系列开篇 — 框架骨架 types/predicates/runner + 1 示范 task)
+
+V0.21 plan 第 3 节 "**V0.25 eval golden corpus 是 V0.26 无人值守的硬前置**". V0.21-V0.25
+沉淀 9 个新能力 (multi-tab/iframe/drag/upload/download/dialog/retry/backtrack/keyboard-nav)
+仅有代码路径单元测 + 真 chromium slow smoke 共 446 测, **完全没数据回答 "LLM 真用上了吗"**.
+V0.26 corpus 用 data:text/html fixture 跑端到端任务测 LLM 行为, baseline 数据驱动决定
+V0.27 凭证 vault + V0.28 无人值守模式开权限边界.
+
+V0.26 系列 5 commit (本是开篇):
+- **V0.26.0**: eval/ 顶层模块 + types/predicates/runner 框架 + 1 baseline 示范 task (本)
+- **V0.26.1**: 充实 corpus 10 task 覆盖 V0.21-V0.25 各能力轴 (含 SubstringPredicate 强制 task-specific token)
+- **V0.26.2**: A/B harness + metrics JSON dump (含 token cost / failure_bucket / pricing 表) 跨 provider 对比
+- **V0.26.3**: web-agent-eval entry script + vcr cassette + 双 opt-in env (RUN_EVAL=1 + EVAL_REAL=1)
+- **V0.26.4**: replay 面板 eval metrics 视图 + 跑 baseline 落档 data/eval/baseline-V0.26.0.json
+
+### 关键设计决策 (V0.26 plan subagent 锁定)
+
+- **fixture self-hosted data:text/html 主路径** (确定性优先) + 2-3 真外网 (二级 opt-in env
+  `WEB_AGENT_EVAL_REAL=1`) — 无人值守的硬前置是"指标稳定"非"真实场景"
+- **predicate Protocol + 3 内建** (SubstringPredicate / RegexPredicate / AllOf 复合; LLMJudge 留 V0.26.2)
+- **vcr cassette 默认回放, 真 LLM 仅 baseline run + 重录** (V0.26.3 加 cassette 后 CI 0 token)
+- **A/B 不强求公平**: 各 provider 用 default + N=3 runs 取 pass rate 平均 + 报方差
+- **串行 chromium** (RateLimit + 内存 200MB×N 控制)
+- **CapabilityAxis Literal 跟 V0.17.0 Action union 同档** mypy strict 自动 narrow
+- **failure_bucket 复用 memory.py FAILURE_MARKERS + 加 4 类 eval 专属** (PREDICATE_FAIL /
+  EVAL_TIMEOUT / EVAL_INFRA_ERROR / OK)
+
+### Changed
+
+- `eval/` **新顶层模块** (sibling 于 `src/`, `tests/`, `demos/`):
+  - `eval/__init__.py` 模块 docstring + `__version__ = "0.26.0"`
+  - `eval/types.py` `EvalTask` frozen+slots dataclass + `CapabilityAxis = Literal[...]` 12 项
+    (10 V0.21-V0.25 能力 + baseline + real-world)
+  - `eval/predicates.py` `Predicate` Protocol + `PredicateResult` dataclass + 3 内建
+    (`SubstringPredicate` / `RegexPredicate` / `AllOf` 复合)
+  - `eval/runner.py` `run_one(task, client, predicate, *, db_path, screenshots_dir,
+    chromium_launcher)` async 跑单 task + `TaskMetric` dataclass + `metric_to_dict` JSON
+    序列化 + `_classify_failure_bucket` 10 桶分类 (复用 loop sentinel + 加 EVAL_INFRA_ERROR
+    等 4 类)
+  - `eval/corpus/__init__.py` 1 个 `BASELINE_EXTRACT_H1` 示范 task + Predicate 1:1 绑
+    (data:text/html `<h1>量子纠缠是粒子之间的关联</h1>` + SubstringPredicate 强制
+    task-specific token "量子纠缠是粒子之间的关联" 防 done(result="完成") 假阳性)
+- `pyproject.toml` `[tool.mypy] files` `["src/web_agent"]` → `["src/web_agent", "eval"]`
+  让 eval/ 也走 mypy strict (新顶层模块跟 src/ 同 quality bar)
+- `tests/test_eval_runner.py` **新建** 16 V0.26.0 测:
+  - 6 predicates 测 (Substring matched/not/case-insensitive / Regex matched/not / AllOf
+    AND 语义)
+  - 3 EvalTask 测 (minimal construct / frozen / CapabilityAxis 12 项完整)
+  - 4 _classify_failure_bucket 测 (OK / loop sentinel 优先 / PREDICATE_FAIL / max_steps)
+  - 1 metric_to_dict pass_ → "pass" key 序列化
+  - 1 run_one INFRA error 路径 (chromium.launch 抛 → EVAL_INFRA_ERROR 不传染)
+
+### Compatibility
+
+- 老 caller / fixture 不受影响 — eval/ 是新顶层模块, 现有 src/web_agent / tests/ 全 0 改.
+- mypy strict 0 (28 source files: src/web_agent 23 + eval 5); ruff 0;
+  pytest 431 → **447 + 16 skip** (V0.26.0 +16 eval framework 测).
+- 真 chromium 15/15 全过 (无新增, V0.26.1 chromium fixture eval task 才加).
+
+### V0.27/V0.28 路线协同
+
+V0.26 必须独立完成不夹带进 V0.27. baseline 要求 (a) 跨 provider (b) 跨能力轴 (c) 多次取均值
+(d) 公开 dump 可对比 — 4 项都是独立 epic, 夹带必降级. V0.27 凭证 vault 决策依赖
+"OpenAI gpt-5.5 在 dialog 类任务 pass rate 50% vs Anthropic 90%" 这类数据决定 default
+provider 选 Anthropic + vault 凭证按 provider 分级. V0.28 无人值守模式直接放权前必须有
+"类似任务 5 次跑都成功"客观证据, V0.26 baseline 提供 per-capability pass rate 决定哪类
+任务可放权 / 哪类需保留 elicit (e.g. drag/upload pass 100% → 放权; dialog/iframe pass 60% → 留 elicit).
+
+### Why minor (V0.26.0) 不 patch
+
+- 新顶层模块 `eval/` (跟 `src/`/`tests/`/`demos/` 同档独立顶层) 是 major surface 扩展,
+  类似 V0.21.0/V0.22.0/V0.23.0 Action union 加 dataclass minor 同档.
+- 跨 minor 0.25.3 → 0.26.0 主题分界 (V0.25 smart retry+backtrack → V0.26 eval framework),
+  跟 V0.24.0 dialog (跨 minor 主题打标) 同模式.
+- SemVer "新增向后兼容功能 → minor", 0.25.3 → 0.26.0.
+
 ## [0.25.3] - 2026-05-09
 
 ### Add (V0.25 smart retry+backtracking 系列收尾 — SYSTEM_PROMPT 加第 14 条失败恢复策略)

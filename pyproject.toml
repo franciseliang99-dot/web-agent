@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "web-agent"
-version = "0.25.3"
+version = "0.26.0"
 description = "MultiOn-style 高度拟人 AI web agent (Python + Playwright + VLM/SoM + stealth, multi-LLM)"
 readme = "README.md"
 license = "MIT"
@@ -69,7 +69,7 @@ target-version = "py312"
 [tool.mypy]
 python_version = "3.12"
 strict = true
-files = ["src/web_agent"]
+files = ["src/web_agent", "eval"]
 exclude = ["tests/", "demos/"]
 
 [[tool.mypy.overrides]]
