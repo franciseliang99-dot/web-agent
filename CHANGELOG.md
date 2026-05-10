@@ -2,6 +2,89 @@
 
 All notable changes to web-agent. 版本号遵循 SemVer 简化形式（V<major>.<minor>.<patch>）。
 
+## [0.27.3] - 2026-05-10
+
+### Add (V0.27 vault 系列 commit 3/5 — provider routing 纯函数)
+
+V0.27.1 (vault framework) + V0.27.2 (make_client API drift fix) 之上, 加数据驱动的
+provider routing: 在多 provider 都可用时, 按 `CapabilityAxis` (eval/types.py 12 项 Literal)
+选 baseline 矩阵里 pass rate 最高的 provider. 缺数据 / available∩baseline=∅ → fallback
+'anthropic' (符合 `make_client` 现 default).
+
+### subagent 审重要决策点 (Plan agent 反方风险全采纳)
+
+1. **B 关键发现**: baseline JSON (`data/eval/baseline-V0.26.4-kimi.json`) **不在 wheel** —
+   pyproject `hatch.build.targets.wheel.packages = ["src/web_agent", "eval"]` 未含 data/,
+   pip install 用户机器无文件 → 用 `_DEFAULT_BASELINE_KIMI` frozen dict 字面量, 0 IO + 0
+   packaging 改 + 0 fixture 测. JSON 留 eval 产物归档, routing.py 不依赖文件系统.
+2. **D scope 砍半**: cli/mcp/jd/list `--capability-hint` flag SKIP 到 V0.27.5 (此版加 4 处
+   入口 flag 但 0 真消费者 = dead code). V0.27.3 只交付纯函数 + 单元测.
+3. **A 复用**: `from eval.types import CapabilityAxis` 复用 (eval 已是 prod console_script
+   `web-agent-eval`, 不是 dev tool, 重定义 12 项 Literal 双源 stale 风险).
+4. **C 映射**: SKU `openai-kimi` → wire `openai` 映射放 routing.py 内部, 不污染 make_client
+   命名空间 (评测层 SKU 跟 wire protocol 是不同命名空间, 硬合并污染 error msg).
+5. **E 测降量 + 漏边界**: 主 agent 原 plan 15 测 → subagent 降 6 + 漏边界 case
+   (`available=['anthropic']` 但 baseline 唯一非零 SKU openai-kimi → 必须 argmax 之后
+   过滤 available, 否则会选不可用 provider). 实落 21 测 (12 axis parametrize + 6 fallback
+   + 3 env helper).
+
+### Changed
+
+- `src/web_agent/routing.py` **新建** (~110 行):
+  - `_DEFAULT_BASELINE_KIMI: dict[str, dict[str, float]]` frozen 字面量, V0.26.4 真跑 9 axis
+    (multi-tab=1.0 / failure-recovery=1.0 / 其余 7 axis=0.0). 缺 retry/backtrack/real-world
+    3 axis (V0.26 corpus 未 cover) → 自然走 case 1 fallback.
+  - `_PROVIDER_TO_CLIENT = {"openai-kimi": "openai", "anthropic": "anthropic", "openai": "openai"}`
+    SKU → wire protocol 映射.
+  - `_DEFAULT_FALLBACK = "anthropic"` 跟 `make_client` default 对齐.
+  - `available_providers_from_env() -> list[str]` env API key 推断 helper.
+  - `select_provider(axis, baseline_matrix=None, available_providers=None) -> str` 纯函数,
+    4 fallback case 文档化 (axis 缺 / baseline 全 0 / argmax 不在 available / matrix 空).
+- `tests/test_routing.py` **新建** 21 测:
+  - `test_select_provider_default_baseline_kimi` parametrize 12 axis (subagent E 优化).
+  - `test_select_provider_unknown_axis_fallback` retry axis V0.26 缺数据 fallback.
+  - `test_select_provider_empty_available_providers_fallback` Kimi 强项但 available=[] fallback.
+  - `test_select_provider_explicit_baseline_matrix_overrides_default` 显式覆盖 default.
+  - `test_select_provider_openai_kimi_sku_mapped_to_openai_wire` SKU 不泄漏 make_client.
+  - `test_select_provider_argmax_filtered_by_available_after_argmax` **subagent 漏边界 case**.
+  - 3 env helper 测 + 1 default baseline axis 完整性自检.
+
+### V0.27.5 真接入路径 (此版预留, V0.27.5 真连线)
+
+```python
+# V0.27.5 cli/mcp/jd/list 内部 (--capability-hint flag 真消费时):
+from web_agent.routing import select_provider
+from web_agent.llm import make_client
+from web_agent.vault import default_store
+
+provider = select_provider(args.capability_hint)  # axis hint → 'anthropic' / 'openai'
+client = make_client(provider=provider, secret_store=default_store())  # V0.27.1 vault 链通
+```
+
+### V0.27 系列进度 (3/5)
+
+| ver | 状态 | 节点 |
+|-----|------|------|
+| V0.27.0 | ⏸ 推迟 | Anthropic baseline (用户拿到 ANTHROPIC_API_KEY 时跑) |
+| V0.27.1 | ✅ | vault framework: SecretStore Protocol + EnvSecretStore + Keyring stub + AnthropicClient/OpenAIClient 注入 |
+| V0.27.2 | ✅ | bug fix make_client API drift (V0.27.1 设计承诺空头支票, **subagent 实测发现**) |
+| V0.27.3 | ✅ | routing.py: select_provider 纯函数 + frozen baseline dict (subagent B 发现 wheel 缺 data) |
+| V0.27.4 | 待 | vault_elicit_cb mcp_server 注入 (跟 V0.18.0 safety 平行) |
+| V0.27.5 | 待 | 真接入 cli/jd/list + --capability-hint flag + 1 routing-aware corpus task + 复测 |
+
+### Compatibility
+
+- 老 caller / fixture 0 改动 — `cli/mcp_server/jd_extract/list_extract` 0 改 (V0.27.5
+  才真接入 flag). 现有 `make_client(provider="anthropic")` / `make_client()` 默路径 100% 等价.
+- mypy strict 0 (41 src 文件); ruff 0; pytest **533 + 17 skip** (V0.27.2 508+16 → +21+测试 collect 改进).
+- 真 chromium 15/15 全过 (无新).
+
+### Why patch (V0.27.3) 不 minor
+
+- 新增 module 是 V0.27 vault 系列内部增量, 老 caller 完全不接 (V0.27.5 才接).
+- SemVer "向后兼容的功能新增 → minor" 但本系列 V0.27.x 内统一 patch 表 V0.27 主题内嵌增量
+  (跟 V0.21.x / V0.22.x / V0.25.x 系列 patch 风格一致, V0.27 minor bump 已发生在 V0.27.0 推迟前).
+
 ## [0.27.2] - 2026-05-10
 
 ### Fix (V0.27.1 simplify subagent 实测发现 — make_client API drift bug fix)
