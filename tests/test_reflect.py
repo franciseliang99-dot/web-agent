@@ -90,6 +90,15 @@ def test_parse_reflection_markdown_fence_tolerated():
     assert r.hint == "h"
 
 
+def test_parse_reflection_fence_no_newline_preserves_j_chars():
+    """V0.28.0 simplify: 防 lstrip('json') 字符集 bug 回归 — 旧实现会把 JSON value 头的 j/s/o/n 字符吃掉.
+    现 regex 只匹配 {...} 内容, 不依赖剥前缀字符."""
+    response = '```json{"root_cause": "json source", "hint": "no newline"}```'
+    r = parse_reflection(response)
+    assert r.root_cause == "json source"  # 头字符 'j' 不能被吃
+    assert r.hint == "no newline"
+
+
 def test_parse_reflection_invalid_json_fallback():
     """V0.28.0: parse 失败 fallback (root_cause=parse_failed + hint=raw text 截 200 char)."""
     response = "this is not JSON at all"

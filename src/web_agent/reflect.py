@@ -20,8 +20,13 @@ V0.28 W6 系列 commit 拆解 (subagent 推, W6-C 推 V0.29+):
 from __future__ import annotations
 
 import json
+import re
 from dataclasses import dataclass
 from typing import Any
+
+# tolerate ```json ... ``` / ``` ... ``` markdown fence (Anthropic Sonnet 偶尔加).
+# 跟 jd_extract.py:71 _MD_CODE_BLOCK_RE 同套 (DRY 接受复制 — 单行 regex 跨模块抽常量 over-eng).
+_MD_CODE_BLOCK_RE = re.compile(r"```(?:json)?\s*(\{.*?\})\s*```", re.DOTALL)
 
 
 @dataclass(frozen=True, slots=True)
@@ -91,12 +96,9 @@ def parse_reflection(response_text: str) -> Reflection:
     Tolerate: ```json ... ``` markdown fence (LLM 偶尔加).
     """
     text = response_text.strip()
-    # tolerate ```json ... ``` markdown fence
-    if text.startswith("```"):
-        # 切到 first ``` 之后, lstrip "json" 后剥到 closing ```
-        parts = text.split("```", 2)
-        if len(parts) >= 2:
-            text = parts[1].lstrip("json").strip()
+    md_match = _MD_CODE_BLOCK_RE.search(text)
+    if md_match:
+        text = md_match.group(1)
     try:
         data = json.loads(text)
     except (json.JSONDecodeError, ValueError):
