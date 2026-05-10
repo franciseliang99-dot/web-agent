@@ -2,6 +2,79 @@
 
 All notable changes to web-agent. 版本号遵循 SemVer 简化形式（V<major>.<minor>.<patch>）。
 
+## [0.24.0] - 2026-05-09
+
+### Add (V0.24 dialog auto-handle 系列开篇 — browser/loop 加 dialog listener + obs 注入)
+
+V0.21 plan subagent 第 #4 high-leverage move. dialog (alert/confirm/prompt/beforeunload) 是
+浏览器系统级**阻塞** event — page.on('dialog') 触发后 page hang 直到 accept/dismiss.
+LLM 不能直接响应 (无 mark 不可标注), 必须 browser 自动 handle. V0.24 系列 3 commit:
+- **V0.24.0**: browser dialog handler + ctx attr deque + loop drain 注入 obs (本)
+- **V0.24.1**: 抽 _drain_pre_step_observations(ctx, trace) helper (兑现 V0.23.2 simplify TODO 第 3 处)
+- **V0.24.2**: SYSTEM_PROMPT 加键盘导航第 13 条 (PageDown/Escape/Tab)
+
+### 关键设计决策
+
+**dialog policy 三档 env WEB_AGENT_DIALOG_POLICY**:
+- `safe-defaults` (默认): alert/beforeunload accept; confirm/prompt dismiss
+  - alert OK-only accept==dismiss 语义等价, accept 直白
+  - beforeunload accept 让 LLM 顺利 nav (否则 page hang 永远卡)
+  - confirm dismiss failsafe NO 防 LLM 误点 "确定删除/购买/支付"
+  - prompt dismiss (LLM 没法 dialog 内输入)
+- `auto-accept`: 全 accept (任务优先, dev 用)
+- `auto-dismiss`: 全 dismiss (paranoid, 任务可能卡)
+
+**不引 elicit 路径 (推迟 V0.25+)**: dialog 必须毫秒级响应, elicit 是 client RPC 往返不可靠;
+跟 V0.18.0 safety_approval_cb 不同档 (safety 是 LLM action-level 同步阻塞, dialog 是
+browser event 异步触发).
+
+### Changed
+
+- `src/web_agent/browser.py`:
+  - 加 `_DIALOG_ACCEPT_TYPES = {alert, beforeunload}` / `_DIALOG_DISMISS_TYPES = {confirm, prompt}`
+    safe-defaults 决策表.
+  - 加 `_dialog_policy()` env 解析 + `_decide_dialog_action(dialog_type)` 三档 policy 路由.
+  - 加 `_handle_dialog(dialog, action)` async accept/dismiss + 异常 catch.
+  - 加 `_make_dialog_handler(ctx) -> Callable` 工厂闭包 (跟 V0.23.2 _make_download_handler 同
+    sync register + async fire 套路): 同步 append `f"dialog {type}: {message!r} (auto-{action}ed)"`
+    到 ctx._web_agent_recent_dialogs deque, asyncio.create_task 调 _handle_dialog.
+  - 加 `_attach_page_dialog(page, ctx)` 单 page 装 + 幂等 flag.
+  - 升级 `_ctx_page_handler_with_download` → `_ctx_page_handler_with_listeners`: 复合 handler
+    一次装 popup notice + download + dialog (新弹 popup page 自动获 3 类监听).
+  - `_attach_download_listeners(ctx)` initial pages walk 同时装 download + dialog (复用
+    单一 entrypoint 避免再加 _attach_dialog_listeners 让 connect 多 1 行).
+- `src/web_agent/loop.py`:
+  - 入口加 `ctx._web_agent_recent_dialogs = deque(maxlen=10)` (跟 download deque 同模式).
+  - 每 step 顶部 obs drain 改 for-loop 遍历 download + dialog 2 attr (注释标 V0.24.1
+    simplify TODO: 第 3 处出现命中"3 处抽 helper"阈值, V0.24.1 抽 helper).
+- `tests/test_browser.py` 加 14 V0.24.0 测:
+  - 13 参数化 `test_decide_dialog_action_policy` (3 policy × 4 dialog type 决策矩阵)
+  - `test_make_dialog_handler_appends_obs_and_dispatches_action` (sync append + async dispatch)
+  - `test_make_dialog_handler_creates_deque_if_missing` (兜底 deque init)
+- `tests/test_loop_drag_upload.py` 加 4 V0.24.0 真 chromium dialog smoke:
+  - alert (safe-defaults accept) — 验 obs append + page 不 hang
+  - confirm safe-defaults dismiss → JS false (failsafe NO)
+  - confirm auto-accept → JS true (env 一刀切)
+  - prompt safe-defaults dismiss → JS null
+
+### Compatibility
+
+- 老 callsite 不受影响 — listener 装在 connect 透明; LLM 看不到 dialog 直接元素 (它是
+  browser event 不在 SoM marks 里), 但下一步 trace.steps[-1].observation 有 obs 注入
+  让 LLM 知道触发了 dialog (有机会换策略).
+- 4 测试文件 FakeContext.on noop (V0.21.3 已加) + _mk_page (V0.23.2 已加 .on) 无需改.
+  ctx.on('page') 复合 handler 升级名字 _ctx_page_handler_with_listeners 但 sig 不变,
+  现有 popup test (检 _on_calls 数 == 2) 仍过.
+- mypy strict 0; ruff 0; pytest 388 + 14 (test_browser dialog) = **402 + 12 skip**;
+  真 chromium **15/15 全过** (popup 2 + iframe 2 + drag/upload 5 + download 2 + V0.24.0 dialog 4).
+
+### Why patch (V0.24.0) 不 minor
+
+- LLM tool surface (V0.23.0 schema) 零变化 — dialog 是 browser event 不是 LLM action.
+- 内部 browser+loop wire listener + obs 注入, 跟 V0.21.3 popup / V0.23.2 download 同模式.
+- 跨 minor 0.23.3 → 0.24.0 仅是约定打"功能主题切换"标 (V0.24 主题=auto-handle).
+- SemVer "向后兼容的 enhance → patch", 0.23.3 → 0.24.0 (跨 minor 主题打标).
+
 ## [0.23.3] - 2026-05-09
 
 ### Add (V0.23 drag/upload/download 系列收尾 — 测试加固, **4 commit 全闭环**)

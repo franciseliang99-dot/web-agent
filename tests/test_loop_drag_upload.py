@@ -293,6 +293,123 @@ async def test_download_collision_appends_n_suffix(tmp_path):
             await browser.close()
 
 
+# --- V0.24.0 dialog auto-handle 真 chromium ---
+
+
+_DIALOG_HTML_TEMPLATE = (
+    "<html><body>"
+    "<button id=trigger onclick=\"{js}\">click</button>"
+    "</body></html>"
+)
+
+
+def _dialog_url(js: str) -> str:
+    return "data:text/html," + urllib.parse.quote(_DIALOG_HTML_TEMPLATE.format(js=js))
+
+
+async def test_dialog_alert_real_chromium_auto_dismissed(tmp_path):
+    """V0.24.0: alert dialog 真触发 → handler accept (safe-defaults), page 不 hang."""
+    import asyncio
+    from playwright.async_api import async_playwright
+    from web_agent.browser import _attach_download_listeners
+
+    async with async_playwright() as p:
+        browser = await p.chromium.launch(headless=True)
+        try:
+            ctx = await browser.new_context()
+            _attach_download_listeners(ctx)
+            page = await ctx.new_page()
+            await asyncio.sleep(0.1)
+            await page.goto(_dialog_url("alert('hello-v0240')"))
+            await page.wait_for_load_state("domcontentloaded")
+            await page.click("#trigger")
+            await asyncio.sleep(0.3)  # 等 listener accept 调度完
+            recent = getattr(ctx, "_web_agent_recent_dialogs", None)
+            assert recent and any("alert" in line and "hello-v0240" in line for line in recent), (
+                f"alert 应被 listener 捕获 + obs append; got {recent}"
+            )
+            # page 不 hang: 后续 evaluate 应正常返
+            assert await page.evaluate("() => 1 + 1") == 2
+        finally:
+            await browser.close()
+
+
+async def test_dialog_confirm_safe_default_dismiss_returns_false(tmp_path, monkeypatch):
+    """V0.24.0: confirm dialog (safe-defaults) → dismiss → JS 收到 false (failsafe NO 防误删)."""
+    import asyncio
+    from playwright.async_api import async_playwright
+    from web_agent.browser import _attach_download_listeners
+    monkeypatch.delenv("WEB_AGENT_DIALOG_POLICY", raising=False)
+
+    async with async_playwright() as p:
+        browser = await p.chromium.launch(headless=True)
+        try:
+            ctx = await browser.new_context()
+            _attach_download_listeners(ctx)
+            page = await ctx.new_page()
+            await asyncio.sleep(0.1)
+            await page.goto(_dialog_url("window.__r = confirm('确定删除?')"))
+            await page.wait_for_load_state("domcontentloaded")
+            await page.click("#trigger")
+            await asyncio.sleep(0.3)
+            r = await page.evaluate("() => window.__r")
+            assert r is False, f"safe-defaults confirm 应 dismiss → JS false; got {r}"
+            recent = getattr(ctx, "_web_agent_recent_dialogs", None)
+            assert recent and any("confirm" in line and "auto-dismissed" in line for line in recent)
+        finally:
+            await browser.close()
+
+
+async def test_dialog_confirm_auto_accept_returns_true(tmp_path, monkeypatch):
+    """V0.24.0: WEB_AGENT_DIALOG_POLICY=auto-accept → confirm accept → JS 收到 true."""
+    import asyncio
+    from playwright.async_api import async_playwright
+    from web_agent.browser import _attach_download_listeners
+    monkeypatch.setenv("WEB_AGENT_DIALOG_POLICY", "auto-accept")
+
+    async with async_playwright() as p:
+        browser = await p.chromium.launch(headless=True)
+        try:
+            ctx = await browser.new_context()
+            _attach_download_listeners(ctx)
+            page = await ctx.new_page()
+            await asyncio.sleep(0.1)
+            await page.goto(_dialog_url("window.__r = confirm('proceed?')"))
+            await page.wait_for_load_state("domcontentloaded")
+            await page.click("#trigger")
+            await asyncio.sleep(0.3)
+            r = await page.evaluate("() => window.__r")
+            assert r is True, f"auto-accept confirm → JS true; got {r}"
+        finally:
+            await browser.close()
+
+
+async def test_dialog_prompt_safe_default_dismiss_returns_null(tmp_path, monkeypatch):
+    """V0.24.0: prompt dialog (safe-defaults) → dismiss → JS 收到 null (LLM 不会响应 prompt)."""
+    import asyncio
+    from playwright.async_api import async_playwright
+    from web_agent.browser import _attach_download_listeners
+    monkeypatch.delenv("WEB_AGENT_DIALOG_POLICY", raising=False)
+
+    async with async_playwright() as p:
+        browser = await p.chromium.launch(headless=True)
+        try:
+            ctx = await browser.new_context()
+            _attach_download_listeners(ctx)
+            page = await ctx.new_page()
+            await asyncio.sleep(0.1)
+            await page.goto(_dialog_url("window.__r = prompt('your name?')"))
+            await page.wait_for_load_state("domcontentloaded")
+            await page.click("#trigger")
+            await asyncio.sleep(0.3)
+            r = await page.evaluate("() => window.__r")
+            assert r is None, f"safe-defaults prompt 应 dismiss → JS null; got {r}"
+            recent = getattr(ctx, "_web_agent_recent_dialogs", None)
+            assert recent and any("prompt" in line for line in recent)
+        finally:
+            await browser.close()
+
+
 async def test_upload_button_dom_walk_real_chromium_finds_hidden_input(tmp_path):
     """V0.23.1: button mark + hidden file input → DOM walk 找到 input + 投递文件 (端到端).
 

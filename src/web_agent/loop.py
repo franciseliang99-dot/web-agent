@@ -368,6 +368,9 @@ async def run_react_loop(
     ctx._web_agent_download_dir = download_dir  # type: ignore[attr-defined]
     if not getattr(ctx, "_web_agent_recent_downloads", None):
         ctx._web_agent_recent_downloads = deque(maxlen=10)  # type: ignore[attr-defined]
+    # V0.24.0: dialog deque 同 download deque 同模式 (browser.py _make_dialog_handler 闭包读)
+    if not getattr(ctx, "_web_agent_recent_dialogs", None):
+        ctx._web_agent_recent_dialogs = deque(maxlen=10)  # type: ignore[attr-defined]
 
     trace = Trace(task_id=task_id, goal=goal)
     recent_actions: deque[str] = deque(maxlen=3)
@@ -418,16 +421,20 @@ async def run_react_loop(
                 active_idx = len(step_pages) - 1
             page = step_pages[active_idx]
 
-            # V0.23.2: 上一步 step 完成后, 任何 download 触发的 listener 已 append 到
-            # ctx._web_agent_recent_downloads deque. 把这些 obs 追加到上一步 trace.steps[-1]
-            # observation (类似 W5-A reflect hint mutate). pop_all 防下一步重复读.
-            recent_dl = getattr(ctx, "_web_agent_recent_downloads", None)
-            if recent_dl and trace.steps:
-                downloads_text = "\n".join(recent_dl)
-                trace.steps[-1].observation = (
-                    trace.steps[-1].observation + "\n" + downloads_text
-                ).strip()
-                recent_dl.clear()  # 防下一步重复 append (注入幂等)
+            # V0.23.2 + V0.24.0: 上一步 step 完成后, browser listener 已 append 元信息到
+            # ctx._web_agent_recent_downloads / _web_agent_recent_dialogs deques. 把它们
+            # 追加到上一步 trace.steps[-1].observation (类似 W5-A reflect hint mutate).
+            # pop_all 防下一步重复读 (注入幂等).
+            # Note V0.24.1 simplify TODO: 第 3 处 obs drain (download/dialog/...) 命中"3 处抽
+            # helper" 阈值, 待 V0.24.1 抽 _drain_pre_step_observations(ctx, trace) helper 统一.
+            for attr_name in ("_web_agent_recent_downloads", "_web_agent_recent_dialogs"):
+                deque_obj = getattr(ctx, attr_name, None)
+                if deque_obj and trace.steps:
+                    obs_text = "\n".join(deque_obj)
+                    trace.steps[-1].observation = (
+                        trace.steps[-1].observation + "\n" + obs_text
+                    ).strip()
+                    deque_obj.clear()
 
             captcha_abort = await _handle_captcha(
                 page, step_i, trace, conn, task_id,

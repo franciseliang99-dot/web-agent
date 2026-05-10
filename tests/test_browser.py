@@ -111,6 +111,79 @@ async def test_connect_popup_listener_idempotent_across_multiple_connects():
     assert len(fake_ctx._on_calls) == 2, "幂等 flag 应防多次叠装"
 
 
+# --- V0.24.0 dialog auto-handle ---
+
+
+@pytest.mark.parametrize("policy,dialog_type,expected", [
+    # safe-defaults (default): alert/beforeunload accept, confirm/prompt dismiss
+    ("", "alert", "accept"),
+    ("safe-defaults", "alert", "accept"),
+    ("safe-defaults", "beforeunload", "accept"),
+    ("safe-defaults", "confirm", "dismiss"),
+    ("safe-defaults", "prompt", "dismiss"),
+    # auto-accept: 全 accept
+    ("auto-accept", "alert", "accept"),
+    ("auto-accept", "confirm", "accept"),
+    ("auto-accept", "prompt", "accept"),
+    ("auto-accept", "beforeunload", "accept"),
+    # auto-dismiss: 全 dismiss
+    ("auto-dismiss", "alert", "dismiss"),
+    ("auto-dismiss", "beforeunload", "dismiss"),
+    ("auto-dismiss", "confirm", "dismiss"),
+    ("auto-dismiss", "prompt", "dismiss"),
+])
+def test_decide_dialog_action_policy(monkeypatch, policy, dialog_type, expected):
+    """V0.24.0: env WEB_AGENT_DIALOG_POLICY 三档 × 4 dialog type 决策矩阵."""
+    from web_agent.browser import _decide_dialog_action
+    if policy:
+        monkeypatch.setenv("WEB_AGENT_DIALOG_POLICY", policy)
+    else:
+        monkeypatch.delenv("WEB_AGENT_DIALOG_POLICY", raising=False)
+    assert _decide_dialog_action(dialog_type) == expected
+
+
+async def test_make_dialog_handler_appends_obs_and_dispatches_action(monkeypatch):
+    """V0.24.0: handler 同步 append 元信息到 deque + asyncio.create_task accept/dismiss."""
+    import asyncio
+    from collections import deque
+    from unittest.mock import AsyncMock, MagicMock
+    from web_agent.browser import _make_dialog_handler
+    monkeypatch.delenv("WEB_AGENT_DIALOG_POLICY", raising=False)  # safe-defaults
+    ctx = SimpleNamespace(_web_agent_recent_dialogs=deque(maxlen=10))
+    handler = _make_dialog_handler(ctx)  # type: ignore[arg-type]
+    fake_dialog = MagicMock()
+    fake_dialog.type = "confirm"
+    fake_dialog.message = "Are you sure?"
+    fake_dialog.accept = AsyncMock()
+    fake_dialog.dismiss = AsyncMock()
+    handler(fake_dialog)
+    # 同步 append 已落
+    assert len(ctx._web_agent_recent_dialogs) == 1
+    obs = ctx._web_agent_recent_dialogs[0]
+    assert "confirm" in obs and "Are you sure?" in obs and "auto-dismissed" in obs
+    # async create_task 已调度 dismiss; 等一拍让 task 跑
+    await asyncio.sleep(0.05)
+    fake_dialog.dismiss.assert_awaited_once()
+    fake_dialog.accept.assert_not_called()
+
+
+async def test_make_dialog_handler_creates_deque_if_missing(monkeypatch):
+    """V0.24.0: ctx._web_agent_recent_dialogs 缺失 → handler 自动建 deque (loop 入口未走时兜底)."""
+    from collections import deque
+    from unittest.mock import AsyncMock, MagicMock
+    from web_agent.browser import _make_dialog_handler
+    monkeypatch.delenv("WEB_AGENT_DIALOG_POLICY", raising=False)
+    ctx = SimpleNamespace()  # 无 _web_agent_recent_dialogs attr
+    handler = _make_dialog_handler(ctx)  # type: ignore[arg-type]
+    fake_dialog = MagicMock()
+    fake_dialog.type = "alert"
+    fake_dialog.message = "x"
+    fake_dialog.accept = AsyncMock()
+    handler(fake_dialog)
+    assert isinstance(ctx._web_agent_recent_dialogs, deque)
+    assert ctx._web_agent_recent_dialogs.maxlen == 10
+
+
 async def test_popup_notice_handler_sleeps_in_range_and_does_not_steal_focus(monkeypatch):
     """V0.21.3: handler 调 random.uniform(0.3, 0.8) + asyncio.sleep, 不调 bring_to_front."""
     from web_agent.browser import _popup_notice_handler

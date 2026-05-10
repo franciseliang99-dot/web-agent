@@ -10,7 +10,7 @@ from collections import deque
 from collections.abc import Callable
 from pathlib import Path
 
-from playwright.async_api import Browser, BrowserContext, Download, Page, Playwright
+from playwright.async_api import Browser, BrowserContext, Dialog, Download, Page, Playwright
 
 logger = logging.getLogger(__name__)
 
@@ -118,17 +118,91 @@ def _attach_page_download(page: Page, ctx: BrowserContext) -> None:
     page._web_agent_download_listener = True  # type: ignore[attr-defined]
 
 
-async def _ctx_page_handler_with_download(page: Page, ctx: BrowserContext) -> None:
-    """V0.23.2: ctx.on('page') 复合 handler — 既跑 popup 拟人延迟也给新 page 装 download listener."""
+# ---------- V0.24.0: dialog auto-handle ----------
+
+# Playwright dialog.type ∈ {alert, beforeunload, confirm, prompt}
+_DIALOG_ACCEPT_TYPES = {"alert", "beforeunload"}  # safe-defaults: accept (alert OK-only, beforeunload 让 LLM nav)
+_DIALOG_DISMISS_TYPES = {"confirm", "prompt"}  # safe-defaults: dismiss (failsafe NO + LLM 没法 prompt 输入)
+
+
+def _dialog_policy() -> str:
+    """V0.24.0: env WEB_AGENT_DIALOG_POLICY 解析. safe-defaults (默认) / auto-accept / auto-dismiss."""
+    return os.environ.get("WEB_AGENT_DIALOG_POLICY", "safe-defaults").strip().lower()
+
+
+def _decide_dialog_action(dialog_type: str) -> str:
+    """V0.24.0: 按 env policy 决定 dialog accept/dismiss.
+
+    safe-defaults: alert/beforeunload accept; confirm/prompt dismiss.
+    auto-accept: 全 accept (任务优先, 风险买/删 — dev 用).
+    auto-dismiss: 全 dismiss (paranoid, 任务可能卡).
+    """
+    policy = _dialog_policy()
+    if policy == "auto-accept":
+        return "accept"
+    if policy == "auto-dismiss":
+        return "dismiss"
+    # safe-defaults (default)
+    if dialog_type in _DIALOG_ACCEPT_TYPES:
+        return "accept"
+    return "dismiss"
+
+
+async def _handle_dialog(dialog: Dialog, action: str) -> None:
+    """V0.24.0: async accept/dismiss + 异常 catch (dialog 已被处理 / page closed → 不阻塞 listener)."""
+    try:
+        if action == "accept":
+            await dialog.accept()
+        else:
+            await dialog.dismiss()
+    except Exception as e:
+        logger.warning("dialog %s 失败 (%r)", action, e)
+
+
+def _make_dialog_handler(ctx: BrowserContext) -> Callable[[Dialog], None]:
+    """V0.24.0: 工厂返 page.on('dialog') sync handler, 闭包持 ctx 拿 _web_agent_recent_dialogs deque.
+
+    handler 必须**同步调度** dialog.accept/dismiss (Playwright 触发后 page hang 直到响应);
+    sync 内 asyncio.create_task fire-and-forget. 同步 append 元信息到 deque (loop 顶部读).
+
+    跟 V0.23.2 _make_download_handler 同套路 (sync register + async fire), 不需新装载机制.
+    """
+    def handler(dialog: Dialog) -> None:
+        action = _decide_dialog_action(dialog.type)
+        recent = getattr(ctx, "_web_agent_recent_dialogs", None)
+        if recent is None:
+            recent = deque(maxlen=10)
+            ctx._web_agent_recent_dialogs = recent  # type: ignore[attr-defined]
+        message = (dialog.message or "")[:120]
+        recent.append(f"dialog {dialog.type}: {message!r} (auto-{action}ed)")
+        asyncio.create_task(_handle_dialog(dialog, action))
+    return handler
+
+
+def _attach_page_dialog(page: Page, ctx: BrowserContext) -> None:
+    """V0.24.0: 给单个 page 装 page.on('dialog') handler, 幂等 flag 防同 page 叠装."""
+    if getattr(page, "_web_agent_dialog_listener", False):
+        return
+    page.on("dialog", _make_dialog_handler(ctx))
+    page._web_agent_dialog_listener = True  # type: ignore[attr-defined]
+
+
+async def _ctx_page_handler_with_listeners(page: Page, ctx: BrowserContext) -> None:
+    """V0.23.2 + V0.24.0: ctx.on('page') 复合 handler — 跑 popup 拟人延迟 + 装 download listener
+    + 装 dialog listener (V0.24.0 加).
+
+    新弹 popup page 自动获得 download/dialog 监听 (跟初始 ctx.pages 同模式).
+    """
     _attach_page_download(page, ctx)
+    _attach_page_dialog(page, ctx)
     await _popup_notice_handler(page)
 
 
 def _attach_download_listeners(ctx: BrowserContext) -> None:
-    """V0.23.2: 给 ctx 装 download listener, 跟 popup 同模式幂等 + 跨 entry 一次性.
+    """V0.23.2 + V0.24.0: 给 ctx 装 download + dialog listener, 跟 popup 同模式幂等 + 跨 entry 一次性.
 
-    Playwright `download` 事件只在 page 级别 (ctx 无), 必须每个 page 装. ctx.on('page')
-    新弹 popup 时也再装一次 (V0.21.3 popup handler 升级为复合 handler 同时装 download).
+    Playwright `download` / `dialog` 事件只在 page 级别 (ctx 无), 必须每个 page 装. ctx.on('page')
+    新弹 popup 时也再装一次 (V0.21.3 popup handler 升级为复合 handler 同时装 download + dialog).
     initial pages (ctx.pages 已有) 也 walk 装一次.
 
     download_dir 由 loop 入口写 ctx._web_agent_download_dir attr (task-scoped); listener
@@ -137,13 +211,14 @@ def _attach_download_listeners(ctx: BrowserContext) -> None:
     """
     if getattr(ctx, "_web_agent_download_listener", False):
         return
-    # initial pages 立即装
+    # initial pages 立即装 download + dialog
     for p in ctx.pages:
         _attach_page_download(p, ctx)
-    # 新弹 page (popup) 装载: ctx.on('page') 升级到复合 handler
-    # 注意: V0.21.3 popup listener 已用 _popup_notice_handler 直接注 ctx.on('page'),
-    # 这里覆盖掉旧 popup-only handler 用复合 handler (同时装 download + 跑 popup 拟人).
-    ctx.on("page", lambda p: asyncio.create_task(_ctx_page_handler_with_download(p, ctx)))
+        _attach_page_dialog(p, ctx)
+    # 新弹 page (popup) 装载: ctx.on('page') 升级到复合 handler 同时装 popup notice +
+    # download + dialog. 沿用 V0.23.2 命名 _attach_download_listeners 保单一 entrypoint
+    # (避免再加 _attach_dialog_listeners 让 connect 多 1 行 — 复合 handler 已涵盖).
+    ctx.on("page", lambda p: asyncio.create_task(_ctx_page_handler_with_listeners(p, ctx)))
     ctx._web_agent_download_listener = True  # type: ignore[attr-defined]
 
 
