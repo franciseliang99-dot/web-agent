@@ -2,6 +2,83 @@
 
 All notable changes to web-agent. 版本号遵循 SemVer 简化形式（V<major>.<minor>.<patch>）。
 
+## [0.28.0] - 2026-05-10
+
+### Add (V0.28 W6 reflective 系列 commit 1/4 — reflect.py 纯函数开篇)
+
+V0.27 vault 系列收尾后, 用户选 V0.28 主线 = **F W6 reflective 长 task**. Plan subagent
+推 4 commit 拆解 (W6-C 长 task chain 推 V0.29+ 独立 milestone).
+
+V0.28 主题切换 (V0.27 vault 基础设施 → V0.28 W6 能力增强), minor bump (subagent C 决 / 用户 3
+锁"完全无人值守"硬 gap, V0.25 retry + W5-A reflect 已铺底但跨 task 反思链未通 — 这是替代真人
+的质变).
+
+### V0.28 W6 系列 commit 拆解 (Plan subagent 设计)
+
+| ver | 状态 | scope |
+|-----|------|-------|
+| **V0.28.0** | ✅ 本提交 | reflect.py 纯函数 + 单测 (不接 loop / 不调 LLM) |
+| V0.28.1 | 待 | loop.py max_steps/LOOP_DETECTED 触发 reflect_on_failure + 写 reflections 表 |
+| V0.28.2 | 待 | cli.py 启动按 domain inject reflections 进 memories_str (跟 W5-D.2 同通道) |
+| V0.28.3 | 待 | eval/runner --reflect flag + reflective_uplift = pass2_rate - pass1_rate metric |
+
+### subagent A-F 6 决策点全采纳
+
+A. **触发时机**: max_steps + LOOP_DETECTED 子集 (排除 WALLCLOCK/SAFETY/CAPTCHA/LLM_FAILED 外因
+   — reflect 给不出可操作 hint, 烧 token 无价值)
+B. **prompt 设计**: 全文本 trace + V0.28.1 wire 时加末张 screenshot. 不删 step (信号高密度);
+   不喂全 vision (烧 50× token 不值)
+C. **输出格式**: structured `{root_cause, hint}` 2 字段 (suggested_action over-eng — hint 自然含动作)
+D. **memory inject 时机** (V0.28.2 W6-B): 启动按 domain (复用 W5-D.2), 不走 embedding (项目无
+   vector store 原则, 跟工程复杂度低 1 个数量级)
+E. **eval 验法** (V0.28.3): --reflect flag 同 task 跑 2 次, 算 reflective_uplift, 不加新 axis
+   (axis 是 task 维度, reflective 是 run 维度)
+F. **W5-A vs W6-A 边界**: W5-A `_maybe_inject_reflect_hint` (intra-step deterministic 0 LLM call,
+   obs append "[reflect]" 通道); W6-A `reflect_on_failure` (inter-task LLM-driven 1 LLM call,
+   structured Reflection 输出). 命名词根分明, 不冲突.
+
+### 主 agent 偏离 subagent 1 处 (更克制)
+
+subagent 推 V0.28.0 "纯 module + 单测, **直接调 client._client (anthropic/openai SDK)**".
+主 agent 判: 绕 LLMClient Protocol 是反模式 (V0.21.2 Protocol 设计原则). 改 V0.28.0 **只做
+prompt build + parse 纯函数 + should_reflect 触发判断, 完全不调 LLMClient** (V0.28.1 wire loop
+时再决接口选择 — 复用 `plan()` vs 加 `reflect()` Protocol 方法). 测试也只测纯函数, 不需
+mock LLMClient. 跟 V0.27.1 vault framework "纯接口 + 后续接入" 节奏一致.
+
+### Changed
+
+- `src/web_agent/reflect.py` **新建** ~80 行:
+  - `Reflection` dataclass (frozen+slots, root_cause + hint 跟 Action/Mark/Usage 一致, V0.28.2
+    inject memory 时 hashable safe + 防 caller mutate)
+  - `TRIGGERING_FAILURE_MARKERS` frozenset 含 max_steps + LOOP_DETECTED 2 marker
+  - `should_reflect(final_result) -> bool` 判触发 (subagent A 决)
+  - `build_reflect_prompt(goal, trace_steps, final_result) -> str` 文本 prompt 构造
+    (subagent B 决, V0.28.1 wire 时加 screenshot)
+  - `parse_reflection(response_text) -> Reflection` JSON parse + ```json``` markdown fence
+    tolerate + fallback "(reflect_parse_failed)" 防阻塞 V0.28.1 wire 路径
+- `tests/test_reflect.py` **新建** 15 测:
+  - `test_should_reflect_trigger_matrix` parametrize 7 (max_steps/LOOP_DETECTED 触发 +
+    WALLCLOCK/SAFETY/CAPTCHA/LLM_FAILED/成功 不触发)
+  - `test_triggering_markers_constant` 防意外扩展
+  - `test_build_reflect_prompt_contains_goal_trace_result` 含关键字段
+  - `test_build_reflect_prompt_empty_trace_does_not_raise` 边界
+  - `test_parse_reflection_valid_json` 正常 path
+  - `test_parse_reflection_markdown_fence_tolerated` Anthropic Sonnet 习惯
+  - `test_parse_reflection_invalid_json_fallback` + `_missing_required_fields_fallback` 防御
+  - `test_reflection_dataclass_is_frozen` immutable 验
+
+### Compatibility
+
+- 0 改老 caller (新 module + 单测, 不接 loop / cli / memory / SYSTEM_PROMPT).
+- mypy strict 0 (42 src, +1 reflect.py); ruff 0; pytest **564 + 17 skip** (V0.27.5 549+17 → +15).
+- 真 chromium 15/15 全过 (无新).
+
+### Why minor (V0.28.0) 不 patch
+
+- V0.28 主题切换 (vault 基础设施 → W6 reflective 能力增强), 是 SemVer minor "向后兼容功能新增"
+  级别 — 跟 V0.21.0 / V0.22.0 / V0.25.0 / V0.26.0 / V0.27.0 主题开篇 minor 风格一致.
+- V0.28.1-3 patch 累加 W6-A 真 wire / W6-B inject / W6 验证.
+
 ## [0.27.5] - 2026-05-10
 
 ### Add (V0.27 vault 系列 commit 5/5 — capability_hint 真接入 + 修 V0.27.4 elicit retry 隐藏 P1)
