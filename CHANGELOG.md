@@ -2,6 +2,59 @@
 
 All notable changes to web-agent. 版本号遵循 SemVer 简化形式（V<major>.<minor>.<patch>）。
 
+## [0.23.0] - 2026-05-09
+
+### Add (V0.23 drag/upload/download 系列开篇 — Action union 加 DragAction/UploadAction)
+
+V0.22 iframe 5 commit 系列闭环后转 V0.23 drag/upload/download (V0.21 plan subagent 第 #3
+high-leverage move). 4 commit:
+- **V0.23.0**: types/schema 加 DragAction/UploadAction (本 commit, 零行为 dispatch placeholder ERROR)
+- **V0.23.1**: actuator 加 human_like_drag (单段贝塞尔 from→to + mouse.down/up) +
+  upload_file (set_input_files 直接 / button DOM walk 找隐藏 input)
+- **V0.23.2**: loop dispatch + safety upload sensitive path 黑名单 + download listener 装
+  browser.connect (跟 V0.21.3 popup 同模式, 落 data/downloads/<task_id>/)
+- **V0.23.3**: 真 chromium drag/upload/download smoke
+
+V0.23.0 跟 V0.21.0/V0.22.0 同节奏 — schema 锁死后 V0.23.1+ 失败定位精准.
+
+### Changed
+
+- `src/web_agent/types.py` Action union 9 → 11 dataclass:
+  - `DragAction(thought, from_mark_id, to_mark_id)` — 拖动 from 到 to mark; 跨 frame 不允许
+    (V0.23.2 dispatch 校验 from.frame_path == to.frame_path)
+  - `UploadAction(thought, mark_id, paths: tuple[str, ...])` — 上传文件; paths 用 tuple
+    (frozen+slots dataclass requires hashable; LLM 给 list 由 factory 转 tuple)
+- `types.py` `action_from_tool_call` match 加 2 arm; upload paths 元素 `str(p)` cast 容错
+  (LLM 偶尔输 int / Path).
+- `src/web_agent/llm/_schema.py` TOOL_SCHEMAS 9 → 11 加 drag (from/to integer required) +
+  upload (mark_id + paths array of string + 显式标"敏感路径会被 safety 拒绝").
+- `_schema.py` SYSTEM_PROMPT 加第 11 条 (drag 用例 Trello/Dropbox + 跨 frame 限制) +
+  第 12 条 (upload 必须绝对路径 + 自动找隐藏 input + 敏感路径 abort 警告).
+- `src/web_agent/loop.py` dispatch match 加 2 placeholder case (DragAction/UploadAction) →
+  ERROR obs "V0.23.0 not wired yet (V0.23.2 完成派发)" — mypy strict match exhaustive 要求
+  每个 union arm 都要有 case, 此处先占位等 V0.23.2 接 actuator + safety.
+- `tests/test_types.py` 加 6 V0.23.0 test (drag factory / drag idx coerce / upload paths
+  list→tuple / upload empty paths / upload paths str coerce / DragAction frozen).
+- `tests/test_llm_schema.py` EXPECTED 9→11 + len 9→11 + drag schema shape + upload schema
+  shape (paths array of string).
+- `tests/test_llm_openai.py` `len(client._tools) == 9 → 11` 同 V0.21.0/V0.22.0 同款 hardcoded.
+
+### Compatibility
+
+- **零行为变化**: dispatch placeholder ERROR obs — LLM 即便选了 drag/upload, loop 返
+  ERROR obs 不崩 (跟 mark_id 越界同模式), 下一步 LLM 自我纠正.
+- 但 LLM 看到 SYSTEM_PROMPT 第 11/12 条 + tools 多 2 个会**主动尝试**用 — V0.23.0 单 commit
+  落档**先不发 release**, 等 V0.23.1 actuator + V0.23.2 dispatch 一起跑通再 ship.
+- mypy strict 0; ruff 0; pytest 357 + 5 skip (V0.22.4 349 + 8 新).
+- 真 chromium 4 个 slow smoke 全过 (popup 2 + iframe perceive 1 + iframe click 1).
+
+### Why minor (V0.23.0) 不 patch
+
+- Action union 字段扩展是**类型 surface area 改变** (跟 V0.21.0/V0.22.0 同档).
+- TOOL_SCHEMAS 增 2 条改变 LLM 看到的 tool surface, 影响 prompt 行为.
+- SemVer "新增向后兼容功能 → minor", 0.22.4 → 0.23.0 (V0.22 iframe 收尾 → V0.23 drag/upload
+  开篇 minor 自然分界).
+
 ## [0.22.4] - 2026-05-09
 
 ### Add (V0.22 iframe 系列收尾 — cross-origin iframe host hint, **5 commit 全闭环**)

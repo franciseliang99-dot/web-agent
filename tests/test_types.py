@@ -12,12 +12,14 @@ from web_agent.types import (
     ClickAction,
     CloseTabAction,
     DoneAction,
+    DragAction,
     ExtractAction,
     KeyboardShortcutAction,
     PasteAction,
     ScrollAction,
     SwitchTabAction,
     TypeAction,
+    UploadAction,
     action_from_tool_call,
 )
 
@@ -125,3 +127,65 @@ def test_actions_are_frozen():
     a = action_from_tool_call("switch_tab", {"thought": "x", "idx": 0})
     with pytest.raises(AttributeError):
         a.idx = 99  # type: ignore[misc]
+
+
+# ---------- V0.23.0: drag / upload factory ----------
+
+
+def test_drag_factory():
+    """V0.23.0: drag 工厂 from/to mark_id."""
+    a = action_from_tool_call("drag", {
+        "thought": "拖卡到 done 列",
+        "from_mark_id": 5,
+        "to_mark_id": 12,
+    })
+    assert isinstance(a, DragAction)
+    assert a.from_mark_id == 5
+    assert a.to_mark_id == 12
+    assert a.type == "drag"
+
+
+def test_drag_factory_idx_coerce_int():
+    """V0.23.0: from/to 容错 LLM 偶尔输 string."""
+    a = action_from_tool_call("drag", {
+        "thought": "x", "from_mark_id": "3", "to_mark_id": "7",
+    })
+    assert isinstance(a, DragAction)
+    assert a.from_mark_id == 3
+    assert a.to_mark_id == 7
+
+
+def test_upload_factory_paths_list_to_tuple():
+    """V0.23.0: upload paths LLM 给 list → factory 转 tuple (frozen dataclass requires hashable)."""
+    a = action_from_tool_call("upload", {
+        "thought": "传 PDF",
+        "mark_id": 8,
+        "paths": ["/tmp/foo.pdf", "/tmp/bar.pdf"],
+    })
+    assert isinstance(a, UploadAction)
+    assert a.mark_id == 8
+    assert a.paths == ("/tmp/foo.pdf", "/tmp/bar.pdf")
+    assert isinstance(a.paths, tuple), "paths 必须是 tuple (frozen+slots dataclass hashable)"
+
+
+def test_upload_factory_empty_paths_handled():
+    """V0.23.0: paths 缺失 / 空 list → 空 tuple (不 raise; 由 actuator/loop ERROR obs 兜底)."""
+    a = action_from_tool_call("upload", {"thought": "x", "mark_id": 1, "paths": []})
+    assert isinstance(a, UploadAction)
+    assert a.paths == ()
+
+
+def test_upload_factory_paths_string_coerce():
+    """V0.23.0: paths 元素 LLM 给 int/Path 等 → str() cast."""
+    a = action_from_tool_call("upload", {
+        "thought": "x", "mark_id": 1, "paths": ["/tmp/a.txt", 123],
+    })
+    assert isinstance(a, UploadAction)
+    assert a.paths == ("/tmp/a.txt", "123")
+
+
+def test_drag_action_frozen():
+    """V0.23.0: DragAction frozen+slots — 拒 mutate."""
+    a = DragAction(thought="x", from_mark_id=1, to_mark_id=2)
+    with pytest.raises(AttributeError):
+        a.from_mark_id = 99  # type: ignore[misc]

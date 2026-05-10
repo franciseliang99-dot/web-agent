@@ -18,6 +18,9 @@ V0.19.0: Action union 扩 KeyboardShortcutAction (key) + PasteAction (text) 共 
 V0.21.0: Action union 扩 SwitchTabAction (idx) + CloseTabAction (idx) 共 9 dataclass.
   零行为变化 — 仅 types/schema 加，loop 派发在 V0.21.1 接入。idx 是 perceive-step 时的
   ctx.pages snapshot 索引（V0.21.1 loop 顶部 snapshot 防 popup 偏移）。
+V0.23.0: Action union 扩 DragAction (from/to mark_id) + UploadAction (mark_id + paths) 共 11 dataclass.
+  零行为变化 — V0.23.1 actuator + V0.23.2 loop dispatch 接入. paths 用 tuple (frozen
+  dataclass requires hashable; LLM 给 list 由 factory 转 tuple).
 """
 
 from __future__ import annotations
@@ -157,6 +160,39 @@ class CloseTabAction:
     type: Literal["close_tab"] = "close_tab"
 
 
+@dataclass(frozen=True, slots=True)
+class DragAction:
+    """V0.23.0: 从 from_mark_id 拖到 to_mark_id (Trello 拖卡, Dropbox 上传 zone, 表单 builder 等).
+
+    actuator V0.23.1 走单段贝塞尔 from→to + mouse.down→bezier moves→mouse.up. iframe 路径
+    走 frame.locator(...).drag_to(other_locator) (跟 V0.22.2 click iframe 同 trade-off 失贝塞尔).
+    跨 frame drag 不允许 (loop V0.23.2 dispatch 校验 from.frame_path == to.frame_path).
+    """
+
+    thought: str
+    from_mark_id: int
+    to_mark_id: int
+    type: Literal["drag"] = "drag"
+
+
+@dataclass(frozen=True, slots=True)
+class UploadAction:
+    """V0.23.0: 把本地文件 paths 上传到 mark_id (input[type=file] 或关联 button).
+
+    paths 是绝对路径 tuple (frozen dataclass requires hashable; LLM 给 list 由 factory 转).
+    actuator V0.23.1 自适应:
+    - mark.tag=='input' and input_type=='file' → 直接 set_input_files
+    - 否则 (mark 是 button) → DOM walk 找关联 input[type=file] (label[for] / aria-controls /
+      同祖先 querySelector)
+    safety V0.23.2 拦敏感路径黑名单 (~/.ssh/, ~/.aws/, .env, *.pem, id_rsa* etc).
+    """
+
+    thought: str
+    mark_id: int
+    paths: tuple[str, ...]
+    type: Literal["upload"] = "upload"
+
+
 Action = (
     ClickAction
     | TypeAction
@@ -167,14 +203,17 @@ Action = (
     | PasteAction
     | SwitchTabAction
     | CloseTabAction
+    | DragAction
+    | UploadAction
 )
 
 
 def action_from_tool_call(name: str, raw: dict[str, Any]) -> Action:
     """V0.17.0: LLM provider parse 用. `raw` 是 tool_use input dict (含 thought+args).
 
-    `thought` 必须在调用前已 pop 出, 或 raw 含 thought 由本函数 pop. 9 type 之一不匹配抛 RuntimeError.
+    `thought` 必须在调用前已 pop 出, 或 raw 含 thought 由本函数 pop. 11 type 之一不匹配抛 RuntimeError.
     V0.21.0: 加 switch_tab / close_tab 2 arm.
+    V0.23.0: 加 drag / upload 2 arm. upload paths LLM 给 list → tuple cast (frozen hashable).
     """
     thought = raw.pop("thought", "") if "thought" in raw else ""
     match name:
@@ -196,6 +235,19 @@ def action_from_tool_call(name: str, raw: dict[str, Any]) -> Action:
             return SwitchTabAction(thought=thought, idx=int(raw["idx"]))
         case "close_tab":
             return CloseTabAction(thought=thought, idx=int(raw["idx"]))
+        case "drag":
+            return DragAction(
+                thought=thought,
+                from_mark_id=int(raw["from_mark_id"]),
+                to_mark_id=int(raw["to_mark_id"]),
+            )
+        case "upload":
+            paths_raw = raw.get("paths") or []
+            return UploadAction(
+                thought=thought,
+                mark_id=int(raw["mark_id"]),
+                paths=tuple(str(p) for p in paths_raw),
+            )
         case _:
             raise RuntimeError(f"action_from_tool_call: unknown tool name {name!r}")
 

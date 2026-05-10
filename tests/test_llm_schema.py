@@ -17,10 +17,12 @@ EXPECTED_TOOL_NAMES = {
     "paste",
     "switch_tab",
     "close_tab",
+    "drag",
+    "upload",
 }
 
 
-def test_neutral_schemas_have_9_tools_with_thought():
+def test_neutral_schemas_have_11_tools_with_thought():
     assert {s["name"] for s in TOOL_SCHEMAS} == EXPECTED_TOOL_NAMES
     for s in TOOL_SCHEMAS:
         assert "thought" in s["properties"], f"{s['name']} 缺 thought 字段"
@@ -29,7 +31,7 @@ def test_neutral_schemas_have_9_tools_with_thought():
 
 def test_to_anthropic_tools_shape():
     tools = to_anthropic_tools()
-    assert len(tools) == 9
+    assert len(tools) == 11
     for t in tools:
         assert set(t.keys()) == {"name", "description", "input_schema"}
         assert t["input_schema"]["type"] == "object"
@@ -45,7 +47,7 @@ def test_to_openai_tools_strict_mode_invariants():
     3. parameters.required 必须包含所有 properties（即便业务上是 optional）
     """
     tools = to_openai_tools(strict=True)
-    assert len(tools) == 9
+    assert len(tools) == 11
     for t in tools:
         assert t["type"] == "function"
         f = t["function"]
@@ -82,6 +84,26 @@ def test_switch_tab_close_tab_schema_shape():
         assert s["properties"]["idx"]["type"] == "integer", f"{tool_name}.idx 必须 integer"
         assert "idx" in s["required"], f"{tool_name} idx 必须 required"
         assert "thought" in s["required"]
+
+
+def test_drag_schema_shape():
+    """V0.23.0: drag 中性 schema (from_mark_id/to_mark_id integer required)."""
+    by_name = {s["name"]: s for s in TOOL_SCHEMAS}
+    s = by_name["drag"]
+    for field in ("from_mark_id", "to_mark_id"):
+        assert s["properties"][field]["type"] == "integer", f"drag.{field} 必须 integer"
+        assert field in s["required"]
+
+
+def test_upload_schema_shape():
+    """V0.23.0: upload schema paths 是 array of string + required."""
+    by_name = {s["name"]: s for s in TOOL_SCHEMAS}
+    s = by_name["upload"]
+    assert s["properties"]["mark_id"]["type"] == "integer"
+    assert s["properties"]["paths"]["type"] == "array"
+    assert s["properties"]["paths"]["items"]["type"] == "string"
+    for field in ("thought", "mark_id", "paths"):
+        assert field in s["required"], f"upload {field} 必须 required"
 
 
 # ---------- V0.21.2 build_user_text tabs header 渲染 ----------

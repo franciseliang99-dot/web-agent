@@ -37,6 +37,7 @@ from web_agent.types import (
     ClickAction,
     CloseTabAction,
     DoneAction,
+    DragAction,
     ExtractAction,
     KeyboardShortcutAction,
     Mark,
@@ -44,6 +45,7 @@ from web_agent.types import (
     ScrollAction,
     SwitchTabAction,
     TypeAction,
+    UploadAction,
 )
 
 # V0.18.0 elicitation callback: 业务层接收 (rule, reason) → True 放行 / False 拦.
@@ -566,6 +568,12 @@ async def run_react_loop(
                         await step_pages[tab_idx].bring_to_front()
                         last_clicked_mark = None  # 切 tab 旧 mark 失效, 防 type safety 误判
                         obs = f"switched to tab [{tab_idx}] {step_pages[tab_idx].url[:80]}"
+                case DragAction(from_mark_id=_fid, to_mark_id=_tid):
+                    # V0.23.0 placeholder: actuator 在 V0.23.1 接入, dispatch 在 V0.23.2 wire.
+                    # mypy strict match exhaustive 要求每个 union arm 都要有 case, 此处先 ERROR obs.
+                    obs = "ERROR: drag V0.23.0 not wired yet (V0.23.2 完成派发)"
+                case UploadAction(mark_id=_uid):
+                    obs = "ERROR: upload V0.23.0 not wired yet (V0.23.2 完成派发)"
                 case CloseTabAction(idx=tab_idx):
                     # V0.21.1: 2 道 guard — len==1 拒 + idx==active_idx 拒 (强迫先 switch 再 close).
                     if tab_idx < 0 or tab_idx >= len(step_pages):
