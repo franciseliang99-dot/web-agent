@@ -24,8 +24,10 @@ from web_agent.memory import (
     DEFAULT_DB as _MEM_DB,
     extract_domain,
     format_memories_for_trace,
+    format_reflections_for_trace,
     is_success,
     recall_by_domain,
+    recall_reflections_by_domain,
     record_task,
 )
 from web_agent.planner_hierarchy import (
@@ -78,17 +80,33 @@ async def run_task(
         logger.info("LLM provider=%s model=%s", client.name, client.model)
 
         # W5-D.2 长期记忆 inject: 跑 ReAct 前召回该 domain 历史, 渲染成字符串注入 trace
+        mem_db = Path(os.environ.get("WEB_AGENT_MEMORY_DB", str(_MEM_DB)))
+        domain = extract_domain(start_url)
         memories_str: str | None = None
         if os.environ.get("WEB_AGENT_MEMORY_DISABLE", "").lower() not in ("true", "1", "yes"):
             try:
-                mem_db = Path(os.environ.get("WEB_AGENT_MEMORY_DB", str(_MEM_DB)))
-                domain = extract_domain(start_url)
                 entries = recall_by_domain(mem_db, domain, limit=5)
                 memories_str = format_memories_for_trace(entries) or None
                 if memories_str:
                     logger.info("recalled %d memories for domain=%r", len(entries), domain)
             except Exception as e:
                 logger.warning("memory recall failed (non-fatal): %r", e)
+
+        # V0.28.2 W6-B: cli 启动按 domain 拉 reflections 注入 (复用 W5-D.2 memories= 通道,
+        # subagent A 决 — W5-C subgoal hint 已开 merge_into_memories 一段拼接先例).
+        # 顺序 memories (历史结果) → reflections (失败教训) → subgoal hint (规划提示):
+        # 由具体到抽象自然过渡; reflections 经验提炼不重复 memories 的"任务结果"信息.
+        if os.environ.get("WEB_AGENT_REFLECTIONS_DISABLE", "").lower() not in ("true", "1", "yes"):
+            try:
+                refl_entries = recall_reflections_by_domain(mem_db, domain, limit=3)
+                refl_str = format_reflections_for_trace(refl_entries)
+                if refl_str:
+                    memories_str = merge_into_memories(memories_str, refl_str)
+                    logger.info("recalled %d reflections for domain=%r", len(refl_entries), domain)
+            except Exception as e:
+                # reflections 表不存在 (V0.28.1 W6-A 失败时才建表) → silent swallow,
+                # 跟 memory recall 同模式不阻塞主路径
+                logger.warning("reflections recall failed (non-fatal): %r", e)
 
         # W5-C 分层规划: 长任务 / 带序号任务注入 subgoal hint (纯字符串, 无 LLM 调用)
         # 复用 W5-D.2 memories= 通道, loop step=-1 synthetic step 一并 carry
@@ -98,6 +116,7 @@ async def run_task(
 
         # V0.28.1 W6-A: 传 domain + memory_db_path 让 loop _maybe_reflect_on_failure 在 max_steps
         # / LOOP_DETECTED 触发时按 domain 写 reflections 表 (V0.28.2 cli 启动 inject 给下次看).
+        # V0.28.2: 复用上方 mem_db / domain (避免重复 env 读 + extract_domain 调用).
         result = await run_react_loop(
             ctx=ctx,
             client=client,
@@ -109,16 +128,15 @@ async def run_task(
             memories=memories_str,
             progress_cb=progress_cb,
             safety_approval_cb=safety_approval_cb,
-            domain=extract_domain(start_url),
-            memory_db_path=Path(os.environ.get("WEB_AGENT_MEMORY_DB", str(_MEM_DB))),
+            domain=domain,
+            memory_db_path=mem_db,
         )
 
         # W5-D 长期记忆: 跨 session 持久化 task outcome by domain.
         # try/except 包: 记忆失败 (磁盘满 / 权限) 不该阻塞主路径返回。
         if os.environ.get("WEB_AGENT_MEMORY_DISABLE", "").lower() not in ("true", "1", "yes"):
             try:
-                mem_db = Path(os.environ.get("WEB_AGENT_MEMORY_DB", str(_MEM_DB)))
-                record_task(mem_db, extract_domain(start_url), goal, result, is_success(result))
+                record_task(mem_db, domain, goal, result, is_success(result))
             except Exception as e:
                 logger.warning("memory record failed (non-fatal): %r", e)
 

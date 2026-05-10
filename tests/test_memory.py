@@ -294,3 +294,40 @@ def test_record_reflection_truncates_long_fields(tmp_path):
     assert len(r.final_result) == 200
     assert len(r.root_cause) == 200
     assert len(r.hint) == 200
+
+
+# ---------- V0.28.2 W6-B: format_reflections_for_trace (W5-D.2 平行) ----------
+
+
+def test_format_reflections_empty_returns_empty_string():
+    """V0.28.2: empty list → '' (caller 可 if-truthy 跳 inject)."""
+    from web_agent.memory import format_reflections_for_trace
+    assert format_reflections_for_trace([]) == ""
+
+
+def test_format_reflections_renders_hint_and_truncates(tmp_path):
+    """V0.28.2: 多条 + 长 hint 截到 hint_trunc=120 (V0.28.2 默)."""
+    from web_agent.memory import (
+        ReflectionEntry,
+        format_reflections_for_trace,
+    )
+    long_hint = "h" * 200
+    entries = [
+        ReflectionEntry(
+            ts=time.time(), task_id="t1", domain="x.test",
+            goal="g", final_result="r", root_cause="rc1", hint=long_hint,
+        ),
+        ReflectionEntry(
+            ts=time.time(), task_id="t2", domain="x.test",
+            goal="g2", final_result="r2", root_cause="rc2", hint="short",
+        ),
+    ]
+    out = format_reflections_for_trace(entries)
+    assert "上次在该 domain 失败教训" in out
+    assert "共 2 条" in out
+    assert "rc1 →" in out
+    assert "rc2 →" in out
+    assert "short" in out
+    # 长 hint 截到 120
+    assert "h" * 120 in out
+    assert "h" * 121 not in out

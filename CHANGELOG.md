@@ -2,6 +2,85 @@
 
 All notable changes to web-agent. 版本号遵循 SemVer 简化形式（V<major>.<minor>.<patch>）。
 
+## [0.28.2] - 2026-05-10
+
+### Add (V0.28 W6 reflective 系列 commit 3/4 — cli inject reflections via memories_str, W6-B)
+
+V0.28.1 W6-A loop wire (失败时 reflect → 写 reflections 表) 之上, 真把反思 hint 注入下次同
+domain task 启动 LLM trace. 让 W6-A 写的反思真生效 — 不止落库, 闭环到下次决策.
+
+### Plan subagent A 决: 共用 memories_str via merge_into_memories (推翻 B 独立通道)
+
+2 选项:
+- **A** 共用 memories_str + merge_into_memories (W5-C subgoal hint 已开此先例 cli.py:96)
+- **B** 独立 reflections 字符串 + run_react_loop 加 reflections 参数
+
+subagent 选 **A**: blast radius 比 B 小 4× (B 案需改 run_react_loop 签名 + mcp_server cli_run_task
+透传 + jd_extract/list_extract 直接调 loop 两处签名). LLM 区分能力靠 prefix 文本而非参数分离 —
+"上次失败教训" vs "过去任务结果" 两段 prefix 已足够区分信号. memories[:2000] 截断 (loop.py:508)
+仍受控.
+
+### 显示顺序 (subagent 决)
+
+memories (历史结果) → reflections (失败教训) → subgoal hint (规划提示)
+由具体到抽象自然过渡; reflections 经验提炼不重复 memories 的"任务结果"信息.
+
+### Changed
+
+- `src/web_agent/memory.py` 加 `format_reflections_for_trace(entries, hint_trunc=120) -> str`:
+  - 格式: `"上次在该 domain 失败教训 (newest first, 共 N 条):\n[ts] root_cause → hint"`
+  - 跟 format_memories_for_trace 平行但精简 (不带 goal/final_result, 反思是经验提炼不重复)
+  - token-budget: 3 条 × ~140 char ≈ 420 char, 跟 memories 5 条相加 ≈ 1.1k char 仍在 [:2000] 内
+  - 空 list 返 "" (caller 可 if-truthy 跳)
+- `src/web_agent/cli.py` `run_task`:
+  - 抽 `mem_db` + `domain` 计算到 memories try 之上 (一次 env 读 + extract_domain 调用复用)
+  - 加 reflections recall + format + merge 路径 (memories 后, subgoal 前):
+    `recall_reflections_by_domain(mem_db, domain, limit=3)` →
+    `format_reflections_for_trace` →
+    `merge_into_memories(memories_str, refl_str)` 一段拼接
+  - try/except 包 silent swallow (跟 W5-D.2 memory recall 同模式) — 防 V0.28.1 W6-A "失败时才
+    建表" 设计下 reflections 表不存在导致 SELECT raise OperationalError 阻塞主路径
+  - opt-in env: `WEB_AGENT_REFLECTIONS_DISABLE=true` 可独立关 (跟 MEMORY_DISABLE 平行)
+  - 后续 V0.28.1 W6-A run_react_loop 调用复用 mem_db / domain (不再二次 env 读 + extract_domain)
+- `tests/test_memory.py` +2 测:
+  - `test_format_reflections_empty_returns_empty_string` 边界
+  - `test_format_reflections_renders_hint_and_truncates` 多条 + 长 hint 截 120
+- `tests/test_cli.py` +3 测:
+  - `test_run_task_injects_reflections_into_memories_str` 集成: monkeypatch recall_reflections
+    返 1 条 → memories 含 "失败教训" + "页面加载慢 →" + hint 内容
+  - `test_run_task_reflections_disable_env_skips_inject` env 开关验真生效 (recall 设 raise 验不调)
+  - `test_run_task_reflections_recall_failure_is_silent` reflections 表不存在 → silent + warning,
+    task return 不阻塞 (caplog.at_level(WARNING) 验)
+
+### V0.28 W6 系列进度 (3/4)
+
+| ver | 状态 | 节点 |
+|-----|------|------|
+| V0.28.0 | ✅ | reflect.py 纯函数 + 16 测 |
+| V0.28.1 | ✅ | LLMClient.reflect Protocol + loop wire + reflections 表 |
+| V0.28.2 | ✅ | 本提交 — cli inject reflections via memories_str (W6-B) |
+| V0.28.3 | 待 | eval --reflect flag + reflective_uplift = pass2_rate - pass1_rate metric |
+
+### SKIP 范围 (跟 V0.27.5 routing memories 一致)
+
+- jd_extract / list_extract 不接 (它俩直接调 run_react_loop 不走 cli.run_task, 自然 SKIP +
+  capability_axis 永远固定 'iframe'/'baseline' 注入反思无意义)
+- mcp_server 走 cli_run_task → 自动接 reflections (跟 memories 一致, 用户期望: mcp 入口享有
+  相同上下文)
+
+### Compatibility
+
+- 老 caller 0 改 — `WEB_AGENT_REFLECTIONS_DISABLE=true` 可关; 不设 env 时默 always-on 但
+  reflections 表不存在 silent swallow 不阻塞
+- mypy strict 0 (42 src); ruff 0; pytest **579 + 17 skip** (V0.28.1 574+17 → +5 V0.28.2 测
+  [2 unit + 3 cli 集成])
+- 真 chromium 15/15 全过 (无新)
+
+### Why patch (V0.28.2) 不 minor
+
+- V0.28 主题 (W6 reflective) minor bump 已发生在 V0.28.0; V0.28.1+ patch 累加 wire / inject / 验证
+- 跟 V0.21.x/V0.27.x 系列 patch 风格一致
+
 ## [0.28.1] - 2026-05-10
 
 ### Add (V0.28 W6 reflective 系列 commit 2/4 — LLMClient.reflect Protocol + loop wire + reflections 表)

@@ -240,6 +240,30 @@ def recall_by_domain(
     ]
 
 
+def format_reflections_for_trace(
+    entries: list[ReflectionEntry],
+    hint_trunc: int = 120,
+) -> str:
+    """V0.28.2 W6-B: 渲染 list[ReflectionEntry] 为 LLM 可读字符串供 trace 注入.
+
+    格式 (跟 format_memories_for_trace 平行, 但精简 — 不带 goal/final_result, 反思是经验提炼
+    不重复 memories 的 "任务结果" 信息):
+        上次在该 domain 失败教训 (newest first, 共 N 条):
+        [2026-05-09T14:22:01] 页面加载慢 → 下次先 wait_for_selector('.results') 再 click
+        [2026-05-08T09:05:33] 误点了广告 banner → 优先用 role=link name=正文标题 定位
+
+    空 list 返 "" (caller 可 if-truthy 跳过 inject). token-budget 友好: 3 条 × ~140 char ≈
+    420 char total, 跟 memories 5 条相加 ≈ 1.1k char 仍在 loop.py:508 [:2000] 截断内.
+    """
+    if not entries:
+        return ""
+    lines = [f"上次在该 domain 失败教训 (newest first, 共 {len(entries)} 条):"]
+    for e in entries:
+        ts = datetime.fromtimestamp(e.ts).isoformat(timespec="seconds")
+        lines.append(f"[{ts}] {e.root_cause} → {e.hint[:hint_trunc]}")
+    return "\n".join(lines)
+
+
 def format_memories_for_trace(
     entries: list[MemoryEntry],
     goal_trunc: int = 60,

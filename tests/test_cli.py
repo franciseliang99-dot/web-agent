@@ -239,3 +239,66 @@ async def test_run_task_default_when_no_arg_no_env(monkeypatch, patch_run_task_i
     assert result == "OK"
     assert patch_run_task_io_chain["max_steps"] == 20
     assert patch_run_task_io_chain["max_wallclock_s"] == 300.0
+
+
+# ---------- V0.28.2 W6-B: cli inject reflections via memories_str ----------
+
+
+async def test_run_task_injects_reflections_into_memories_str(monkeypatch, patch_run_task_io_chain, tmp_path):
+    """V0.28.2: cli 启动按 domain 拉 reflections + format → merge_into_memories → 透传 run_react_loop."""
+    from web_agent.memory import ReflectionEntry
+
+    fake_refl = [
+        ReflectionEntry(
+            ts=1700000000.0, task_id="t1", domain="example.com",
+            goal="抓取首页", final_result="(max_steps 耗尽未完成)",
+            root_cause="页面加载慢", hint="下次先 wait_for_selector('.results')",
+        ),
+    ]
+
+    monkeypatch.setattr("web_agent.cli.recall_reflections_by_domain",
+                        lambda db, domain, limit=3: fake_refl)
+    monkeypatch.setattr("web_agent.cli.recall_by_domain", lambda db, domain, limit=5: [])
+
+    await run_task(goal="g", start_url="https://example.com")
+
+    memories = patch_run_task_io_chain["memories"]
+    assert memories is not None
+    assert "上次在该 domain 失败教训" in memories
+    assert "页面加载慢 →" in memories
+    assert "wait_for_selector" in memories
+
+
+async def test_run_task_reflections_disable_env_skips_inject(monkeypatch, patch_run_task_io_chain):
+    """V0.28.2: WEB_AGENT_REFLECTIONS_DISABLE=true → recall_reflections_by_domain 不调."""
+    monkeypatch.setenv("WEB_AGENT_REFLECTIONS_DISABLE", "true")
+    monkeypatch.setattr("web_agent.cli.recall_by_domain", lambda db, domain, limit=5: [])
+
+    def _boom(db, domain, limit=3):
+        raise AssertionError("REFLECTIONS_DISABLE=true 时不应调 recall_reflections_by_domain")
+
+    monkeypatch.setattr("web_agent.cli.recall_reflections_by_domain", _boom)
+
+    await run_task(goal="g", start_url="https://example.com")
+
+    memories = patch_run_task_io_chain["memories"]
+    assert memories is None or "失败教训" not in memories
+
+
+async def test_run_task_reflections_recall_failure_is_silent(monkeypatch, patch_run_task_io_chain, caplog):
+    """V0.28.2: reflections recall raise (e.g. table 不存在) → silent + warning, 不阻塞 task return."""
+    import logging
+
+    monkeypatch.setattr("web_agent.cli.recall_by_domain", lambda db, domain, limit=5: [])
+
+    def _boom(db, domain, limit=3):
+        raise RuntimeError("no such table: reflections")
+
+    monkeypatch.setattr("web_agent.cli.recall_reflections_by_domain", _boom)
+
+    with caplog.at_level(logging.WARNING):
+        result = await run_task(goal="g", start_url="https://example.com")
+
+    assert result == "OK"  # 不阻塞主路径
+    assert any("reflections recall failed" in r.message for r in caplog.records), \
+        f"应 logger.warning, caplog: {[r.message for r in caplog.records]}"
