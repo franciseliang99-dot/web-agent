@@ -235,6 +235,33 @@ async def test_perceive_main_frame_evaluate_failure_propagates():
         await perceive(page)
 
 
+def test_som_inject_js_sets_data_som_id_attribute():
+    """V0.22.2: SoM inject JS 给元素挂 data-som-id 让 actuator 走 frame.locator 选."""
+    from web_agent.perceiver import _SOM_INJECT_JS
+    assert "setAttribute('data-som-id'" in _SOM_INJECT_JS, (
+        "V0.22.2: 注入时必须挂 data-som-id (actuator iframe 路径靠它选)"
+    )
+
+
+def test_som_inject_js_cleans_old_data_som_id_at_entry():
+    """V0.22.2 真 chromium 实测: data-som-id cleanup 必须在 inject 入口而不在 REMOVE.
+
+    原 sanity D 推荐 REMOVE 清 data-som-id, 但实测发现 perceive() 末尾 REMOVE 后 actuator
+    用 frame.locator([data-som-id]) 找不到元素 (Locator.click timeout). 改在 inject 入口清旧
+    + 末尾 REMOVE 不清 → agent 跑期间 data-som-id 持续可用, agent 退出关 Chrome 自动清.
+    """
+    from web_agent.perceiver import _SOM_INJECT_JS, _SOM_REMOVE_JS
+    # inject 入口必须清旧 data-som-id (含 shadow walker)
+    assert "removeAttribute('data-som-id')" in _SOM_INJECT_JS, (
+        "V0.22.2: inject 入口必须清旧 data-som-id (上次残留)"
+    )
+    # REMOVE 故意不清 data-som-id (留给 actuator); 注释里可能含 "data-som-id" 字样,
+    # 用更精确的 removeAttribute('data-som-id') 反查防误判
+    assert "removeAttribute('data-som-id')" not in _SOM_REMOVE_JS, (
+        "V0.22.2 实测修正: REMOVE 不能 removeAttribute(data-som-id) 否则 actuator 找不到元素"
+    )
+
+
 async def test_perceive_nested_iframe_path_encoding():
     """V0.22.1: 主 → iframe[0] → iframe[1] 的嵌套 → frame_path 编码 '0.1'."""
     from unittest.mock import AsyncMock, MagicMock

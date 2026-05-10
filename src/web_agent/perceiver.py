@@ -49,10 +49,30 @@ _SOM_INJECT_JS = """
     return true;
   });
   document.querySelectorAll('[data-som-mark]').forEach(e => e.remove());
+  // V0.22.2: 清旧 data-som-id (上次 perceive 残留) 防 actuator 走错 id;
+  // 跨 open shadowRoot walker (跟主收集 selector 同模式).
+  {
+    const visited = new WeakSet();
+    const stack = [document];
+    while (stack.length) {
+      const root = stack.pop();
+      if (visited.has(root)) continue;
+      visited.add(root);
+      root.querySelectorAll('[data-som-id]').forEach(e => e.removeAttribute('data-som-id'));
+      if (!SHADOW_ON) continue;
+      root.querySelectorAll('*').forEach(e => {
+        if (e.shadowRoot && e.shadowRoot.mode === 'open' && !visited.has(e.shadowRoot)) {
+          stack.push(e.shadowRoot);
+        }
+      });
+    }
+  }
   const colors = ['#FF3B30', '#34C759', '#007AFF', '#AF52DE', '#FF9500', '#5AC8FA'];
   return els.map((el, i) => {
     const r = el.getBoundingClientRect();
     const id = i + 1 + ID_OFFSET;  // V0.22.1: iframe 路径下 offset>0
+    // V0.22.2: 给元素挂 data-som-id 让 actuator iframe 路径走 frame.locator(`[data-som-id="N"]`)
+    el.setAttribute('data-som-id', String(id));
     const color = colors[i % colors.length];
     const box = document.createElement('div');
     box.dataset.somMark = 'box';
@@ -95,7 +115,13 @@ _SOM_INJECT_JS = """
 """
 
 _SOM_REMOVE_JS = """
-() => { document.querySelectorAll('[data-som-mark]').forEach(e => e.remove()); }
+() => {
+  // 移除 SoM 视觉框 div (截图后调, 让 LLM 看到有框的截图但页面回归干净视觉)
+  // V0.22.2: data-som-id **故意留**给 actuator 后续 frame.locator 用; 下次 perceive 入口
+  // 在 _SOM_INJECT_JS 内自动清旧 data-som-id 再注入新, 不污染跨步骤 selector.
+  // agent 退出关 Chrome 时 data-som-id 随 page 一并消失, 不污染用户长留 session.
+  document.querySelectorAll('[data-som-mark]').forEach(e => e.remove());
+}
 """
 
 

@@ -63,3 +63,45 @@ async def test_perceive_real_srcdoc_iframe_marks_have_frame_path():
             assert len(set(ids)) == len(ids), f"id 必须全局 unique; got {ids}"
         finally:
             await browser.close()
+
+
+_CLICK_HTML = (
+    "<html><body>"
+    "<iframe srcdoc=\""
+    "<html><body>"
+    "<button id='target' onclick='window.parent.__iframe_click_count = (window.parent.__iframe_click_count || 0) + 1'>click me</button>"
+    "</body></html>"
+    "\"></iframe>"
+    "</body></html>"
+)
+_CLICK_PARENT_URL = "data:text/html," + urllib.parse.quote(_CLICK_HTML)
+
+
+async def test_actuator_iframe_click_real_triggers_button():
+    """V0.22.2 端到端: perceive 拿 iframe button mark → human_like_click(frame=...) → 真触发."""
+    from playwright.async_api import async_playwright
+    from web_agent.actuator import human_like_click
+    from web_agent.loop import _resolve_frame
+    from web_agent.perceiver import perceive
+
+    async with async_playwright() as p:
+        browser = await p.chromium.launch(headless=True)
+        try:
+            ctx = await browser.new_context()
+            page = await ctx.new_page()
+            await page.goto(_CLICK_PARENT_URL)
+            await page.wait_for_load_state("networkidle", timeout=5000)
+            marks, _ = await perceive(page)
+            iframe_btn = next(
+                (m for m in marks if m.frame_path == "0" and "click me" in m.text),
+                None,
+            )
+            assert iframe_btn is not None, f"iframe button 必须被抓; got {[(m.text, m.frame_path) for m in marks]}"
+            target_frame = _resolve_frame(page, iframe_btn.frame_path)
+            assert target_frame is not None, "frame_path='0' 必须能 resolve"
+            await human_like_click(page, iframe_btn, frame=target_frame)
+            # 验 click 真触发: iframe button onclick 加 window.parent.__iframe_click_count
+            count = await page.evaluate("() => window.__iframe_click_count || 0")
+            assert count == 1, f"iframe button 必须被点 1 次 (V0.22.2 闭环); got count={count}"
+        finally:
+            await browser.close()

@@ -2,6 +2,80 @@
 
 All notable changes to web-agent. 版本号遵循 SemVer 简化形式（V<major>.<minor>.<patch>）。
 
+## [0.22.2] - 2026-05-09
+
+### Add (V0.22 iframe 系列第 3 commit — actuator 按 frame_path 路由, **iframe 真可点可输入**)
+
+V0.22.0 schema + V0.22.1 perceiver 让 LLM 看到 iframe 元素后, V0.22.2 接 actuator 真
+派发动作: iframe 内 button 点得着, input 输得了, contenteditable 粘贴得了.
+端到端闭环: perceive 拿 frame_path → loop 解析 Frame → actuator 走 frame.locator.
+
+### Changed
+
+- `src/web_agent/perceiver.py` `_SOM_INJECT_JS` map 内加
+  `el.setAttribute('data-som-id', String(id))` (1 行) — actuator iframe 路径靠
+  `frame.locator('[data-som-id="N"]')` 选元素.
+- `perceiver.py` `_SOM_INJECT_JS` 入口加 shadow DOM walker 清旧 data-som-id (上次 perceive
+  残留) 防 actuator 走错 id.
+- **关键修正 (实测发现)**: V0.22.2 sanity D 推荐 `_SOM_REMOVE_JS` 清 data-som-id 防污染
+  第三方 site DOM. 但真 chromium 实测发现 perceive() 末尾 REMOVE 后 actuator 用
+  `frame.locator('[data-som-id]')` 找不到元素 (Locator.click 30s timeout). 改方案:
+  inject 入口清旧 + 末尾 REMOVE 不清 → agent 跑期间 data-som-id 持续可用 (跨步骤
+  selector 稳定), agent 退出关 Chrome 自动清 (不污染用户长留 session). 接受 trade-off:
+  agent 跑期间第三方 widget DOM 上有 data-som-id 但不影响功能.
+- `src/web_agent/actuator.py` 5 动作加 `frame: Frame | None = None` kwarg:
+  - `human_like_click(page, mark, frame=None)` iframe → `frame.locator(...).click()`
+    (Playwright auto hover+down+up, 反检测损失: 无贝塞尔轨迹).
+  - `human_like_type(page, text, frame=None, mark=None)` iframe →
+    `frame.locator(...).press_sequentially(text, delay=120)` (Locator.type deprecated).
+  - `human_like_paste(page, text, frame=None, mark=None)` iframe → `frame.evaluate`
+    execCommand 跟主 frame 同款 (iframe 内 fallback Ctrl+V 跳过 — CDP-connected mode
+    iframe 也 grant 不了 clipboard).
+  - `human_like_keyboard_shortcut(page, key, frame=None, mark=None)` iframe →
+    `frame.locator(...).press(key)` 走 last_clicked_mark 路径 (focus 保证); 无 mark
+    (LLM 单按 Tab/PageDown 全局快捷键) 仍走 page.keyboard.press.
+  - `scroll(page, dy)` 不加 frame kwarg (iframe 内 LLM scroll 用例罕见 YAGNI).
+- `actuator.py` 加 `_iframe_locator(frame, mark) -> Locator` helper 拼
+  `[data-som-id="{mark.id}"]` 选 (避免 5 函数各自拼字符串易拼错).
+- `src/web_agent/loop.py` 加 `_resolve_frame(page, frame_path) -> Frame | None` helper:
+  - 主 frame `""` → None; "0" → main.child_frames[0]; "0.1" → main.child[0].child[1]
+  - catch (IndexError 越界 / ValueError 非数字 / RuntimeError detached) → None +
+    `logger.warning` (loop 退化主 frame 路径 ERROR obs 安全兜底)
+- `loop.py` `match action` 4 arm 改 (Click/Type/Paste/KeyboardShortcut 加 frame 解析):
+  - ClickAction: 解析 mark.frame_path → 传 frame; obs 加 `@frame_path` 后缀.
+  - Type/Paste/KeyboardShortcut: **复用 last_clicked_mark.frame_path** 不加
+    last_clicked_frame_path 状态变量 (SwitchTab/CloseTab 已 reset last_clicked_mark = None,
+    单一 source of truth 防双重维护 bug).
+  - safety_check 不动 (mark.text/input_type/name 跟 frame_path 无关).
+- `tests/test_actuator.py` 加 6 V0.22.2 test (5 iframe 路径 mock + 1 主 frame 兼容).
+- `tests/test_loop_main.py` 加 5 _resolve_frame test (主 None / DFS / IndexError /
+  ValueError / detached).
+- `tests/test_perceiver.py` 加 2 V0.22.2 test (inject 含 setAttribute / REMOVE 故意不清
+  data-som-id 的实测修正注释).
+- `tests/test_loop_iframe.py` 加 1 V0.22.2 真 chromium smoke
+  `test_actuator_iframe_click_real_triggers_button` — 端到端: srcdoc iframe button +
+  perceive 拿 frame_path="0" mark + _resolve_frame 解析 + human_like_click(frame=...) +
+  验 onclick 真触发 (window.parent.__iframe_click_count == 1). **首次发现 V0.22.2 设计
+  冲突的实测**.
+
+### Compatibility
+
+- 主 frame 路径 (frame=None / mark.frame_path="") 100% 兼容 V0.22.1: 贝塞尔/正态/typo
+  全保留, _last_mouse_pos[page] 状态不污染.
+- _resolve_frame 失败 → None → actuator 退化主 frame (而非抛) → ERROR obs 模式跟
+  ClickAction mark_id 缺失同款 (loop 自我恢复).
+- iframe 反检测损失: frame.locator.click 内部 mousedown/up isTrusted=true 但无鼠标轨迹.
+  高反爬站 reCAPTCHA inside iframe 可能识破. **TODO V0.23 评估 CDP
+  Input.dispatchMouseEvent 走 iframe 拟人轨迹**.
+- mypy strict 0; ruff 0; pytest 341 + 5 skip; 真 chromium 4 个 slow smoke 全过
+  (含 V0.21.3 popup 2 + V0.22.1 srcdoc iframe perceive + V0.22.2 srcdoc iframe click).
+
+### Why patch (V0.22.2) 不 minor
+
+- actuator 5 函数加 KW-only 默认参数 (frame=None / mark=None) 兼容扩展, 老 callsite 零改.
+- loop dispatch 改是内部实现, 对外 LLM tool surface (V0.21.0 schema) 零变化.
+- SemVer "向后兼容的 enhance → patch", 0.22.1 → 0.22.2.
+
 ## [0.22.1] - 2026-05-09
 
 ### Add (V0.22 iframe 系列第 2 commit — perceiver 同源 iframe SoM 注入 + id 全局连续)

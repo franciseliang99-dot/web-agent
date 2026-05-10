@@ -130,3 +130,119 @@ def test_type_delay_mean_near_120ms():
     delays = [_type_delay() for _ in range(2000)]
     mean = statistics.mean(delays)
     assert 0.10 <= mean <= 0.14, f"均值偏离 0.12: {mean:.3f}"
+
+
+# --- V0.22.2 iframe 路径分流 (mock frame.locator) ---
+
+
+def _mk_iframe_mark(id_: int, frame_path: str = "0") -> Mark:
+    return Mark(
+        id=id_, tag="button", role="", text="iframe-btn",
+        bbox={"x": 0, "y": 0, "w": 50, "h": 20},
+        frame_path=frame_path,
+    )
+
+
+async def test_human_like_click_iframe_path_uses_locator():
+    """V0.22.2: frame 非 None → 走 frame.locator(...).click() (无贝塞尔), 不调 page.mouse."""
+    from unittest.mock import AsyncMock, MagicMock
+    from web_agent.actuator import human_like_click
+    locator = MagicMock()
+    locator.click = AsyncMock()
+    frame = MagicMock()
+    frame.locator = MagicMock(return_value=locator)
+    page = MagicMock()
+    page.mouse = MagicMock()  # 不该被调
+    page.mouse.move = AsyncMock()
+    page.mouse.down = AsyncMock()
+    mark = _mk_iframe_mark(7)
+    await human_like_click(page, mark, frame=frame)
+    frame.locator.assert_called_once_with('[data-som-id="7"]')
+    locator.click.assert_awaited_once()
+    page.mouse.move.assert_not_called()
+    page.mouse.down.assert_not_called()
+
+
+async def test_human_like_type_iframe_path_uses_press_sequentially():
+    """V0.22.2: type frame+mark → frame.locator(...).press_sequentially (Locator.type deprecated)."""
+    from unittest.mock import AsyncMock, MagicMock
+    from web_agent.actuator import human_like_type
+    locator = MagicMock()
+    locator.press_sequentially = AsyncMock()
+    frame = MagicMock()
+    frame.locator = MagicMock(return_value=locator)
+    page = MagicMock()
+    page.keyboard = MagicMock()
+    page.keyboard.type = AsyncMock()  # 不该被调
+    mark = _mk_iframe_mark(3)
+    await human_like_type(page, "hi", frame=frame, mark=mark)
+    frame.locator.assert_called_once_with('[data-som-id="3"]')
+    locator.press_sequentially.assert_awaited_once_with("hi", delay=120)
+    page.keyboard.type.assert_not_called()
+
+
+async def test_human_like_keyboard_shortcut_iframe_path_uses_locator_press():
+    """V0.22.2: keyboard_shortcut frame+mark → frame.locator(...).press(key) (focus 后按)."""
+    from unittest.mock import AsyncMock, MagicMock
+    from web_agent.actuator import human_like_keyboard_shortcut
+    locator = MagicMock()
+    locator.press = AsyncMock()
+    frame = MagicMock()
+    frame.locator = MagicMock(return_value=locator)
+    page = MagicMock()
+    page.keyboard = MagicMock()
+    page.keyboard.press = AsyncMock()  # 不该被调
+    mark = _mk_iframe_mark(5)
+    await human_like_keyboard_shortcut(page, "Control+End", frame=frame, mark=mark)
+    locator.press.assert_awaited_once_with("Control+End")
+    page.keyboard.press.assert_not_called()
+
+
+async def test_human_like_keyboard_shortcut_iframe_no_mark_falls_back_to_page():
+    """V0.22.2: frame 给了但无 mark (LLM 单按 Tab 全局) → 仍走 page.keyboard.press."""
+    from unittest.mock import AsyncMock, MagicMock
+    from web_agent.actuator import human_like_keyboard_shortcut
+    frame = MagicMock()
+    frame.locator = MagicMock()
+    page = MagicMock()
+    page.keyboard = MagicMock()
+    page.keyboard.press = AsyncMock()
+    await human_like_keyboard_shortcut(page, "Tab", frame=frame, mark=None)
+    page.keyboard.press.assert_awaited_once_with("Tab")
+    frame.locator.assert_not_called()
+
+
+async def test_human_like_paste_iframe_path_uses_frame_evaluate():
+    """V0.22.2: paste frame 非 None → frame.evaluate execCommand (跟主 frame 同款)."""
+    from unittest.mock import AsyncMock, MagicMock
+    from web_agent.actuator import human_like_paste
+    frame = MagicMock()
+    frame.evaluate = AsyncMock(return_value=True)
+    page = MagicMock()
+    page.evaluate = AsyncMock()  # 不该被调
+    page.keyboard = MagicMock()
+    page.keyboard.press = AsyncMock()
+    await human_like_paste(page, "long text", frame=frame, mark=_mk_iframe_mark(1))
+    frame.evaluate.assert_awaited_once()
+    args = frame.evaluate.call_args
+    assert "execCommand" in args.args[0]
+    assert args.args[1] == "long text"
+    page.evaluate.assert_not_called()
+
+
+async def test_human_like_click_main_frame_unchanged_when_frame_none():
+    """V0.22.2: frame=None → 主 frame 路径 100% 兼容 V0.22.1 (跑 page.mouse 贝塞尔)."""
+    from unittest.mock import AsyncMock, MagicMock
+    from web_agent.actuator import human_like_click
+    page = MagicMock()
+    page.evaluate = AsyncMock(return_value={"x": 0, "y": 0})
+    page.viewport_size = {"width": 1280, "height": 800}
+    page.mouse = MagicMock()
+    page.mouse.move = AsyncMock()
+    page.mouse.down = AsyncMock()
+    page.mouse.up = AsyncMock()
+    mark = Mark(id=1, tag="button", role="", text="ok", bbox={"x": 100, "y": 100, "w": 50, "h": 30})
+    await human_like_click(page, mark)  # frame 默认 None
+    assert page.mouse.move.await_count >= 15  # 贝塞尔轨迹至少 15 步
+    page.mouse.down.assert_awaited_once()
+    page.mouse.up.assert_awaited_once()

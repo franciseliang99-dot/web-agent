@@ -16,7 +16,7 @@ from collections import deque
 from pathlib import Path
 from typing import Any, Awaitable, Callable
 
-from playwright.async_api import BrowserContext, Page
+from playwright.async_api import BrowserContext, Frame, Page
 
 from web_agent.actuator import (
     human_like_click,
@@ -199,6 +199,33 @@ def _dump_spike_metrics(task_id: str, goal: str, trace: Trace) -> None:
 
 def _captcha_enabled() -> bool:
     return os.environ.get("WEB_AGENT_CAPTCHA_DISABLE", "").lower() not in ("true", "1", "yes")
+
+
+def _resolve_frame(page: Page, frame_path: str) -> Frame | None:
+    """V0.22.2: 解析 mark.frame_path → Playwright Frame (主 frame 返 None 走 page 路径).
+
+    "0" → page.main_frame.child_frames[0]
+    "0.1" → main.child_frames[0].child_frames[1]
+    失败 (IndexError 越界 / ValueError 非数字 / detached) → 返 None, 调用方观察 None
+    走主 frame 路径 (退化为 click 主 page 失败 → ERROR obs 安全兜底).
+
+    分歧: 解析失败用 None 兜底 vs 抛 / 返 sentinel — 选 None 兜底因 actuator 已经天然
+    支持 frame=None 主路径, 错误传染最小; loop dispatch 在 _resolve_frame 返 None 但
+    mark.frame_path != "" 时 log warning 让用户看 trace 时知道路由失败 (但 obs 仍尝试主路径).
+    """
+    if not frame_path:
+        return None
+    try:
+        f: Frame = page.main_frame
+        for idx_str in frame_path.split("."):
+            f = f.child_frames[int(idx_str)]
+        if f.is_detached():
+            logger.warning("frame_path=%r resolve 后已 detached", frame_path)
+            return None
+        return f
+    except (IndexError, ValueError, RuntimeError) as e:
+        logger.warning("frame_path=%r resolve 失败 (%r), 回退主 frame", frame_path, e)
+        return None
 
 
 async def _gather_tab_titles(pages: list[Page]) -> list[tuple[int, str]]:
@@ -474,15 +501,22 @@ async def run_react_loop(
                     if m is None:
                         obs = f"ERROR: mark_id={mid} 不在当前 marks 里"
                     else:
-                        await human_like_click(page, m)
-                        last_clicked_mark = m  # 给下一步 type action 的 safety check 用
+                        # V0.22.2: 解析 frame_path; 主 frame mark.frame_path="" → frame=None
+                        # 走旧贝塞尔, iframe → frame.locator
+                        target_frame = _resolve_frame(page, m.frame_path)
+                        await human_like_click(page, m, frame=target_frame)
+                        last_clicked_mark = m  # 给下一步 type action 的 safety check 用 (含 frame_path)
                         try:
                             await page.wait_for_load_state("domcontentloaded", timeout=5000)
                         except Exception:
                             pass
-                        obs = f"clicked [{m.id}] {m.tag} {m.text!r}"
+                        frame_suffix = f" @{m.frame_path}" if m.frame_path else ""
+                        obs = f"clicked [{m.id}] {m.tag} {m.text!r}{frame_suffix}"
                 case TypeAction(text=text, submit=submit):
-                    await human_like_type(page, text)
+                    # V0.22.2: 复用 last_clicked_mark.frame_path 路由 iframe (不加 last_clicked_frame_path
+                    # 状态; SwitchTab/CloseTab 已 reset last_clicked_mark = None)
+                    type_frame = _resolve_frame(page, last_clicked_mark.frame_path) if last_clicked_mark else None
+                    await human_like_type(page, text, frame=type_frame, mark=last_clicked_mark)
                     if submit:
                         await page.keyboard.press("Enter")
                         try:
@@ -491,6 +525,7 @@ async def run_react_loop(
                             pass
                     obs = f"typed {text!r}" + (" + submit" if submit else "")
                 case ScrollAction(dy=dy):
+                    # V0.22.2: scroll 不实现 iframe 路径 (LLM 用例罕见 YAGNI)
                     await scroll(page, dy)
                     obs = f"scrolled dy={dy}"
                 case ExtractAction(answer=answer):
@@ -499,10 +534,14 @@ async def run_react_loop(
                     result = res
                     obs = res
                 case KeyboardShortcutAction(key=key):
-                    await human_like_keyboard_shortcut(page, key)
+                    # V0.22.2: 99% 场景接 click 后跳末尾, 复用 last_clicked_mark.frame_path
+                    ks_frame = _resolve_frame(page, last_clicked_mark.frame_path) if last_clicked_mark else None
+                    await human_like_keyboard_shortcut(page, key, frame=ks_frame, mark=last_clicked_mark)
                     obs = f"keyboard_shortcut {key!r}"
                 case PasteAction(text=text):
-                    await human_like_paste(page, text)
+                    # V0.22.2: paste 同 type, 复用 last_clicked_mark.frame_path
+                    paste_frame = _resolve_frame(page, last_clicked_mark.frame_path) if last_clicked_mark else None
+                    await human_like_paste(page, text, frame=paste_frame, mark=last_clicked_mark)
                     obs = f"pasted {text!r}"
                 case SwitchTabAction(idx=tab_idx):
                     # V0.21.1: 用 step_pages snapshot 解析 (防 step 内 popup 偏移);

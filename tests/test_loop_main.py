@@ -432,6 +432,54 @@ def test_page_fingerprint_includes_active_idx():
     assert fp_default == fp_tab0
 
 
+def test_resolve_frame_main_frame_returns_none():
+    """V0.22.2: frame_path="" (主 frame) → None 让 actuator 走 page 路径."""
+    from unittest.mock import MagicMock
+    from web_agent.loop import _resolve_frame
+    page = MagicMock()
+    assert _resolve_frame(page, "") is None
+
+
+def test_resolve_frame_walks_child_frames_dfs():
+    """V0.22.2: "0.1" → main.child_frames[0].child_frames[1]."""
+    from unittest.mock import MagicMock
+    from web_agent.loop import _resolve_frame
+    inner = MagicMock()
+    inner.is_detached = MagicMock(return_value=False)
+    middle = MagicMock(child_frames=[MagicMock(), inner])
+    main = MagicMock(child_frames=[middle])
+    page = MagicMock(main_frame=main)
+    assert _resolve_frame(page, "0.1") is inner
+
+
+def test_resolve_frame_index_error_returns_none():
+    """V0.22.2: frame_path="0.99" 越界 → None (loop 退化主 frame, 不抛)."""
+    from unittest.mock import MagicMock
+    from web_agent.loop import _resolve_frame
+    main = MagicMock(child_frames=[])  # 无 child
+    page = MagicMock(main_frame=main)
+    assert _resolve_frame(page, "0") is None
+
+
+def test_resolve_frame_value_error_on_non_numeric_returns_none():
+    """V0.22.2: frame_path="abc" 非数字 → ValueError → None."""
+    from unittest.mock import MagicMock
+    from web_agent.loop import _resolve_frame
+    page = MagicMock()
+    assert _resolve_frame(page, "abc") is None
+
+
+def test_resolve_frame_detached_returns_none():
+    """V0.22.2: resolve 到 detached frame → None (loop 退化主 frame)."""
+    from unittest.mock import MagicMock
+    from web_agent.loop import _resolve_frame
+    detached = MagicMock()
+    detached.is_detached = MagicMock(return_value=True)
+    main = MagicMock(child_frames=[detached])
+    page = MagicMock(main_frame=main)
+    assert _resolve_frame(page, "0") is None
+
+
 def test_page_fingerprint_distinguishes_frame_path():
     """V0.22.0: 同 url+marks 但 frame_path 不同 → 不同 fingerprint (防 iframe navigate 看似无变化)."""
     from web_agent.loop import _page_fingerprint

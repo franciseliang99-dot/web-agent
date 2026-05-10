@@ -24,9 +24,14 @@ from collections import deque
 from collections.abc import Iterable
 from weakref import WeakKeyDictionary
 
-from playwright.async_api import Page
+from playwright.async_api import Frame, Locator, Page
 
 from web_agent.types import Mark
+
+
+def _iframe_locator(frame: Frame, mark: Mark) -> Locator:
+    """V0.22.2: iframe 内元素定位用 [data-som-id="N"] (perceiver V0.22.2 注入)."""
+    return frame.locator(f'[data-som-id="{mark.id}"]')
 
 logger = logging.getLogger(__name__)
 
@@ -104,11 +109,21 @@ def _bezier_path(
         yield x, y
 
 
-async def human_like_click(page: Page, mark: Mark) -> None:
+async def human_like_click(page: Page, mark: Mark, frame: Frame | None = None) -> None:
     """3 阶贝塞尔轨迹移动到按钮 → 短暂悬停 → 按下 → 短停 → 抬起。
 
     起点取该 page 上次鼠标位置；首次取视口中心附近随机点。
+
+    V0.22.2: frame 非 None → 走 Playwright frame.locator iframe 路径 (反检测损失:
+    无贝塞尔轨迹, isTrusted=true 但无鼠标移动事件; 高反爬站 reCAPTCHA inside iframe
+    可能识破, 留 TODO V0.23 评估 CDP Input.dispatchMouseEvent 走 iframe 拟人轨迹).
+    主 frame 路径 (frame=None) 100% 兼容 V0.22.1.
     """
+    if frame is not None:
+        await think(0.2, 0.6)
+        await _iframe_locator(frame, mark).click()
+        await asyncio.sleep(random.uniform(0.05, 0.15))
+        return
     page_x, page_y = _click_point(mark)
     scroll = await page.evaluate("() => ({x: window.scrollX, y: window.scrollY})")
     target_vx = page_x - scroll["x"]
@@ -145,12 +160,22 @@ def _type_delay() -> float:
     return max(0.04, min(0.30, random.gauss(0.12, 0.04)))
 
 
-async def human_like_type(page: Page, text: str, typo_rate: float = 0.02) -> None:
+async def human_like_type(
+    page: Page, text: str, typo_rate: float = 0.02,
+    frame: Frame | None = None, mark: Mark | None = None,
+) -> None:
     """逐字键入：截断正态间隔 + ~2% 概率打错相邻 QWERTY 键 + reaction time 200-400ms + backspace 修正。
 
     typo 触发条件：① ASCII 字母（中文 IME 单字符 typo 不真实）② 概率命中 ③ 中速以上
     （最近 3 字平均间隔 < 150ms，慢打字不会频繁错）。typo_rate 默认 2%（参考 Salthouse 1986 + IKI 数据集）。
+
+    V0.22.2: frame+mark 非 None → 走 Playwright frame.locator(...).press_sequentially iframe
+    路径 (Locator.type deprecated). 用固定 mean-delay (120ms) 简化 — 拟人节奏粗放但接受
+    (反检测主战场是入口页 form 不是 iframe widget). 主 frame 路径 100% 兼容 V0.22.1.
     """
+    if frame is not None and mark is not None:
+        await _iframe_locator(frame, mark).press_sequentially(text, delay=120)
+        return
     recent_delays: deque[float] = deque(maxlen=3)
     for ch in text:
         delay = _type_delay()
@@ -188,21 +213,35 @@ async def scroll(page: Page, dy: int = 400) -> None:
     await asyncio.sleep(random.uniform(0.3, 0.8))  # 滚完看新内容
 
 
-async def human_like_keyboard_shortcut(page: Page, key: str) -> None:
+async def human_like_keyboard_shortcut(
+    page: Page, key: str, frame: Frame | None = None, mark: Mark | None = None,
+) -> None:
     """V0.19.0: 按键盘快捷键 (Control+End / Control+a / End / Tab 等).
 
     LLM 偶尔写 'Ctrl+...', normalize 到 Playwright canonical 'Control+...'.
     Playwright `page.keyboard.press` 直接接受 'Control+End' chord syntax 处理 modifier down/up.
 
     拟人化: 0.2-0.6s 思考 + chord press + 0.05-0.15s 收尾停顿.
+
+    V0.22.2: frame+mark 非 None → 走 frame.locator(...).press(key) (focus 元素后按键)
+    适用于 iframe 内 textarea/contenteditable 跳末尾等. 无 mark (LLM 单独按 Tab/PageDown
+    全局快捷键) 仍走 page.keyboard.press 即便 frame 给了 — 因为 iframe 全局 press
+    没有 element focus 锚点.
     """
     normalized = key.replace("Ctrl+", "Control+").replace("ctrl+", "Control+")
     await think(0.2, 0.6)
+    if frame is not None and mark is not None:
+        await _iframe_locator(frame, mark).press(normalized)
+        await asyncio.sleep(random.uniform(0.05, 0.15))
+        return
     await page.keyboard.press(normalized)
     await asyncio.sleep(random.uniform(0.05, 0.15))
 
 
-async def human_like_paste(page: Page, text: str) -> None:
+async def human_like_paste(
+    page: Page, text: str,
+    frame: Frame | None = None, mark: Mark | None = None,
+) -> None:
     """V0.19.0: 把 text 粘贴到当前 focus 的 input/textarea/contenteditable.
 
     主路径 document.execCommand('insertText', false, text):
@@ -215,8 +254,22 @@ async def human_like_paste(page: Page, text: str) -> None:
     - deny 时 log warning, 不抛 (loop 看 obs 推断)
 
     拟人化: 0.2-0.6s 思考 + paste + 0.1-0.3s 等 input event 异步触发.
+
+    V0.22.2: frame 非 None → 走 frame.evaluate execCommand (跟主 frame 同款).
+    iframe 内 fallback Ctrl+V 跳 (CDP-connected mode 在 iframe 也 grant 不了 clipboard 权限).
     """
     await think(0.2, 0.6)
+    if frame is not None:
+        try:
+            success = await frame.evaluate(
+                "(t) => document.execCommand('insertText', false, t)", text,
+            )
+            if not success:
+                logger.warning("human_like_paste iframe execCommand 未生效 (站可能 intercept)")
+        except Exception as e:
+            logger.warning("human_like_paste iframe evaluate 失败 (%r)", e)
+        await asyncio.sleep(random.uniform(0.1, 0.3))
+        return
     success = await page.evaluate("(t) => document.execCommand('insertText', false, t)", text)
     if not success:
         try:
