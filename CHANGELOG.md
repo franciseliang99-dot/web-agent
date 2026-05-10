@@ -2,6 +2,60 @@
 
 All notable changes to web-agent. 版本号遵循 SemVer 简化形式（V<major>.<minor>.<patch>）。
 
+## [0.26.5] - 2026-05-10
+
+### Add (V0.26 系列收尾 — Kimi baseline JSON 落档 + docs 数据填充, **6 commit 全闭环**)
+
+V0.26.4 framework + bug fix + docs 框架后, V0.26.5 把后台跑完的 baseline JSON 落档 + docs
+数据填充 + V0.27 路线决策建议. 实际 commit ≠ V0.26 plan 5 commit (plan 是 5 commit, 实际
+跑出 6 commit, V0.26.4 commit 时 baseline 还在后台跑, 拆 V0.26.5 data-only commit 跟
+V0.20.x audit gap commit 拆 framework + data 同模式).
+
+### Baseline 实测数据 (Kimi K2.6 only)
+
+| 指标 | 值 |
+|------|------|
+| corpus | V0.26.1 10 task |
+| provider | openai-kimi (Kimi K2.6 国内版) |
+| **total pass** | **2/10 = 20.0%** |
+| avg_steps | 5.5 |
+| p50 wallclock_s | 45.4s |
+| **total cost** | **$0.21** (vs 估算 $0.5, cache hit + max_steps 早 abort 降低) |
+
+**capability_axis pass rate matrix**:
+- ✅ **multi-tab 100%** (Kimi 真用 switch_tab)
+- ✅ **failure-recovery 100%** (Kimi 看 SYSTEM_PROMPT 第 14 条不死磕)
+- ❌ baseline / iframe / drag / upload / download / dialog / keyboard-nav **全 0%**
+
+**failure_buckets**: 2 OK / 2 PREDICATE_FAIL / 4 max_steps / 1 LLM_FAILED / 1 EVAL_INFRA_ERROR.
+
+### V0.27 决策 (基于 baseline)
+
+**Kimi-only baseline 不足以直接开 V0.28 无人值守模式** — iframe/drag/upload 0% 失败率高
+但**不能确定是 Kimi vision 限制还是 web-agent 框架问题**. V0.27 启动时**必须**:
+1. 配 ANTHROPIC_API_KEY 跑 cross-provider baseline (~$3.6 单次)
+2. 对比 anthropic vs openai-kimi 各 9 能力轴 pass rate
+3. 若 Anthropic ≥80% → V0.28 按 capability 放权; 若也 <60% → 必须先修 web-agent 框架 bug
+
+### Changed
+
+- `data/eval/baseline-V0.26.4-kimi.json` **新增** baseline JSON (~9KB, V0.26.2 metrics
+  schema 完整: metrics list + aggregate + by_capability_axis + git_sha=41c50a2 关联代码版本).
+- `docs/eval-baseline-V0.26.md` 数据填充: 总体数据 / capability_axis pass rate matrix /
+  failure_buckets 分布 / V0.27 决策建议表 / 后续动作清单 (4 项 V0.27/V0.28 todo).
+- `data/eval/trace.db` + `data/eval/screenshots/` gitignored (V0.26.4 已加, V0.26.5 仅 commit JSON).
+
+### Compatibility
+
+- 纯 data + docs 改动, 0 行代码改动. ruff/mypy/pytest 跟 V0.26.4 等价 (491 + 16 skip).
+- 真 chromium 15/15 全过 (无新).
+- baseline JSON 是 V0.26.5 实测产物, V0.27/V0.28 决策的客观证据底座.
+
+### Why patch (V0.26.5) 不 minor
+
+- 0 行代码 + 仅 data 落档 + docs 填充; SemVer "data + docs → patch", 0.26.4 → 0.26.5.
+- V0.26 系列 6 commit 收尾, V0.27 候选清单已在 docs/eval-baseline-V0.26.md V0.27 路线协同节.
+
 ## [0.26.4] - 2026-05-10
 
 ### Add (V0.26 系列 — Kimi baseline 真跑 pipeline 验通 + bug fix _last_task_id SQL + Kimi name 标记)

@@ -1,0 +1,263 @@
+{
+  "run_id": "06db694e0c6d",
+  "started_at": 1778441892.94,
+  "ended_at": 1778442308.92,
+  "git_sha": "41c50a2",
+  "web_agent_version": "0.26.3",
+  "corpus_version": "0.26.3",
+  "vcr_replay": false,
+  "providers": [
+    "openai-kimi"
+  ],
+  "metrics": [
+    {
+      "task_id": "baseline-extract-h1-001",
+      "provider": "openai-kimi",
+      "run_id": "aaed0ddd",
+      "pass": false,
+      "failure_bucket": "PREDICATE_FAIL",
+      "steps": 2,
+      "wallclock_s": 14.18,
+      "web_agent_task_id": "d0a0ecfbf05c",
+      "final_result": "é‡åå°º ç¼ æ˜¯ç²’åä¹‹é—´ çš„„å…³è”",
+      "predicate_result": {
+        "matched": false,
+        "reason": "substring '量子纠缠是粒子之间的关联' not in result 'é‡åå°º ç¼ æ˜¯ç²’åä¹‹é—´ çš„„å…³è”'",
+        "name": "Substring"
+      },
+      "input_tokens": 7310,
+      "output_tokens": 338,
+      "input_cost_usd": 0.004386,
+      "output_cost_usd": 0.000845
+    },
+    {
+      "task_id": "v021-multitab-popup-extract",
+      "provider": "openai-kimi",
+      "run_id": "8dd6ce23",
+      "pass": true,
+      "failure_bucket": "OK",
+      "steps": 6,
+      "wallclock_s": 35.29,
+      "web_agent_task_id": "23c4edcf3715",
+      "final_result": "popup-h1-token-7d3a",
+      "predicate_result": {
+        "matched": true,
+        "reason": "matched substring 'popup-h1-token-7d3a'",
+        "name": "Substring"
+      },
+      "input_tokens": 26448,
+      "output_tokens": 978,
+      "input_cost_usd": 0.015869,
+      "output_cost_usd": 0.002445
+    },
+    {
+      "task_id": "v022-iframe-click-button",
+      "provider": "openai-kimi",
+      "run_id": "efe0304e",
+      "pass": false,
+      "failure_bucket": "(max_steps",
+      "steps": 8,
+      "wallclock_s": 50.95,
+      "web_agent_task_id": "f3d84c2cf444",
+      "final_result": "(max_steps 耗尽未完成)",
+      "predicate_result": {
+        "matched": false,
+        "reason": "Substring: FAIL (substring 'iframe-clicked-marker-b91f' not in result '(max_steps 耗尽未完成)') | TraceContainsAction: OK (trace 含 3 次 'click' (>= 1))",
+        "name": "AllOf"
+      },
+      "input_tokens": 38768,
+      "output_tokens": 952,
+      "input_cost_usd": 0.023261,
+      "output_cost_usd": 0.00238
+    },
+    {
+      "task_id": "v023-drag-src-to-dst",
+      "provider": "openai-kimi",
+      "run_id": "f836f6fb",
+      "pass": false,
+      "failure_bucket": "(max_steps",
+      "steps": 8,
+      "wallclock_s": 50.88,
+      "web_agent_task_id": "a4b60f5e41fc",
+      "final_result": "(max_steps 耗尽未完成)",
+      "predicate_result": {
+        "matched": false,
+        "reason": "Substring: FAIL (substring 'drop-zone-accepted-c4e2' not in result '(max_steps 耗尽未完成)') | TraceContainsAction: OK (trace 含 1 次 'drag' (>= 1))",
+        "name": "AllOf"
+      },
+      "input_tokens": 38464,
+      "output_tokens": 672,
+      "input_cost_usd": 0.023078,
+      "output_cost_usd": 0.00168
+    },
+    {
+      "task_id": "v023-upload-to-file-input",
+      "provider": "openai-kimi",
+      "run_id": "5bc663ff",
+      "pass": false,
+      "failure_bucket": "EVAL_INFRA_ERROR",
+      "steps": 0,
+      "wallclock_s": 5.08,
+      "web_agent_task_id": "",
+      "final_result": "INFRA: FileNotFoundError: [Errno 2] No such file or directory: '/tmp/v026-corpus-fake.txt'",
+      "predicate_result": {
+        "matched": false,
+        "reason": "[Errno 2] No such file or directory: '/tmp/v026-corpus-fake.txt'",
+        "name": "N/A"
+      },
+      "input_tokens": 0,
+      "output_tokens": 0,
+      "input_cost_usd": 0.0,
+      "output_cost_usd": 0.0
+    },
+    {
+      "task_id": "v023-download-link-extract-filename",
+      "provider": "openai-kimi",
+      "run_id": "e15c09af",
+      "pass": false,
+      "failure_bucket": "PREDICATE_FAIL",
+      "steps": 7,
+      "wallclock_s": 43.27,
+      "web_agent_task_id": "36025e7441d9",
+      "final_result": "download.txt",
+      "predicate_result": {
+        "matched": false,
+        "reason": "Substring: FAIL (substring 'v026-corpus-report-9f2e.pdf' not in result 'download.txt') | TraceObsContains: FAIL (trace 无 obs 含 'downloaded:' (检查 V0.24.1 helper drain 是否到达))",
+        "name": "AllOf"
+      },
+      "input_tokens": 31983,
+      "output_tokens": 1540,
+      "input_cost_usd": 0.01919,
+      "output_cost_usd": 0.00385
+    },
+    {
+      "task_id": "v024-dialog-confirm-extract-message",
+      "provider": "openai-kimi",
+      "run_id": "312a213c",
+      "pass": false,
+      "failure_bucket": "(max_steps",
+      "steps": 8,
+      "wallclock_s": 47.5,
+      "web_agent_task_id": "8b66c9a83749",
+      "final_result": "(max_steps 耗尽未完成)",
+      "predicate_result": {
+        "matched": false,
+        "reason": "Substring: FAIL (substring 'dialog-message-token-e5d7' not in result '(max_steps 耗尽未完成)') | TraceObsContains: FAIL (trace 无 obs 含 'dialog confirm:' (检查 V0.24.1 helper drain 是否到达))",
+        "name": "AllOf"
+      },
+      "input_tokens": 36592,
+      "output_tokens": 672,
+      "input_cost_usd": 0.021955,
+      "output_cost_usd": 0.00168
+    },
+    {
+      "task_id": "v024-keyboard-nav-scroll-to-bottom",
+      "provider": "openai-kimi",
+      "run_id": "eb36f12d",
+      "pass": false,
+      "failure_bucket": "(max_steps",
+      "steps": 10,
+      "wallclock_s": 61.25,
+      "web_agent_task_id": "1259d18a252c",
+      "final_result": "(max_steps 耗尽未完成)",
+      "predicate_result": {
+        "matched": false,
+        "reason": "substring 'bottom-of-modal-found-d2c8' not in result '(max_steps 耗尽未完成)'",
+        "name": "Substring"
+      },
+      "input_tokens": 52640,
+      "output_tokens": 1960,
+      "input_cost_usd": 0.031584,
+      "output_cost_usd": 0.0049
+    },
+    {
+      "task_id": "v025-failure-recovery-find-valid-button",
+      "provider": "openai-kimi",
+      "run_id": "2a0c67bc",
+      "pass": true,
+      "failure_bucket": "OK",
+      "steps": 2,
+      "wallclock_s": 11.08,
+      "web_agent_task_id": "507821cbcdbc",
+      "final_result": "valid-mark-clicked-b7f4",
+      "predicate_result": {
+        "matched": true,
+        "reason": "matched substring 'valid-mark-clicked-b7f4'",
+        "name": "Substring"
+      },
+      "input_tokens": 7288,
+      "output_tokens": 166,
+      "input_cost_usd": 0.004373,
+      "output_cost_usd": 0.000415
+    },
+    {
+      "task_id": "v021-v022-popup-with-iframe-click",
+      "provider": "openai-kimi",
+      "run_id": "787acf83",
+      "pass": false,
+      "failure_bucket": "LLM_FAILED",
+      "steps": 4,
+      "wallclock_s": 96.49,
+      "web_agent_task_id": "871486323f96",
+      "final_result": "LLM_FAILED at step 3: RuntimeError: openai-kimi(kimi-k2.6) 没返回 tool_call（可能 thinking 占满 max_tokens）。reasoning/content 预览: 'click=1 两次都没变化，说明这个 data URI 链接在当前页点击不会导航也不会弹 tab。但任务明确说“click 弹新 tab”。  \\n观察当前 tab 的 URL 已经是被编码过的残留字符串，说明之前可能已经点过并且页面状态异常。  \\n最合理的恢复策略：直接在当前页面把 open 链接的 href 当成目标地址，手动在新 tab 打开——但 agent 没有“新窗口打开链接”的 API。  \\n换个思路：当前页面本身可能就是那个“新 tab”的内容（因为 URL 看起来像被编码过的 data URI 残余）。让我先 extract 看看当前页面实际渲染出来的内容，确认是不是已经包含'",
+      "predicate_result": {
+        "matched": false,
+        "reason": "Substring: FAIL (substring 'cross-feature-iframe-popup-1ec5' not in result 'LLM_FAILED at step 3:) | TraceContainsAction: OK (trace 含 1 次 'switch_tab' (>= 1)) | TraceContainsAction: OK (trace 含 2 次 'click' (>= 1))",
+        "name": "AllOf"
+      },
+      "input_tokens": 17292,
+      "output_tokens": 16384,
+      "input_cost_usd": 0.010375,
+      "output_cost_usd": 0.04096
+    }
+  ],
+  "aggregate": {
+    "openai-kimi": {
+      "task_count": 10,
+      "pass_count": 2,
+      "pass_rate": 0.2,
+      "avg_steps": 5.5,
+      "median_wallclock_s": 45.38,
+      "total_input_tokens": 256785,
+      "total_output_tokens": 23662,
+      "total_input_cost_usd": 0.1541,
+      "total_output_cost_usd": 0.0592,
+      "failure_buckets": {
+        "PREDICATE_FAIL": 2,
+        "OK": 2,
+        "(max_steps": 4,
+        "EVAL_INFRA_ERROR": 1,
+        "LLM_FAILED": 1
+      }
+    }
+  },
+  "by_capability_axis": {
+    "baseline": {
+      "openai-kimi": 0.0
+    },
+    "multi-tab": {
+      "openai-kimi": 1.0
+    },
+    "iframe": {
+      "openai-kimi": 0.0
+    },
+    "drag": {
+      "openai-kimi": 0.0
+    },
+    "upload": {
+      "openai-kimi": 0.0
+    },
+    "download": {
+      "openai-kimi": 0.0
+    },
+    "dialog": {
+      "openai-kimi": 0.0
+    },
+    "keyboard-nav": {
+      "openai-kimi": 0.0
+    },
+    "failure-recovery": {
+      "openai-kimi": 1.0
+    }
+  }
+}
