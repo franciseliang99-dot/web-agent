@@ -40,7 +40,8 @@ class FakeLLMClient:
         self._actions = list(actions)
         self._i = 0
 
-    async def plan(self, goal, screenshot_b64, marks, trace) -> Action:
+    async def plan(self, goal, screenshot_b64, marks, trace, **kwargs) -> Action:
+        # V0.21.2: **kwargs 接 tabs/current_idx
         a = self._actions[min(self._i, len(self._actions) - 1)]
         self._i += 1
         return a

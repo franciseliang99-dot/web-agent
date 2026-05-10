@@ -35,4 +35,7 @@ class LLMClient(Protocol):
         screenshot_b64: str,
         marks: list[Mark],
         trace: Trace,
+        *,
+        tabs: list[tuple[int, str]] | None = None,
+        current_idx: int = 0,
     ) -> Action: ...

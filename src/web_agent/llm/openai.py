@@ -59,6 +59,9 @@ class OpenAIClient:
         screenshot_b64: str,
         marks: list[Mark],
         trace: Trace,
+        *,
+        tabs: list[tuple[int, str]] | None = None,
+        current_idx: int = 0,
     ) -> Action:
         user_content: list[dict[str, Any]] = [
             {
@@ -68,7 +71,9 @@ class OpenAIClient:
                     "detail": "high",  # 'low' 省 token 但 SoM 编号易看不清；'high' 更稳
                 },
             },
-            {"type": "text", "text": build_user_text(goal, marks, trace)},
+            {"type": "text", "text": build_user_text(
+                goal, marks, trace, tabs=tabs, current_idx=current_idx,
+            )},
         ]
 
         kwargs: dict[str, Any] = {

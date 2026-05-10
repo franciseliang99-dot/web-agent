@@ -2,6 +2,54 @@
 
 All notable changes to web-agent. 版本号遵循 SemVer 简化形式（V<major>.<minor>.<patch>）。
 
+## [0.21.2] - 2026-05-09
+
+### Add (V0.21 multi-tab 系列第 3 commit — tabs header 进 user_text, LLM 真看到 tab 状态)
+
+V0.21.1 落档 loop 派发后, LLM 能切 tab 但**看不到 tab 状态** — 只在 SYSTEM_PROMPT 第 10 条
+被告知"可能有多 tab", 实际 perceive 截图只显示当前 tab. V0.21.2 补反馈闭环: 每 step 算
+tabs 列表渲染 header `Tabs (N open, current=X): [0] "title-A" [1] "title-B"` 进 user_text,
+LLM 第一眼看到环境状态再读 marks 动作面板.
+
+### Changed
+
+- `src/web_agent/llm/_schema.py` 加 `_render_tabs_header(tabs, current_idx)` helper +
+  `build_user_text` 加 KW-only `tabs: list[tuple[int, str]] | None = None` /
+  `current_idx: int = 0` 参数. 默认 None/空 → 跳过渲染 (向后兼容老 caller).
+  header 位置: goal → trace → **tabs** → marks → 提示语 (LLM 读完任务和历史看 tab 状态再看动作).
+  title 截 60 字符防 SEO 堆词污染上下文.
+- `src/web_agent/llm/base.py` `LLMClient.plan` Protocol 加 KW-only `tabs/current_idx` 默认参数
+  (不破现有 FakeLLMClient — Python KW-only + 默认值 structural typing 兼容).
+- `src/web_agent/llm/anthropic.py` / `openai.py` `plan()` 签名同步加 2 个 KW-only 参数 +
+  传给 `build_user_text`.
+- `src/web_agent/loop.py` 加 `_gather_tab_titles(pages)` async helper:
+  - 串行 await `page.title()` (N≤5 时 ms 级开销可忽略, V0.21.x 不优化, 留 TODO 给 V0.22+ asyncio.gather).
+  - 容错 fallback 链: title() 返空 → URL path 末 60 字符; URL 也无 / title() raise → "(untitled)".
+  - 任何 exception 不 raise (page closed / 网络断 → 不该中断 loop).
+- `loop.py` plan() 调用前算 `tabs = await _gather_tab_titles(step_pages)` 传给 client.plan
+  (loop 算好不让 client 碰 page/ctx 保持解耦).
+- `tests/test_llm_schema.py` 加 5 个 V0.21.2 test: 不传 tabs 跳 header / 单 tab 渲染 / 多 tab
+  current_idx 标记 / 长 title 截断 / header 在 marks 之前.
+- `tests/test_loop_main.py` `FakePage` 加 `async title()` + `title=` ctor; 加 3 个 V0.21.2 test:
+  plan() 收到 tabs/current_idx kwargs (含 SwitchTab 后 current_idx 跟随变) /
+  _gather_tab_titles fallback URL / fallback "(untitled)".
+
+### Compatibility
+
+- 老 caller 不传 tabs/current_idx → header 跳过, prompt 完全等价 V0.21.1.
+- jd_extract / list_extract 半自动模式: 现有调用未传 tabs → header 跳过 (这俩任务单 tab
+  perceive, header 反馈不重要; V0.22+ 视情况补).
+- LLM 第一次真看到 tab 状态: V0.21.0 schema 解锁 + V0.21.1 派发解锁 + V0.21.2 反馈解锁 = 闭环.
+  下一步 V0.21.3 popup auto-register listener 让新弹 tab 自动出现在 header 里.
+- mypy strict 0; ruff 0; pytest 306 + 5 (schema header) + 3 (loop tabs kwargs/fallback) =
+  314 + 1 skip 全绿.
+
+### Why patch (V0.21.2) 不 minor
+
+- LLMClient Protocol 加 KW-only 默认参数是**可选扩展**, 老 fake/真 client 不传仍工作 (structural typing).
+- 行为变化只在: 多 tab 场景 LLM 多看到一段 header. 老单 tab caller 100% 等价.
+- SemVer "向后兼容的 enhance → patch", 0.21.1 → 0.21.2.
+
 ## [0.21.1] - 2026-05-09
 
 ### Add (V0.21 multi-tab 系列第 2 commit — loop 改读 ctx + 派发 switch_tab/close_tab)

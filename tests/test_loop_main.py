@@ -38,7 +38,8 @@ class FakeLLMClient:
         self._actions = list(actions)
         self._i = 0
 
-    async def plan(self, goal, screenshot_b64, marks, trace) -> Action:
+    async def plan(self, goal, screenshot_b64, marks, trace, **kwargs) -> Action:
+        # V0.21.2: **kwargs 接 tabs/current_idx (loop 始终传, fake 测试不用)
         a = self._actions[min(self._i, len(self._actions) - 1)]
         self._i += 1
         return a
@@ -51,8 +52,9 @@ class FakePage:
         async def press(self, key: str) -> None:
             return None
 
-    def __init__(self, url: str = "about:blank") -> None:
+    def __init__(self, url: str = "about:blank", title: str = "") -> None:
         self.url = url
+        self._title = title
         self.keyboard = FakePage._Keyboard()
         self.brought_to_front = 0
         self.closed = False
@@ -65,6 +67,9 @@ class FakePage:
 
     async def close(self) -> None:
         self.closed = True
+
+    async def title(self) -> str:
+        return self._title
 
 
 class FakeContext:
@@ -185,7 +190,7 @@ async def test_memories_injected_as_synthetic_step_minus_one(
         name = "fake"
         model = "fake"
 
-        async def plan(self, goal, screenshot_b64, marks, trace):
+        async def plan(self, goal, screenshot_b64, marks, trace, **kwargs):
             seen_traces.append(list(trace.for_llm()))
             return DoneAction(thought="x", result="ok")
 
@@ -224,7 +229,7 @@ async def test_llm_exception_captured_writes_error_step(
         name = "fake"
         model = "fake"
 
-        async def plan(self, goal, screenshot_b64, marks, trace):
+        async def plan(self, goal, screenshot_b64, marks, trace, **kwargs):
             raise RuntimeError("503 upstream timeout")
 
     db = tmp_path / "trace.db"
@@ -417,3 +422,79 @@ def test_page_fingerprint_includes_active_idx():
     # 默认 active_idx=0 向后兼容 (单 tab callers 不传)
     fp_default = _page_fingerprint("https://x.example/", [_DUMMY_MARK])
     assert fp_default == fp_tab0
+
+
+# ---------- V0.21.2 loop 集成: plan() 收到 tabs/current_idx ----------
+
+
+async def test_plan_called_with_tabs_and_current_idx(
+    monkeypatch, tmp_path, patch_loop_internals
+):
+    """V0.21.2: loop 每 step 算 tabs + current_idx 传给 client.plan().
+
+    验证 RecordingLLMClient 收到的 kwargs 含 tabs=[(idx, title)] + current_idx=active_idx;
+    切 tab 后 current_idx 应跟随 active_idx 变.
+    """
+    monkeypatch.delenv("WEB_AGENT_AUTO_APPROVE", raising=False)
+    pages = [
+        FakePage(url="https://a.example/", title="Tab A"),
+        FakePage(url="https://b.example/", title="Tab B"),
+    ]
+    seen_kwargs: list[dict] = []
+
+    class RecordingLLMClient:
+        name = "fake"
+        model = "fake"
+
+        def __init__(self, actions: list[Action]) -> None:
+            self._actions = list(actions)
+            self._i = 0
+
+        async def plan(self, goal, screenshot_b64, marks, trace, **kwargs):
+            seen_kwargs.append(kwargs)
+            a = self._actions[min(self._i, len(self._actions) - 1)]
+            self._i += 1
+            return a
+
+    client = RecordingLLMClient([
+        SwitchTabAction(thought="切 b", idx=1),
+        DoneAction(thought="完成", result="ok"),
+    ])
+    result = await run_react_loop(
+        FakeContext(pages), client, goal="测 tabs kwargs",
+        max_steps=3, db_path=tmp_path / "trace.db",
+        screenshots_dir=tmp_path / "shots",
+    )
+    assert result == "ok"
+    # 第 0 步: active_idx=0
+    assert seen_kwargs[0]["current_idx"] == 0
+    assert seen_kwargs[0]["tabs"] == [(0, "Tab A"), (1, "Tab B")]
+    # 第 1 步: SwitchTab(1) 已派发 → active_idx=1
+    assert seen_kwargs[1]["current_idx"] == 1
+    assert seen_kwargs[1]["tabs"] == [(0, "Tab A"), (1, "Tab B")]
+
+
+def test_gather_tab_titles_fallback_url_on_empty_title():
+    """V0.21.2: title() 返空 → fallback URL path[-60:]."""
+    import asyncio
+    from web_agent.loop import _gather_tab_titles
+    pages = [
+        FakePage(url="https://example.com/very/long/path/segment", title=""),
+    ]
+    result = asyncio.run(_gather_tab_titles(pages))
+    assert len(result) == 1
+    assert result[0][0] == 0
+    assert "example.com" in result[0][1] or "/very/long/path/segment" in result[0][1]
+
+
+def test_gather_tab_titles_fallback_untitled_on_no_url():
+    """V0.21.2: title() 失败 + 无 url → '(untitled)' 兜底, 不 raise."""
+    import asyncio
+    from web_agent.loop import _gather_tab_titles
+
+    class BarePage:
+        async def title(self) -> str:
+            raise RuntimeError("page navigating")
+
+    result = asyncio.run(_gather_tab_titles([BarePage()]))
+    assert result == [(0, "(untitled)")]

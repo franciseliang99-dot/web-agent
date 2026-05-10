@@ -60,7 +60,8 @@ class RecordingLLMClient:
         self._i = 0
         self.observed_traces: list[list[str]] = []
 
-    async def plan(self, goal, screenshot_b64, marks, trace) -> Action:
+    async def plan(self, goal, screenshot_b64, marks, trace, **kwargs) -> Action:
+        # V0.21.2: **kwargs 接 tabs/current_idx
         self.observed_traces.append([s.observation for s in trace.steps])
         a = self._actions[min(self._i, len(self._actions) - 1)]
         self._i += 1

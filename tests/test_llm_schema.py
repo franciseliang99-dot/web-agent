@@ -82,3 +82,66 @@ def test_switch_tab_close_tab_schema_shape():
         assert s["properties"]["idx"]["type"] == "integer", f"{tool_name}.idx 必须 integer"
         assert "idx" in s["required"], f"{tool_name} idx 必须 required"
         assert "thought" in s["required"]
+
+
+# ---------- V0.21.2 build_user_text tabs header 渲染 ----------
+
+
+def test_build_user_text_no_tabs_skips_header():
+    """V0.21.2: 不传 tabs (老 caller / jd_extract 等) → header 不渲染, 向后兼容."""
+    from web_agent.llm._schema import build_user_text
+    from web_agent.trace import Trace
+    text = build_user_text("做事", marks=[], trace=Trace(task_id="t", goal="做事"))
+    assert "# 当前 Tabs" not in text
+
+
+def test_build_user_text_single_tab_renders_header():
+    """V0.21.2: 单 tab 也渲染 header (LLM 知道 tab 概念存在)."""
+    from web_agent.llm._schema import build_user_text
+    from web_agent.trace import Trace
+    text = build_user_text(
+        "做事", marks=[], trace=Trace(task_id="t", goal="做事"),
+        tabs=[(0, "Inbox - Gmail")], current_idx=0,
+    )
+    assert "# 当前 Tabs (1 open, current=0)" in text
+    assert '[0] "Inbox - Gmail"' in text
+
+
+def test_build_user_text_multi_tab_marks_current():
+    """V0.21.2: 多 tab + current_idx=1 → header 标 current=1, 列出全部 tab idx+title."""
+    from web_agent.llm._schema import build_user_text
+    from web_agent.trace import Trace
+    text = build_user_text(
+        "做事", marks=[], trace=Trace(task_id="t", goal="做事"),
+        tabs=[(0, "Inbox"), (1, "GitHub"), (2, "SO")], current_idx=1,
+    )
+    assert "current=1)" in text
+    for snippet in ('[0] "Inbox"', '[1] "GitHub"', '[2] "SO"'):
+        assert snippet in text
+
+
+def test_build_user_text_truncates_long_title():
+    """V0.21.2: title >60 字符截断 (防 SEO 堆词污染上下文)."""
+    from web_agent.llm._schema import build_user_text
+    from web_agent.trace import Trace
+    long_title = "A" * 200
+    text = build_user_text(
+        "做事", marks=[], trace=Trace(task_id="t", goal="做事"),
+        tabs=[(0, long_title)], current_idx=0,
+    )
+    # 截 60 字符
+    assert "A" * 60 in text
+    assert "A" * 61 not in text
+
+
+def test_build_user_text_tabs_header_position_before_marks():
+    """V0.21.2: header 出现在 marks 之前 (LLM 先看 tabs 状态再读 marks 动作面板)."""
+    from web_agent.llm._schema import build_user_text
+    from web_agent.trace import Trace
+    text = build_user_text(
+        "做事", marks=[], trace=Trace(task_id="t", goal="做事"),
+        tabs=[(0, "X")], current_idx=0,
+    )
+    tabs_pos = text.index("# 当前 Tabs")
+    marks_pos = text.index("# 当前可交互元素清单")
+    assert tabs_pos < marks_pos, "tabs header 应在 marks 之前"

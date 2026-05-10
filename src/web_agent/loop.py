@@ -199,6 +199,26 @@ def _captcha_enabled() -> bool:
     return os.environ.get("WEB_AGENT_CAPTCHA_DISABLE", "").lower() not in ("true", "1", "yes")
 
 
+async def _gather_tab_titles(pages: list[Page]) -> list[tuple[int, str]]:
+    """V0.21.2: 取每个 page.title() 失败 fallback URL path. 串行 — N≤5 ms 级开销可忽略.
+
+    title() 返空字符串 (about:blank / 加载中) → 也走 URL fallback 让 LLM 至少看 host/path.
+    任何 exception (page closed / 网络断) → fallback URL 字符串. 不 raise 防 loop 中断.
+    """
+    out: list[tuple[int, str]] = []
+    for i, p in enumerate(pages):
+        title = ""
+        try:
+            title = (await p.title()) or ""
+        except Exception:
+            pass
+        if not title:
+            url = getattr(p, "url", "") or ""
+            title = url.split("?")[0][-60:] if url else "(untitled)"
+        out.append((i, title))
+    return out
+
+
 async def _handle_captcha(
     page: Page,
     step_i: int,
@@ -363,8 +383,14 @@ async def run_react_loop(
 
             logger.info("step %d perceive: %d marks, screenshot %s | t+%.1fs", step_i, len(marks), shot_path, elapsed)
 
+            # V0.21.2: 算 tabs 列表传给 LLM 让它看到 multi-tab 状态. 单 tab 也传 (LLM 知道
+            # tab 概念存在). 失败 fallback URL — 不 raise 防 loop 中断.
+            tabs = await _gather_tab_titles(step_pages)
             try:
-                action: Action = await client.plan(goal, screenshot_b64, marks, trace)
+                action: Action = await client.plan(
+                    goal, screenshot_b64, marks, trace,
+                    tabs=tabs, current_idx=active_idx,
+                )
             except Exception as e:
                 # SDK 内置 retry 已耗尽 / network / tool_call=None / 其他 LLM 异常
                 result = (

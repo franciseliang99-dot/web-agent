@@ -53,6 +53,9 @@ class AnthropicClient:
         screenshot_b64: str,
         marks: list[Mark],
         trace: Trace,
+        *,
+        tabs: list[tuple[int, str]] | None = None,
+        current_idx: int = 0,
     ) -> Action:
         user_content = [
             {
@@ -63,7 +66,9 @@ class AnthropicClient:
                     "data": screenshot_b64,
                 },
             },
-            {"type": "text", "text": build_user_text(goal, marks, trace)},
+            {"type": "text", "text": build_user_text(
+                goal, marks, trace, tabs=tabs, current_idx=current_idx,
+            )},
         ]
 
         # V0.17.1: anthropic SDK TypedDict 直接 annotate, 替 4 处 cast(Any).
