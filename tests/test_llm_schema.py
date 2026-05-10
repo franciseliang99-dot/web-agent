@@ -106,6 +106,20 @@ def test_upload_schema_shape():
         assert field in s["required"], f"upload {field} 必须 required"
 
 
+def test_system_prompt_includes_keyboard_navigation_clauses():
+    """V0.24.2: SYSTEM_PROMPT 第 13 条键盘导航 (PageDown/Escape/Tab) 让 LLM 知道用 keyboard_shortcut.
+
+    V0.19.0 keyboard_shortcut 已是通用工具但 SYSTEM_PROMPT 第 8 条只举编辑器场景 (Control+End/a),
+    LLM 不会自己想到用 PageDown 滚长列表 / Escape 关 modal. V0.24.2 显式列候选清单提示 LLM.
+    """
+    from web_agent.llm._schema import SYSTEM_PROMPT
+    # 关键键盘候选: 滚动 / 跳首末 / 关 modal / 切焦点
+    for keyword in ("PageDown", "PageUp", "Home", "End", "Escape", "Tab"):
+        assert keyword in SYSTEM_PROMPT, f"V0.24.2: SYSTEM_PROMPT 应含 {keyword!r} 键盘导航候选"
+    # 关闭 modal 的语义提示
+    assert "modal" in SYSTEM_PROMPT or "popover" in SYSTEM_PROMPT
+
+
 # ---------- V0.21.2 build_user_text tabs header 渲染 ----------
 
 

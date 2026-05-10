@@ -2,6 +2,59 @@
 
 All notable changes to web-agent. 版本号遵循 SemVer 简化形式（V<major>.<minor>.<patch>）。
 
+## [0.24.2] - 2026-05-09
+
+### Add (V0.24 系列收尾 — SYSTEM_PROMPT 加键盘导航第 13 条, **3 commit 全闭环**)
+
+V0.24 闭环: V0.24.0 dialog handler → V0.24.1 抽 helper (兑现 V0.23.2 simplify TODO) →
+V0.24.2 SYSTEM_PROMPT 键盘导航 (本). LLM 现 (a) 不被 dialog 卡死 + (b) 知道用键盘导航
+比 scroll 更稳.
+
+V0.19.0 `keyboard_shortcut` 已是通用工具但 SYSTEM_PROMPT 第 8 条只举编辑器场景
+(Control+End / Control+a / End), **LLM 不会自己想到用 PageDown 滚长列表 / Escape 关 modal /
+Tab 切焦点** — V0.24.2 显式列候选清单提示 LLM.
+
+### Changed
+
+- `src/web_agent/llm/_schema.py` SYSTEM_PROMPT 加第 13 条:
+  - "遇到长列表/长 modal/长 SPA 页, 优先用 keyboard_shortcut 比 scroll 像素级更稳"
+  - 常用键候选: `PageDown`/`PageUp` 翻屏, `Home`/`End` 跳页首末 (含 textarea/contenteditable
+    内首末), `Escape` 关 modal/popover/广告/弹窗, `Tab`/`Shift+Tab` 切换焦点 (无 SoM mark
+    时找下一个交互元素的 fallback).
+- `tests/test_llm_schema.py` 加 `test_system_prompt_includes_keyboard_navigation_clauses`
+  assert 关键词 (PageDown/PageUp/Home/End/Escape/Tab + modal/popover) 在 SYSTEM_PROMPT.
+
+### V0.24 系列总结 (3 commit / V0.24.0-2)
+
+| ver | commit | 解锁节点 |
+|-----|--------|---------|
+| V0.24.0 | 08960cc | browser dialog handler (4 类 dialog 三档 policy) + obs deque 注入 |
+| V0.24.1 | 69c2e84 | refactor _drain_pre_step_observations helper (兑现 V0.23.2 simplify TODO) |
+| V0.24.2 | 本 | SYSTEM_PROMPT 加第 13 条键盘导航候选清单 |
+
+净增 ~20 单元测 + 4 真 chromium dialog smoke. V0.23.3 → V0.24.2 跨度 3 个版本号,
+单元测从 388 → 407 (+19), 真 chromium slow smoke 从 11 → 15 (popup 2 + iframe 2 +
+drag/upload 5 + download 2 + V0.24.0 dialog 4).
+
+### V0.25 候选
+
+- **#5 smart retry + backtracking** (V0.21 plan 第 5 high-leverage; 失败模式分类 +
+  page.go_back) — 估 3 commit
+- **iframe 反检测 CDP 路径** (V0.22.2 留 TODO, 高反爬 reCAPTCHA inside iframe)
+- **iframe a11y tree fallback** (V0.22.4 仅 host name; 跨域内部结构 LLM 仍瞎)
+- **eval golden corpus** (V0.25 plan, 无人值守的数据底座 — 用户场景"完全无人值守"硬前置)
+- **dialog elicit 路径** (V0.24.0 留 TODO, mcp 模式 confirm 走 elicit 让用户决定)
+- **README + ARCHITECTURE 文档 sweep** (V0.16.23 stale → V0.24.2, 跨 V0.17-V0.24 共 8 个 minor)
+- **TypedDict stubs** (DragArgs/UploadArgs/SwitchTabArgs/CloseTabArgs — V0.23.0 simplify TODO)
+- **键盘导航 LLM 行为 eval** (V0.24.2 加 prompt 但没 eval 真用上, 留 V0.25 eval corpus 一并)
+
+### Why patch (V0.24.2) 不 minor
+
+- 仅 SYSTEM_PROMPT 加 1 条 + 1 单测; 对外 LLM tool surface (V0.23.0 schema) 零变化.
+- LLM 行为可能轻微变化 (看到 PageDown/Escape 提示后更倾向用 keyboard_shortcut), 但不 break
+  老 caller.
+- SemVer "向后兼容的 enhance → patch", 0.24.1 → 0.24.2.
+
 ## [0.24.1] - 2026-05-09
 
 ### Refactor (兑现 V0.23.2 simplify subagent TODO 第 (2) 条 — 抽 _drain_pre_step_observations helper)
