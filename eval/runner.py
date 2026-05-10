@@ -201,12 +201,19 @@ async def run_corpus(
 
 
 def _last_task_id(db_path: Path) -> str:
-    """V0.26.0: 拿 trace.db 最后写入的 task_id (run_react_loop 不返出来, 从 db 拿)."""
+    """V0.26.0+V0.26.4: 拿 trace.db 最后写入的 task_id.
+
+    V0.26.4 实测发现 V0.26.0 用错列名 `started` (实际 `started_at`) → SQL OperationalError
+    → except 兜底返 "" → web_agent_task_id 为空 → _read_trace_steps 也返空 → metrics
+    steps=0 input_tokens=0 全为 0. 修正用 started_at.
+    """
     if not db_path.exists():
         return ""
     conn = sqlite3.connect(db_path)
     try:
-        row = conn.execute("SELECT task_id FROM tasks ORDER BY started DESC LIMIT 1").fetchone()
+        row = conn.execute(
+            "SELECT task_id FROM tasks ORDER BY started_at DESC LIMIT 1"
+        ).fetchone()
     except sqlite3.OperationalError:
         return ""
     finally:

@@ -73,6 +73,7 @@ def _check_real_eval_or_cassette(cassette_dir: Path) -> bool:
 
 async def _run_async(args: argparse.Namespace) -> int:
     """V0.26.3: async main — make_client + run_corpus + dump_json + 渲染 markdown."""
+    from dotenv import load_dotenv
     from playwright.async_api import async_playwright
 
     from eval.corpus import ALL_PREDICATES
@@ -83,6 +84,10 @@ async def _run_async(args: argparse.Namespace) -> int:
     )
     from eval.runner import run_corpus
     from web_agent.llm import make_client
+
+    # V0.26.4: load .env (跟 web_agent.cli 同模式) — 让 OPENAI_API_KEY/ANTHROPIC_API_KEY/
+    # OPENAI_BASE_URL 等从 .env 加载. 主 cli 已 load 但 eval/cli.py 是独立 entry.
+    load_dotenv()
 
     tasks = _select_tasks(args.corpus)
     if not tasks:

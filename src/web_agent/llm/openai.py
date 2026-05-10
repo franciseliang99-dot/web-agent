@@ -52,6 +52,10 @@ class OpenAIClient:
         self._tools = to_openai_tools(strict=True)
         # Kimi (Moonshot) OpenAI-compat 端点不支持 tool_choice="required" + 不识 max_completion_tokens
         self._is_kimi = bool(base_url and "moonshot" in base_url.lower())
+        # V0.26.4: Kimi 显式标 "openai-kimi" 让 eval metrics report 区分 GPT vs Kimi
+        # (V0.21.2 plan F 节已用此标记). instance attribute 覆盖 class attribute.
+        if self._is_kimi:
+            self.name = "openai-kimi"
         self.last_usage: Usage | None = None  # V0.26.2: eval/runner 累加用
 
     async def plan(

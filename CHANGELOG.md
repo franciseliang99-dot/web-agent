@@ -2,6 +2,87 @@
 
 All notable changes to web-agent. 版本号遵循 SemVer 简化形式（V<major>.<minor>.<patch>）。
 
+## [0.26.4] - 2026-05-10
+
+### Add (V0.26 系列 — Kimi baseline 真跑 pipeline 验通 + bug fix _last_task_id SQL + Kimi name 标记)
+
+V0.26.0/1/2/3 framework + corpus + harness + CLI 后, V0.26.4 真跑 Kimi K2.6 baseline 验
+端到端 pipeline + 实测发现 V0.26.0 SQL 列名错 + 加 Kimi name 区分标记. **baseline JSON 数据
++ docs 实数填充留 V0.26.5** (后台 baseline 跑完落档).
+
+V0.26.4 commit 代码就位, V0.26.5 数据落档 → V0.26 系列 6 commit 实际闭环 (plan 5 commit
+基础上加 1 个 data-only commit, 跟 V0.20.x audit gap commit 拆 framework + data 同模式).
+
+### Bug fix (V0.26.4 实测发现 V0.26.0 SQL 列名错)
+
+V0.26.0 `_last_task_id` SQL `ORDER BY started DESC` 用错列名 (实际 `started_at`) →
+SQL OperationalError → except 兜底返 "" → web_agent_task_id 空 → metrics steps=0 + tokens=0
+全为 0. **V0.26.4 真跑 baseline 时实测发现** (V0.26.0/1/2/3 单测全 mock 不触发该 SQL).
+修正用 `started_at` 后 metrics 真正跑通.
+
+### Changed
+
+- `src/web_agent/llm/openai.py`: `_is_kimi=True` 时 `self.name = "openai-kimi"` 让 eval
+  metrics report 区分 GPT vs Kimi (V0.21.2 plan F 节标记). 类 attribute 默认 "openai" +
+  instance attribute 覆盖, 不破坏 OpenAIClient.name class-level 类型.
+- `eval/runner.py` `_last_task_id` SQL 列名修正 `started` → `started_at` (V0.26.4 实测 bug fix).
+- `eval/cli.py` `_run_async` 加 `load_dotenv()` (跟 web_agent.cli 同模式) — eval 是独立
+  entry, 主 cli 加载的 .env 不传染. 加载后 `OPENAI_API_KEY` / `OPENAI_BASE_URL` 等可从 .env 读.
+- `tests/test_llm_openai.py`:
+  - 老 3 测 `assert client.name == "openai"` 失败因 .env 装 Kimi → `_is_kimi=True` → name
+    改 "openai-kimi". 修加 `monkeypatch.delenv("OPENAI_BASE_URL")` 显式强 GPT 路径.
+  - 加 2 V0.26.4 测: `test_openai_client_kimi_name_is_openai_kimi` (base_url 含 moonshot →
+    name 改 openai-kimi) + `test_openai_client_non_kimi_keeps_openai_name` (OpenRouter 等
+    非 Kimi base_url → name 仍 openai).
+- `.env` 实测发现行有前导 whitespace `   OPENAI_API_KEY=...`, dotenv 不解析带前导空格的
+  环境变量行. V0.26.4 跑前 strip 前导 whitespace.
+- `data/eval/<run_id>.json` **留 V0.26.5** baseline 后台跑完落档 (gitignored 路径但 baseline 文件
+  独立提交).
+- `docs/eval-baseline-V0.26.md` **新建** baseline 总结文档框架 (V0.26.5 填具体 pass rate):
+  - 限制说明 (Kimi 中文 mojibake / tool_choice="auto" / vision detail=high)
+  - V0.27 路线协同 (pass rate ≥80% 放权 / <60% 留 elicit / 中文任务默认 Anthropic)
+  - V0.26 系列 5 commit 总结表
+- 实测 1 task baseline (baseline-extract-h1) 验通 pipeline + 揭示 Kimi 中文 mojibake limitation.
+
+### V0.26 系列总结 (6 commit / V0.26.0-5, V0.26.5 待 baseline 跑完落档)
+
+| ver | 解锁节点 |
+|-----|---------|
+| V0.26.0 | eval/ 顶层模块 + types/predicates/runner 框架 + 1 baseline 示范 task |
+| V0.26.1 | corpus 10 task + 2 trace-aware predicate (TraceContainsAction / TraceObsContains) + token-specific lint |
+| V0.26.2 | A/B harness + token cost (Usage 中性 schema + last_usage Protocol attr) + markdown report (V0.27 vault 数据底座) |
+| V0.26.3 | web-agent-eval CLI + 双 opt-in env (RUN_EVAL=1 + EVAL_REAL=1) + GitHub Actions stub |
+| V0.26.4 | bug fix _last_task_id SQL 列名 + Kimi name 标记 + load_dotenv + docs/baseline 框架 |
+| V0.26.5 | baseline JSON 落档 + docs 数据填充 (data-only commit, baseline 后台跑完触发) |
+
+净增 ~70+ 单元测. V0.25.3 → V0.26.4 跨度 5 个版本号, 单元测 431 → ~500 (+70, 16% 增).
+真 chromium slow smoke 不变 15 (eval 端到端不在 slow smoke channel, opt-in env 单独).
+
+### V0.26 关键决策落档 (跨 5 commit subagent + 实测沉淀)
+
+1. **V0.26.1 sanity 推翻 plan**: drop transient retry task (V0.25.0 单测已覆盖, LLM 0 主动行为);
+   推迟 backtrack task → V0.26.3 cassette ready (data:html 单页 go_back 无 history);
+   凑 10 task 加 cross-feature stress
+2. **V0.26.2 sanity 锁定**: A token usage = Y last_usage 属性 (零破坏 4 fake) / B fresh chromium
+   跨 provider (cookie 隔离 > 内存) / C markdown 表 / D skip wrapper
+3. **V0.26.3 sanity rate-limited 主 agent 自决**: cassette `eval/cassettes/` 隔离 / CLI 默认
+   `--providers anthropic` / 双 opt-in / **wheel packages 加 eval 实测发现**
+4. **V0.26.4 实测 bug fix**: `_last_task_id` SQL 列名 + `.env` 前导 whitespace + Kimi name 标记
+
+### V0.27 候选
+
+- **凭证 vault** (V0.21 plan #6) — V0.26 baseline 数据决定 default provider 选 Anthropic + per-provider 凭证分级
+- **跨 provider baseline 补全** (Anthropic + OpenAI gpt-5.5) — 当前 Kimi-only, 跨 provider 对比留 V0.27 启动时
+- **vcr cassette 真集成** (V0.26.3 留 stub) — 真录回放 0 token CI
+- **iframe 反检测 CDP 路径** (V0.22.2 留 TODO)
+- **README + ARCHITECTURE docs sweep** (V0.16.23 stale → V0.26.4 = 10 minor)
+
+### Why patch (V0.26.4) 不 minor
+
+- baseline 真跑 + JSON 落档 + docs + 1 bug fix; 对外 API/CLI/MCP/LLM tool surface 0 变化.
+- OpenAIClient.name "openai-kimi" 是 instance attribute 覆盖 class default, 老 caller (test_make_client_factory) 不传 OPENAI_BASE_URL 仍走 "openai".
+- SemVer "向后兼容的 enhance + bug fix → patch", 0.26.3 → 0.26.4 (V0.26 系列收尾).
+
 ## [0.26.3] - 2026-05-10
 
 ### Add (V0.26 第 4 commit — web-agent-eval CLI + 双 opt-in env + GitHub Actions stub)

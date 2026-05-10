@@ -17,6 +17,8 @@ from web_agent.llm.openai import DEFAULT_MODEL, OpenAIClient  # noqa: E402
 
 def test_openai_client_init_uses_env_key(monkeypatch):
     monkeypatch.setenv("OPENAI_API_KEY", "sk-test-fake-key-not-real")
+    # V0.26.4: 显式 delenv OPENAI_BASE_URL 防 .env 装 Kimi 时 _is_kimi=True 改 name="openai-kimi"
+    monkeypatch.delenv("OPENAI_BASE_URL", raising=False)
     client = OpenAIClient()
     assert client.name == "openai"
     assert client.model == DEFAULT_MODEL
@@ -50,6 +52,7 @@ def test_openai_client_explicit_model_override(monkeypatch):
 def test_make_client_factory_picks_openai_by_provider_env(monkeypatch):
     monkeypatch.setenv("OPENAI_API_KEY", "sk-test")
     monkeypatch.setenv("WEB_AGENT_LLM_PROVIDER", "openai")
+    monkeypatch.delenv("OPENAI_BASE_URL", raising=False)  # V0.26.4: 防 Kimi 改 name
     from web_agent.llm import make_client
 
     c = make_client()
@@ -59,11 +62,30 @@ def test_make_client_factory_picks_openai_by_provider_env(monkeypatch):
 def test_make_client_factory_picks_openai_by_model_prefix(monkeypatch):
     monkeypatch.setenv("OPENAI_API_KEY", "sk-test")
     monkeypatch.delenv("WEB_AGENT_LLM_PROVIDER", raising=False)
+    monkeypatch.delenv("OPENAI_BASE_URL", raising=False)  # V0.26.4: 防 Kimi 改 name
     from web_agent.llm import make_client
 
     c = make_client(model="gpt-4o")
     assert c.name == "openai"
     assert c.model == "gpt-4o"
+
+
+def test_openai_client_kimi_name_is_openai_kimi(monkeypatch):
+    """V0.26.4: base_url 含 moonshot → name 改 "openai-kimi" 让 eval metrics 区分 GPT vs Kimi."""
+    monkeypatch.setenv("OPENAI_API_KEY", "sk-test")
+    monkeypatch.setenv("OPENAI_BASE_URL", "https://api.moonshot.cn/v1")
+    client = OpenAIClient()
+    assert client.name == "openai-kimi"
+    assert client._is_kimi is True
+
+
+def test_openai_client_non_kimi_keeps_openai_name(monkeypatch):
+    """V0.26.4: 非 Kimi base_url (e.g. OpenRouter) → name 仍 "openai" (类 attribute 默认)."""
+    monkeypatch.setenv("OPENAI_API_KEY", "sk-test")
+    monkeypatch.setenv("OPENAI_BASE_URL", "https://openrouter.ai/api/v1")
+    client = OpenAIClient()
+    assert client.name == "openai"
+    assert client._is_kimi is False
 
 
 def test_provider_from_model_kimi_and_moonshot():

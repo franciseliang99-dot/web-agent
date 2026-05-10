@@ -9,4 +9,4 @@ V0.27 凭证 vault + V0.28 无人值守模式开权限边界.
 跟 tests/ 不同: tests/ 测代码路径 (mock LLM); eval/ 测 LLM 真实表现 (vcr 录回放或真 LLM).
 """
 
-__version__ = "0.26.3"
+__version__ = "0.26.4"
