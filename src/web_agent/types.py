@@ -38,6 +38,19 @@ class BBox(TypedDict):
     h: float
 
 
+@dataclass(frozen=True, slots=True)
+class Usage:
+    """V0.26.2: LLM API 单次调用 token 用量 (跨 provider 中性 schema).
+
+    anthropic resp.usage.input_tokens/output_tokens vs openai resp.usage.prompt_tokens/
+    completion_tokens — 两 SDK 字段名不同, Usage 中性化让 eval/metrics 跨 provider 累加.
+    eval 用 (web_agent 主路径不强依赖, last_usage 属性默认 None 不破坏 fake client).
+    """
+
+    input_tokens: int
+    output_tokens: int
+
+
 @dataclass
 class Mark:
     """SoM (Set-of-Mark) 截图上的可点击/可输入元素，由 perceiver 注入 JS 提取。"""

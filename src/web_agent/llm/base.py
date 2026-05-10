@@ -12,7 +12,7 @@ from __future__ import annotations
 from typing import Protocol, runtime_checkable
 
 from web_agent.trace import Trace
-from web_agent.types import Action, Mark
+from web_agent.types import Action, Mark, Usage
 
 
 @runtime_checkable
@@ -24,10 +24,13 @@ class LLMClient(Protocol):
     - 暴露 `name` 属性用于日志（"anthropic" / "openai" / "gemini" ...）
     - 暴露 `model` 属性用于日志
     - plan() 接收 goal / 截图 b64 / SoM marks / 历史 trace，返回结构化 Action
+    - V0.26.2: 暴露 `last_usage: Usage | None` 属性记录上次 plan() token 用量, 默认 None
+      让现有 FakeLLMClient (V0.21.2 加 **kwargs) 零改动兼容. eval/runner 累加用.
     """
 
     name: str
     model: str
+    last_usage: Usage | None
 
     async def plan(
         self,

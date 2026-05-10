@@ -2,6 +2,70 @@
 
 All notable changes to web-agent. 版本号遵循 SemVer 简化形式（V<major>.<minor>.<patch>）。
 
+## [0.26.2] - 2026-05-10
+
+### Add (V0.26 第 3 commit — A/B harness + token cost metrics + markdown report)
+
+V0.26.0 框架 + V0.26.1 corpus 后, V0.26.2 加跨 provider A/B harness + token cost 计量 +
+markdown 对比表渲染. **决定 V0.27 vault 按 provider 分级权限的关键数据底座** (e.g.
+"OpenAI 在 dialog 类 50% vs Anthropic 90%" → vault 默认 provider 选 Anthropic).
+
+### V0.26.2 关键设计决策 (sanity 锁定)
+
+- **A token usage = Y 选项 last_usage 属性** (Protocol 加默认 None 字段, 现有 4 FakeLLMClient
+  零改动). X 改 plan() 返 tuple 破坏 4 处, Z 留 V0.26.3 cassette 让 metrics 半成品 — 都不选.
+- **B 跨 provider 也 fresh chromium launch** (cookie 隔离 > 200MB×N 内存; 18 cell 串行 ~3 min 可接受).
+- **C report 用 markdown 表** (LLM/PR/issue 友好, 终端 monospace 也对齐, 不引 rich 依赖).
+- **D 不引 wrapper class** — Y 选项 last_usage 已原地暴露, run_one 内 1 行读 + 累加.
+
+### Changed
+
+- `src/web_agent/types.py` 加 `Usage` frozen+slots dataclass (input_tokens / output_tokens) —
+  跨 provider 中性 schema (anthropic input/output_tokens vs openai prompt/completion_tokens).
+- `src/web_agent/llm/base.py` `LLMClient` Protocol 加 `last_usage: Usage | None` 字段
+  (默认 None, 现有 FakeLLMClient 自动兼容因 V0.21.2 已加 **kwargs).
+- `src/web_agent/llm/anthropic.py`: `__init__` 加 `self.last_usage: Usage | None = None`;
+  `plan()` 末尾 `self.last_usage = Usage(input=resp.usage.input_tokens, output=resp.usage.output_tokens)`.
+- `src/web_agent/llm/openai.py`: 同款, OpenAI/Kimi resp.usage.prompt_tokens / completion_tokens
+  字段 (`if resp.usage is not None` 防 Kimi extra_body 边界 None).
+- `eval/pricing.py` **新建** `ModelPricing` dataclass + `PRICING` dict 7 model 价格 (Anthropic
+  Sonnet 4.6 / Opus 4.7 / Haiku 4.5 + OpenAI gpt-5.5 / gpt-4o + Kimi k2.6 / moonshot-v1-128k);
+  `cost_usd(model, in, out) -> tuple[float, float]` 算 USD; 未知 model 返 (0, 0).
+- `eval/metrics.py` **新建** `ProviderSummary` frozen dataclass + `aggregate(metrics)` 跨 task
+  per-provider 聚合 (pass_rate / avg_steps / median_wallclock / total cost / failure_buckets) +
+  `aggregate_by_capability_axis(metrics, task_axis)` 按 axis 分组 (V0.27 vault 分级核心数据).
+- `eval/runner.py`: `TaskMetric` 加 `input_tokens` / `output_tokens` / `input_cost_usd` /
+  `output_cost_usd` 默认 0.0 (V0.26.0 metric 兼容); `run_one` 入口 reset `client.last_usage = None`
+  防 mutable state 跨 task 残留 (sanity 提到的陷阱); 跑后 `last_usage * step 数` 估总 token
+  + `cost_usd` 算 USD; 加 `CorpusReport` dataclass + `run_corpus(tasks, clients, predicates)`
+  跑 task × provider grid 串行 fresh chromium per cell.
+- `eval/report.py` **新建** `dump_json(report, tasks, output_dir)` 落档 (含 git_sha / version /
+  metrics list / aggregate / by_capability_axis schema 跟 V0.26 plan F 节一致); 加
+  `render_provider_summary_markdown` (跨 provider tasks/pass%/avg_steps/p50_wallclock/total_cost
+  对比表) + `render_capability_axis_markdown` (axis × provider pass_rate matrix).
+- `tests/test_eval_metrics.py` **新建** 14 V0.26.2 测:
+  - 3 pricing 测 (PRICING 表覆盖 3 主力 / cost_usd 已知 model / cost_usd 未知 model 返 0)
+  - 5 aggregate 测 (空 / 单 provider / 跨 provider / median wallclock / total cost 累加)
+  - 2 by_capability_axis 测 (跨 axis × provider grouping / orphan task 跳过)
+  - 2 markdown render 测 (provider 表 / by-axis 表 / 空 metrics)
+  - 2 TaskMetric V0.26.2 字段兼容 (token cost 字段存在 + metric_to_dict 含)
+
+### Compatibility
+
+- 老 caller / fixture 不受影响 — `last_usage: Usage | None` 默认 None 让 4 FakeLLMClient 不
+  override 自动兼容; `TaskMetric` 加字段都有默认 0 (V0.26.0 测试构造保持兼容).
+- mypy strict 0 (38 source files: src/web_agent 23 + eval 15); ruff 0;
+  pytest 457 → **472 + 16 skip** (V0.26.2 +14 metrics + 1 token cost 集成测).
+- 真 chromium 15/15 全过 (无新, V0.26.3 vcr cassette 才加 eval slow smoke).
+
+### Why patch (V0.26.2) 不 minor
+
+- LLM tool surface (V0.23.0 schema) 零变化; `last_usage` 是 Protocol 字段扩展不破坏 caller
+  (默认 None + 现有 fake 已 **kwargs).
+- `run_corpus` / `aggregate` / `cost_usd` / `dump_json` / `render_*_markdown` 是 eval 内部
+  扩展, 不影响 src/web_agent 主路径行为 (老 cli/mcp/jd_extract/list_extract 0 改).
+- SemVer "向后兼容的 enhance → patch", 0.26.1 → 0.26.2.
+
 ## [0.26.1] - 2026-05-10
 
 ### Add (V0.26 第 2 commit — corpus 充实 9 task 覆盖 V0.21-V0.25 能力轴 + 2 新 predicate 类)

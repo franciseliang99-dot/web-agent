@@ -22,7 +22,7 @@ from openai import AsyncOpenAI
 
 from web_agent.llm._schema import SYSTEM_PROMPT, build_user_text, to_openai_tools
 from web_agent.trace import Trace
-from web_agent.types import Action, Mark, action_from_tool_call
+from web_agent.types import Action, Mark, Usage, action_from_tool_call
 
 DEFAULT_MODEL = "gpt-5.5"  # 2026-04-24 release，vision-capable；用户可 override
 
@@ -52,6 +52,7 @@ class OpenAIClient:
         self._tools = to_openai_tools(strict=True)
         # Kimi (Moonshot) OpenAI-compat 端点不支持 tool_choice="required" + 不识 max_completion_tokens
         self._is_kimi = bool(base_url and "moonshot" in base_url.lower())
+        self.last_usage: Usage | None = None  # V0.26.2: eval/runner 累加用
 
     async def plan(
         self,
@@ -97,6 +98,14 @@ class OpenAIClient:
             kwargs["max_completion_tokens"] = 2048
             kwargs["tool_choice"] = "required"
         resp = await self._client.chat.completions.create(**kwargs)
+
+        # V0.26.2: 记 token usage (OpenAI / Kimi schema: prompt_tokens/completion_tokens).
+        # Kimi extra_body thinking 模式 usage 仍存在 — 必查 hasattr 防边界 None.
+        if resp.usage is not None:
+            self.last_usage = Usage(
+                input_tokens=resp.usage.prompt_tokens,
+                output_tokens=resp.usage.completion_tokens,
+            )
 
         msg = resp.choices[0].message
         if not msg.tool_calls:

@@ -18,7 +18,7 @@ from anthropic.types import (
 
 from web_agent.llm._schema import SYSTEM_PROMPT, build_user_text, to_anthropic_tools
 from web_agent.trace import Trace
-from web_agent.types import Action, Mark, action_from_tool_call
+from web_agent.types import Action, Mark, Usage, action_from_tool_call
 
 DEFAULT_MODEL = "claude-sonnet-4-6"
 
@@ -46,6 +46,7 @@ class AnthropicClient:
         self._client = AsyncAnthropic(**kwargs)
         self.model = model
         self._tools = to_anthropic_tools()
+        self.last_usage: Usage | None = None  # V0.26.2: eval/runner 累加用
 
     async def plan(
         self,
@@ -93,6 +94,11 @@ class AnthropicClient:
             messages=cast(list[MessageParam], [{"role": "user", "content": user_content}]),
         )
 
+        # V0.26.2: 记 token usage 让 eval/runner 累加 cost. fail before tool_use parse 也写一次.
+        self.last_usage = Usage(
+            input_tokens=resp.usage.input_tokens,
+            output_tokens=resp.usage.output_tokens,
+        )
         for block in resp.content:
             if block.type == "tool_use":
                 # V0.17.0: action_from_tool_call dispatch 到 5 dataclass union, 删 cast(dict[str, Any])
