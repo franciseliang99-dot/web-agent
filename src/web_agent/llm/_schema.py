@@ -195,6 +195,20 @@ def _render_tabs_header(tabs: list[tuple[int, str]], current_idx: int) -> str:
     return f"# 当前 Tabs ({len(tabs)} open, current={current_idx})\n{body}\n\n"
 
 
+def _render_cross_origin_footer(hosts: list[str]) -> str:
+    """V0.22.4: 渲染跨域 iframe footer (放 marks 之后让 LLM 知道反爬 widget 存在).
+
+    格式: `# 跨域 iframe (LLM 不可见内容, 不要尝试 click): N 个 - host1, host2`
+    文案明示"不可见 + 不要 click"防 LLM 试图按 host 名幻觉生成 mark_id.
+    """
+    if not hosts:
+        return ""
+    return (
+        f"# 跨域 iframe (LLM 不可见内容, 不要尝试 click): "
+        f"{len(hosts)} 个 - {', '.join(hosts)}\n\n"
+    )
+
+
 def build_user_text(
     goal: str,
     marks: list[Mark],
@@ -202,15 +216,17 @@ def build_user_text(
     *,
     tabs: list[tuple[int, str]] | None = None,
     current_idx: int = 0,
+    cross_origin_hosts: list[str] | None = None,
 ) -> str:
     """构造各 provider plan() 通用的 user 消息 text 部分（截图 image block 由各 client 自己拼）。
 
-    包括 goal、历史 trace JSON 序列化、(V0.21.2 加) tabs header、当前 SoM 元素清单。
-    Anthropic 和 OpenAI 共用此文本，差异只在 image content block 格式
-    （Anthropic source.base64 vs OpenAI image_url data: URL）。
+    包括 goal、历史 trace JSON 序列化、(V0.21.2 加) tabs header、当前 SoM 元素清单、
+    (V0.22.4 加) 跨域 iframe footer。Anthropic 和 OpenAI 共用此文本，差异只在 image content
+    block 格式（Anthropic source.base64 vs OpenAI image_url data: URL）。
 
     V0.21.2: `tabs` 是 [(idx, title), ...] 列表 (loop 每 step 算好), `current_idx` 标记当前 active.
-    空 list 跳过 header (向后兼容老 caller / jd_extract / list_extract / FakeLLMClient 等不传).
+    V0.22.4: `cross_origin_hosts` 是 perceive 收集的跨域 iframe host 列表 (DFS 顺序去重).
+    空 list / None 跳过对应 section (向后兼容老 caller).
     """
     history_text = (
         json.dumps(trace.for_llm(), ensure_ascii=False, indent=2)
@@ -218,10 +234,12 @@ def build_user_text(
         else "(空)"
     )
     tabs_section = _render_tabs_header(tabs or [], current_idx)
+    cross_origin_section = _render_cross_origin_footer(cross_origin_hosts or [])
     return (
         f"# 任务目标\n{goal}\n\n"
         f"# 历史 Action Trace\n{history_text}\n\n"
         f"{tabs_section}"
         f"# 当前可交互元素清单（编号对应截图边框）\n{marks_to_text(marks)}\n\n"
+        f"{cross_origin_section}"
         f"请通过 tool 返回下一步操作。"
     )

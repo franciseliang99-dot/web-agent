@@ -160,7 +160,7 @@ async def test_perceive_main_frame_only_no_iframes():
     page.main_frame = main_frame
     page.evaluate = AsyncMock(return_value=[])  # auto-dismiss
     page.screenshot = AsyncMock(return_value=b"\x89PNG\r\n\x1a\n" + b"\x00" * 8)
-    marks, _ = await perceive(page)
+    marks, _, _ = await perceive(page)
     assert len(marks) == 2
     assert all(m.frame_path == "" for m in marks)
     assert [m.id for m in marks] == [1, 2]
@@ -186,7 +186,7 @@ async def test_perceive_iframe_dfs_id_offset_continuous():
     page.main_frame = main_frame
     page.evaluate = AsyncMock(return_value=[])
     page.screenshot = AsyncMock(return_value=b"\x89PNG\r\n\x1a\n" + b"\x00" * 8)
-    marks, _ = await perceive(page)
+    marks, _, _ = await perceive(page)
     assert [m.id for m in marks] == [1, 2, 3, 4, 5]
     assert [m.frame_path for m in marks] == ["", "", "0", "0", "0"]
     # iframe.evaluate 第 1 调用 (SoM inject) opts 含 id_offset=2
@@ -212,7 +212,7 @@ async def test_perceive_cross_origin_iframe_skipped_main_continues():
     page.main_frame = main_frame
     page.evaluate = AsyncMock(return_value=[])
     page.screenshot = AsyncMock(return_value=b"\x89PNG\r\n\x1a\n" + b"\x00" * 8)
-    marks, _ = await perceive(page)
+    marks, _, _ = await perceive(page)
     # 主 2 marks 仍在; 跨域 0 marks; 不抛
     assert len(marks) == 2
     assert all(m.frame_path == "" for m in marks)
@@ -232,7 +232,7 @@ async def test_perceive_main_frame_evaluate_failure_propagates():
     page.screenshot = AsyncMock(return_value=b"\x89PNG\r\n\x1a\n" + b"\x00" * 8)
     import pytest
     with pytest.raises(RuntimeError, match="main frame crashed"):
-        await perceive(page)
+        _ = await perceive(page)
 
 
 def test_som_inject_js_sets_data_som_id_attribute():
@@ -259,6 +259,86 @@ def test_som_inject_js_cleans_old_data_som_id_at_entry():
     # 用更精确的 removeAttribute('data-som-id') 反查防误判
     assert "removeAttribute('data-som-id')" not in _SOM_REMOVE_JS, (
         "V0.22.2 实测修正: REMOVE 不能 removeAttribute(data-som-id) 否则 actuator 找不到元素"
+    )
+
+
+async def test_perceive_returns_three_tuple_with_cross_origin_hosts():
+    """V0.22.4: perceive() 返 (marks, screenshot, cross_origin_hosts) 三-tuple. 无跨域时空 list."""
+    from unittest.mock import AsyncMock, MagicMock
+    from web_agent.perceiver import perceive
+    main_frame = _mk_frame(child_frames=[], evaluate_returns=[_mk_raw(1, 1), None])
+    page = MagicMock()
+    page.main_frame = main_frame
+    page.evaluate = AsyncMock(return_value=[])
+    page.screenshot = AsyncMock(return_value=b"\x89PNG\r\n\x1a\n" + b"\x00" * 8)
+    result = await perceive(page)
+    assert len(result) == 3, f"V0.22.4: perceive 必须返三-tuple; got len={len(result)}"
+    marks, _, hosts = result
+    assert hosts == [], f"无跨域时 hosts 应空; got {hosts}"
+
+
+async def test_perceive_collects_cross_origin_host_from_url():
+    """V0.22.4: child frame.evaluate raise + url 含 host → cross_origin_hosts 含 netloc."""
+    from unittest.mock import AsyncMock, MagicMock
+    from web_agent.perceiver import perceive
+    cross_origin = _mk_frame(
+        child_frames=[],
+        evaluate_raises=RuntimeError("Frame is cross-origin"),
+        url="https://www.google.com/recaptcha/api2/anchor?k=abc",
+    )
+    main_frame = _mk_frame(
+        child_frames=[cross_origin],
+        evaluate_returns=[_mk_raw(1, 1), None],
+    )
+    page = MagicMock()
+    page.main_frame = main_frame
+    page.evaluate = AsyncMock(return_value=[])
+    page.screenshot = AsyncMock(return_value=b"\x89PNG\r\n\x1a\n" + b"\x00" * 8)
+    _, _, hosts = await perceive(page)
+    assert hosts == ["www.google.com"], f"应收集 netloc; got {hosts}"
+
+
+async def test_perceive_dedupes_repeated_cross_origin_hosts_dfs_order():
+    """V0.22.4: 同 host 多 iframe (e.g. 多 reCAPTCHA) → dict.fromkeys 保 DFS 顺序去重."""
+    from unittest.mock import AsyncMock, MagicMock
+    from web_agent.perceiver import perceive
+    a1 = _mk_frame(child_frames=[], evaluate_raises=RuntimeError("x"), url="https://a.example/1")
+    b = _mk_frame(child_frames=[], evaluate_raises=RuntimeError("x"), url="https://b.example/")
+    a2 = _mk_frame(child_frames=[], evaluate_raises=RuntimeError("x"), url="https://a.example/2")
+    main_frame = _mk_frame(
+        child_frames=[a1, b, a2],
+        evaluate_returns=[_mk_raw(1, 1), None],
+    )
+    page = MagicMock()
+    page.main_frame = main_frame
+    page.evaluate = AsyncMock(return_value=[])
+    page.screenshot = AsyncMock(return_value=b"\x89PNG\r\n\x1a\n" + b"\x00" * 8)
+    _, _, hosts = await perceive(page)
+    assert hosts == ["a.example", "b.example"], (
+        f"DFS 顺序去重: a 先于 b, a 第二次 skip; got {hosts}"
+    )
+
+
+async def test_perceive_cross_origin_url_fallback_to_url_when_no_netloc():
+    """V0.22.4: about:blank / data: 无 netloc → fallback url[:60]."""
+    from unittest.mock import AsyncMock, MagicMock
+    from web_agent.perceiver import perceive
+    weird = _mk_frame(
+        child_frames=[],
+        evaluate_raises=RuntimeError("blocked"),
+        url="data:text/html,<html></html>",
+    )
+    main_frame = _mk_frame(
+        child_frames=[weird],
+        evaluate_returns=[_mk_raw(1, 1), None],
+    )
+    page = MagicMock()
+    page.main_frame = main_frame
+    page.evaluate = AsyncMock(return_value=[])
+    page.screenshot = AsyncMock(return_value=b"\x89PNG\r\n\x1a\n" + b"\x00" * 8)
+    _, _, hosts = await perceive(page)
+    assert hosts and hosts[0].startswith("data:"), (
+        f"无 netloc 应 fallback url 原串; got {hosts}"
     )
 
 
@@ -289,7 +369,7 @@ async def test_perceive_nested_iframe_path_encoding():
     page.main_frame = main_frame
     page.evaluate = AsyncMock(return_value=[])
     page.screenshot = AsyncMock(return_value=b"\x89PNG\r\n\x1a\n" + b"\x00" * 8)
-    marks, _ = await perceive(page)
+    marks, _, _ = await perceive(page)
     assert [m.frame_path for m in marks] == ["", "0", "0.1"]
     assert [m.id for m in marks] == [1, 2, 3]
 

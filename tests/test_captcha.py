@@ -152,7 +152,8 @@ _FAKE_SHOT_B64 = "aGVsbG8h"
 
 
 async def _fake_perceive(page):
-    return [_DUMMY_MARK], _FAKE_SHOT_B64
+    # V0.22.4: perceive 返三-tuple (marks, screenshot, cross_origin_hosts)
+    return [_DUMMY_MARK], _FAKE_SHOT_B64, []
 
 
 async def _noop(*args, **kwargs):

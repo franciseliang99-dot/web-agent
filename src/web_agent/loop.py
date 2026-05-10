@@ -411,7 +411,7 @@ async def run_react_loop(
             if captcha_abort is not None:
                 return captcha_abort
 
-            marks, screenshot_b64 = await perceive(page)
+            marks, screenshot_b64, cross_origin_hosts = await perceive(page)
 
             # W5-A 自反思: 页面 3 步无变化 → 软提示 (与 V0.5.0 anti-loop 硬 abort 互补)
             # V0.21.1: fingerprint 加 active_idx 防 switch-back 看似无变化触发误报
@@ -431,6 +431,7 @@ async def run_react_loop(
                 action: Action = await client.plan(
                     goal, screenshot_b64, marks, trace,
                     tabs=tabs, current_idx=active_idx,
+                    cross_origin_hosts=cross_origin_hosts,
                 )
             except Exception as e:
                 # SDK 内置 retry 已耗尽 / network / tool_call=None / 其他 LLM 异常

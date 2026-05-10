@@ -145,3 +145,49 @@ def test_build_user_text_tabs_header_position_before_marks():
     tabs_pos = text.index("# 当前 Tabs")
     marks_pos = text.index("# 当前可交互元素清单")
     assert tabs_pos < marks_pos, "tabs header 应在 marks 之前"
+
+
+# ---------- V0.22.4 cross_origin_hosts footer ----------
+
+
+def test_build_user_text_no_cross_origin_hosts_skips_footer():
+    """V0.22.4: 不传 / 空 list → footer 不渲染 (向后兼容)."""
+    from web_agent.llm._schema import build_user_text
+    from web_agent.trace import Trace
+    text = build_user_text("做事", marks=[], trace=Trace(task_id="t", goal="做事"))
+    assert "跨域 iframe" not in text
+    text2 = build_user_text(
+        "做事", marks=[], trace=Trace(task_id="t", goal="做事"),
+        cross_origin_hosts=[],
+    )
+    assert "跨域 iframe" not in text2
+
+
+def test_build_user_text_renders_cross_origin_hosts_with_count_and_warning():
+    """V0.22.4: 多 host → 渲染含数量 + host list + 不要 click 警告."""
+    from web_agent.llm._schema import build_user_text
+    from web_agent.trace import Trace
+    text = build_user_text(
+        "做事", marks=[], trace=Trace(task_id="t", goal="做事"),
+        cross_origin_hosts=["stripe.com", "www.google.com"],
+    )
+    assert "2 个" in text
+    assert "stripe.com" in text
+    assert "www.google.com" in text
+    assert "不要尝试 click" in text, "文案必须明示不可点防 LLM 幻觉 mark_id"
+
+
+def test_build_user_text_cross_origin_footer_after_marks():
+    """V0.22.4: footer 在 marks 之后 (跟 tabs header 在前对称: header=context, footer=marks 注脚)."""
+    from web_agent.llm._schema import build_user_text
+    from web_agent.trace import Trace
+    text = build_user_text(
+        "做事", marks=[], trace=Trace(task_id="t", goal="做事"),
+        cross_origin_hosts=["x.example"],
+    )
+    marks_pos = text.index("# 当前可交互元素清单")
+    footer_pos = text.index("# 跨域 iframe")
+    assert marks_pos < footer_pos, "cross-origin footer 应在 marks 之后 (注脚而非 context)"
+    # 同时确认在 "请通过 tool 返回" 之前 (不是被推到末尾)
+    end_pos = text.index("请通过 tool 返回")
+    assert footer_pos < end_pos

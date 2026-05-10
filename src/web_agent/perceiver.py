@@ -6,6 +6,7 @@ import base64
 import logging
 import os
 from typing import cast
+from urllib.parse import urlparse
 
 from playwright.async_api import Frame, Page
 
@@ -214,13 +215,37 @@ async def _remove_som_in_frame(frame: Frame) -> None:
         logger.warning("frame %r remove SoM failed (non-fatal): %r", frame.url[:80], e)
 
 
+def _frame_host(frame: Frame) -> str:
+    """V0.22.4: 从 frame.url 解析 host (cross-origin iframe LLM 不可见内容时给 LLM 看的 hint).
+
+    跨域 frame.url 仍可读 (来自父 frame attach 时看到的 src). urlparse 失败/netloc 空
+    (data:/about:blank/javascript:) → fallback url[:60] 原串; 极端 detach url 属性也 raise →
+    fallback "(unknown)".
+    """
+    try:
+        url = getattr(frame, "url", "") or ""
+    except Exception:
+        return "(unknown)"
+    if not url:
+        return "(unknown)"
+    try:
+        netloc = urlparse(url).netloc
+        return netloc if netloc else url[:60]
+    except Exception:
+        return url[:60]
+
+
 async def _walk_child_frames(
-    parent: Frame, parent_path: str, shadow_on: bool, marks: list[Mark],
+    parent: Frame, parent_path: str, shadow_on: bool,
+    marks: list[Mark], cross_origin_hosts: list[str],
 ) -> None:
     """V0.22.1: DFS 递归注入 child frame SoM, 累加到 marks. 跨域/detached frame 跳过子树.
 
     每层用 `len(marks)` 作 id_offset → 全局 id 连续无冲突. frame_path 编码深度优先索引,
     主 frame 父调用 path="", 第 1 个 child path="0", child 的第 2 个 child path="0.1".
+
+    V0.22.4: 跨域 frame catch 时把 host append 到 cross_origin_hosts (调用方 dict.fromkeys
+    去重保 DFS 顺序). LLM 看到 build_user_text footer 知道反爬 widget 存在, 不会瞎点.
     """
     for i, child in enumerate(parent.child_frames):
         child_path = f"{parent_path}.{i}" if parent_path else str(i)
@@ -231,17 +256,19 @@ async def _walk_child_frames(
                 child, child_path, shadow_on, id_offset=len(marks),
             )
         except Exception as e:
+            host = _frame_host(child)
+            cross_origin_hosts.append(host)
             logger.warning(
-                "frame %r (path=%s) SoM inject failed (cross-origin/detached?), 跳过子树: %r",
-                child.url[:80], child_path, e,
+                "frame %r (path=%s, host=%s) SoM inject failed (cross-origin/detached?), 跳过子树: %r",
+                getattr(child, "url", "")[:80], child_path, host, e,
             )
             continue  # 跨域父跳了子也访问不到, 整子树 skip
         marks.extend(child_marks)
-        await _walk_child_frames(child, child_path, shadow_on, marks)
+        await _walk_child_frames(child, child_path, shadow_on, marks, cross_origin_hosts)
         await _remove_som_in_frame(child)
 
 
-async def perceive(page: Page) -> tuple[list[Mark], str]:
+async def perceive(page: Page) -> tuple[list[Mark], str, list[str]]:
     """先尝试关弹窗 → 注入 SoM 标注 (主 frame + 同源 iframe) → 截带标注的视口图 → 移除标注。
 
     auto-dismiss 在 SoM 注入**之前**执行，避免关弹窗后 mark 编号错位 (只在主 frame 跑,
@@ -249,10 +276,13 @@ async def perceive(page: Page) -> tuple[list[Mark], str]:
     截图含 SoM 红框 + 数字角标，直接给 LLM 看；返回前已清掉标注 DOM 节点不污染页面。
 
     V0.22.1: 同源 iframe 也注入 SoM 让 LLM 看到 reCAPTCHA 风格 widget 内元素;
-    跨域 frame.evaluate fail → catch warn 跳整子树 (留 V0.22.3 加 a11y fallback);
+    跨域 frame.evaluate fail → catch warn 跳整子树.
     主 frame fail 不 catch (fail-fast — silent 空 marks 会让 loop 误判页面无元素死循环).
     id 全局连续: 主 frame 1..N, 第 1 个 iframe N+1..N+M, ... (用 id_offset 注入 JS, 视觉框
     数字 == Python Mark.id 三方一致).
+
+    V0.22.4: 返第 3 元 cross_origin_hosts: list[str] 跨域 iframe 的 host 列表 (DFS 顺序去重),
+    loop 传给 build_user_text 渲染 footer 让 LLM 知道反爬 widget 存在不会瞎点.
     """
     dismissed = await maybe_auto_dismiss(page)
     if dismissed:
@@ -261,12 +291,15 @@ async def perceive(page: Page) -> tuple[list[Mark], str]:
     shadow_on = os.environ.get("WEB_AGENT_SOM_SHADOW", "true").lower() not in ("false", "0", "no", "off")
     # 主 frame 不 catch (fail-fast 跟 V0.22.0 行为对齐)
     marks = await _inject_som_in_frame(page.main_frame, "", shadow_on, id_offset=0)
-    # 同源 iframe DFS
-    await _walk_child_frames(page.main_frame, "", shadow_on, marks)
+    # 同源 iframe DFS; 跨域 catch 时收集 host (V0.22.4)
+    cross_origin_hosts: list[str] = []
+    await _walk_child_frames(page.main_frame, "", shadow_on, marks, cross_origin_hosts)
     screenshot_bytes = await page.screenshot(type="png", full_page=False)
     # cleanup 主 frame 的 SoM (iframe 已在 _walk_child_frames 内 cleanup 完)
     await _remove_som_in_frame(page.main_frame)
-    return marks, base64.b64encode(screenshot_bytes).decode()
+    # 去重保 DFS 顺序 (LLM prompt 缓存命中率看顺序)
+    deduped_hosts = list(dict.fromkeys(cross_origin_hosts))
+    return marks, base64.b64encode(screenshot_bytes).decode(), deduped_hosts
 
 
 def marks_to_text(marks: list[Mark]) -> str:

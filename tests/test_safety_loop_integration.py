@@ -80,7 +80,8 @@ def _ctx() -> FakeContext:
 
 
 async def _fake_perceive(page):
-    return [_SEND_BUTTON], _FAKE_SHOT_B64
+    # V0.22.4: perceive 返三-tuple (marks, screenshot, cross_origin_hosts)
+    return [_SEND_BUTTON], _FAKE_SHOT_B64, []
 
 
 async def _noop(*args, **kwargs):

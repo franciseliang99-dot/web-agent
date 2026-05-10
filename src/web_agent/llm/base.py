@@ -38,4 +38,5 @@ class LLMClient(Protocol):
         *,
         tabs: list[tuple[int, str]] | None = None,
         current_idx: int = 0,
+        cross_origin_hosts: list[str] | None = None,
     ) -> Action: ...

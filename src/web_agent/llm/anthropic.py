@@ -56,6 +56,7 @@ class AnthropicClient:
         *,
         tabs: list[tuple[int, str]] | None = None,
         current_idx: int = 0,
+        cross_origin_hosts: list[str] | None = None,
     ) -> Action:
         user_content = [
             {
@@ -67,7 +68,9 @@ class AnthropicClient:
                 },
             },
             {"type": "text", "text": build_user_text(
-                goal, marks, trace, tabs=tabs, current_idx=current_idx,
+                goal, marks, trace,
+                tabs=tabs, current_idx=current_idx,
+                cross_origin_hosts=cross_origin_hosts,
             )},
         ]
 

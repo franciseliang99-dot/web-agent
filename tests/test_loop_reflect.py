@@ -102,7 +102,8 @@ _FAKE_SHOT = "aGVsbG8h"  # b'hello!' valid base64
 
 async def _stuck_perceive(page):
     """每次返同 marks/url → fingerprint 永同 → 触发 reflect hint。"""
-    return list(_STUCK_MARKS), _FAKE_SHOT
+    # V0.22.4: perceive 返三-tuple
+    return list(_STUCK_MARKS), _FAKE_SHOT, []
 
 
 async def _noop(*args, **kwargs):
@@ -164,7 +165,8 @@ async def test_reflect_not_injected_when_marks_change(
 
     async def varying_perceive(page):
         counter["n"] += 1
-        return [_mk(counter["n"], f"btn-{counter['n']}")], _FAKE_SHOT
+        # V0.22.4: perceive 返三-tuple
+        return [_mk(counter["n"], f"btn-{counter['n']}")], _FAKE_SHOT, []
 
     monkeypatch.setattr("web_agent.loop.perceive", varying_perceive)
 

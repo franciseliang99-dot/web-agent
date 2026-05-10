@@ -49,7 +49,7 @@ async def test_perceive_real_srcdoc_iframe_marks_have_frame_path():
             await page.goto(_PARENT_URL)
             # iframe srcdoc attach 后 wait load
             await page.wait_for_load_state("networkidle", timeout=5000)
-            marks, _ = await perceive(page)
+            marks, _, _ = await perceive(page)
             main_marks = [m for m in marks if m.frame_path == ""]
             iframe_marks = [m for m in marks if m.frame_path == "0"]
             assert any("main button" in m.text for m in main_marks), (
@@ -91,7 +91,7 @@ async def test_actuator_iframe_click_real_triggers_button():
             page = await ctx.new_page()
             await page.goto(_CLICK_PARENT_URL)
             await page.wait_for_load_state("networkidle", timeout=5000)
-            marks, _ = await perceive(page)
+            marks, _, _ = await perceive(page)
             iframe_btn = next(
                 (m for m in marks if m.frame_path == "0" and "click me" in m.text),
                 None,

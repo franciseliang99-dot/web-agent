@@ -93,7 +93,8 @@ def _ctx(pages: list[FakePage] | None = None) -> FakeContext:
 
 
 async def _fake_perceive(page):
-    return [_DUMMY_MARK], _FAKE_SHOT
+    # V0.22.4: perceive 返三-tuple (marks, screenshot, cross_origin_hosts)
+    return [_DUMMY_MARK], _FAKE_SHOT, []
 
 
 async def _noop(*args, **kwargs):
@@ -406,7 +407,7 @@ async def test_initial_active_idx_kwarg_picks_jd_extract_path(
 
     async def recording_perceive(page):
         seen_urls.append(page.url)
-        return [_DUMMY_MARK], _FAKE_SHOT
+        return [_DUMMY_MARK], _FAKE_SHOT, []
 
     monkeypatch.setattr("web_agent.loop.perceive", recording_perceive)
     client = FakeLLMClient([DoneAction(thought="完成", result="ok")])
@@ -559,6 +560,35 @@ def test_gather_tab_titles_fallback_url_on_empty_title():
     assert len(result) == 1
     assert result[0][0] == 0
     assert "example.com" in result[0][1] or "/very/long/path/segment" in result[0][1]
+
+
+async def test_plan_called_with_cross_origin_hosts_kwarg(
+    monkeypatch, tmp_path, patch_loop_internals
+):
+    """V0.22.4: loop 把 perceive 收集的 cross_origin_hosts 透传给 client.plan() kwarg."""
+    monkeypatch.delenv("WEB_AGENT_AUTO_APPROVE", raising=False)
+    seen_kwargs: list[dict] = []
+
+    async def perceive_with_hosts(page):
+        return [_DUMMY_MARK], _FAKE_SHOT, ["stripe.com", "recaptcha.net"]
+
+    monkeypatch.setattr("web_agent.loop.perceive", perceive_with_hosts)
+
+    class RecordingLLMClient:
+        name = "fake"
+        model = "fake"
+
+        async def plan(self, goal, screenshot_b64, marks, trace, **kwargs):
+            seen_kwargs.append(kwargs)
+            return DoneAction(thought="完成", result="ok")
+
+    result = await run_react_loop(
+        _ctx(), RecordingLLMClient(), goal="测 cross_origin_hosts kwargs",
+        max_steps=2, db_path=tmp_path / "trace.db",
+        screenshots_dir=tmp_path / "shots",
+    )
+    assert result == "ok"
+    assert seen_kwargs[0]["cross_origin_hosts"] == ["stripe.com", "recaptcha.net"]
 
 
 def test_gather_tab_titles_fallback_untitled_on_no_url():

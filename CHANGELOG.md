@@ -2,6 +2,89 @@
 
 All notable changes to web-agent. 版本号遵循 SemVer 简化形式（V<major>.<minor>.<patch>）。
 
+## [0.22.4] - 2026-05-09
+
+### Add (V0.22 iframe 系列收尾 — cross-origin iframe host hint, **5 commit 全闭环**)
+
+V0.22 闭环: V0.22.0 schema → V0.22.1 perceiver 同源 iframe SoM → V0.22.2 actuator
+按 frame_path 路由 → V0.22.3 refactor _frame_for_followup helper → V0.22.4 cross-origin
+host hint. LLM 现完整看到/操作 iframe (同源 widget 内元素直接可点) + 知道反爬 widget
+存在 (跨域 iframe host 列表 footer 防瞎点).
+
+V0.22.4 选 D 方案 (跟 V0.21.2 tabs header 同模式 KW-only 默认参数透传) 而非 D'
+placeholder Mark — 后者占 id 空间 + LLM 可能试 click placeholder 触发 30s timeout
+ERROR (复刻 V0.20.7/0.20.8 silent fail 反模式).
+
+### Changed
+
+- `src/web_agent/perceiver.py` 加 `_frame_host(frame) -> str` helper:
+  - urlparse(frame.url).netloc 取 host
+  - data:/about:blank/javascript: 等无 netloc → fallback url[:60] 原串
+  - 极端 detach url 属性 raise → "(unknown)" 兜底, 不 raise 防 catch 路径双重失败
+- `perceiver.py` `_walk_child_frames` 加 `cross_origin_hosts: list[str]` 参数, catch
+  block append `_frame_host(child)`; 跟 marks 同 mutable list 累加范式.
+- `perceiver.py` `perceive()` 改签名 `tuple[list[Mark], str]` →
+  `tuple[list[Mark], str, list[str]]` 第 3 元 cross_origin_hosts (DFS 顺序保留 +
+  `dict.fromkeys` 末尾去重防同 host 多 iframe 重复, 如多 reCAPTCHA).
+- `src/web_agent/llm/_schema.py` 加 `_render_cross_origin_footer(hosts) -> str` helper:
+  - 空 list 返空字符串 (向后兼容)
+  - 渲染 `# 跨域 iframe (LLM 不可见内容, 不要尝试 click): N 个 - host1, host2`
+  - 文案明示 "**不要尝试 click**" 防 LLM 试图按 host 名幻觉生成 mark_id
+- `_schema.py` `build_user_text` 加 KW-only `cross_origin_hosts: list[str] | None = None`
+  参数, 渲染位置 marks 之后 / "请通过 tool 返回" 之前 (footer 是 marks 集的注脚而非
+  全局 context, 跟 V0.21.2 tabs header 在 marks 之前对称).
+- `src/web_agent/llm/base.py` `LLMClient.plan` Protocol + `anthropic.py` / `openai.py`
+  `plan()` 各加 KW-only `cross_origin_hosts: list[str] | None = None` 参数透传
+  build_user_text (跟 V0.21.2 tabs/current_idx 同模式).
+- `src/web_agent/loop.py` 解 perceive 三-tuple `marks, screenshot_b64, cross_origin_hosts`;
+  `client.plan(...)` 加 `cross_origin_hosts=cross_origin_hosts` kwarg 透传.
+- `tests/test_perceiver.py` 加 4 V0.22.4 测 (三-tuple 返 / 收集 netloc / DFS 顺序去重 /
+  no-netloc fallback url 原串).
+- `tests/test_llm_schema.py` 加 3 V0.22.4 测 (空 list 跳渲染 / 多 host 含数量+警告 /
+  位置在 marks 之后 + "请通过 tool" 之前).
+- `tests/test_loop_main.py` 加 1 V0.22.4 测 (plan 收 cross_origin_hosts kwarg).
+- 4 测试文件 (test_loop_main / test_safety_loop_integration / test_captcha /
+  test_loop_reflect) `_fake_perceive` / `_stuck_perceive` / `varying_perceive` 全 update
+  返三-tuple `(marks, shot, [])` (loop 现统一三-tuple 解构).
+
+### Compatibility
+
+- 老 caller / fixture 不传 cross_origin_hosts → footer 跳渲染 (跟 V0.21.2 tabs 同模式).
+- 4 个 FakeLLMClient.plan 已接 `**kwargs` (V0.21.2 路径), 不用改 — Python KW-only +
+  默认值 structural typing 兼容.
+- jd_extract / list_extract 半自动模式: 现有调用未传 cross_origin_hosts → footer 跳渲染.
+- mypy strict 0; ruff 0; pytest 349 + 5 skip; 真 chromium 4 个 slow smoke 全过
+  (popup 2 + iframe perceive 1 + iframe click 1).
+
+### V0.22 系列总结 (5 commit / V0.22.0-4)
+
+| ver | commit | 解锁节点 |
+|-----|--------|---------|
+| V0.22.0 | 705f0ae | Mark.frame_path schema (零行为) |
+| V0.22.1 | 1462a65 | perceiver 同源 iframe SoM 注入 + id 全局连续 (id_offset JS 注入) |
+| V0.22.2 | 680e233 | actuator 按 frame_path 路由 (端到端 iframe click 真触发) |
+| V0.22.3 | f7b1a41 | refactor _frame_for_followup helper (simplify subagent PROCEED) |
+| V0.22.4 | 本 | cross-origin iframe host hint footer |
+
+净增 ~32 单元测 + 2 真 chromium slow smoke. V0.20.8 (V0.20 收尾) → V0.22.4
+跨度 7 个版本号, 单元测从 287 → 349 (+62, 22% 增).
+
+### V0.23 候选 (按 V0.21 plan subagent 5 high-leverage moves 已完成 #1 multi-tab + #2 iframe)
+
+- **#3 drag/upload/download** (Trello / Gmail 附件 / 表单文件) — 估 4 commit 系列
+- **#4 dialog auto-handle + 键盘导航** (window.confirm/alert/prompt) — 估 2 commit
+- **#5 smart retry + backtracking** (失败模式分类 + page.go_back) — 估 3 commit
+- **iframe 反检测**: V0.22.2 留 TODO 评估 CDP `Input.dispatchMouseEvent` 走 iframe
+  拟人轨迹 (高反爬站 reCAPTCHA inside iframe 可能识破现 frame.locator.click 路径)
+- **eval golden corpus** (V0.25 plan, 无人值守的数据底座)
+- **iframe a11y tree fallback** (V0.22.4 仅给 host name; 跨域 iframe 内部结构 LLM 仍瞎)
+
+### Why patch (V0.22.4) 不 minor
+
+- perceive 签名扩 (返 2-tuple → 3-tuple) 是**内部 API 改动**, 非对外 LLM tool surface.
+- build_user_text + plan 加 KW-only 默认参数 = 兼容扩展 (跟 V0.21.2 同档).
+- SemVer "向后兼容的 enhance → patch", 0.22.3 → 0.22.4.
+
 ## [0.22.3] - 2026-05-09
 
 ### Refactor (V0.22.2 simplify subagent 判 PROCEED — 抽 _frame_for_followup helper)
