@@ -92,7 +92,7 @@ async def run_task(
             logger.info("subgoal hint injected (W5-C: 长任务 / 带序号触发)")
 
         result = await run_react_loop(
-            page=page,
+            ctx=ctx,
             client=client,
             goal=goal,
             max_steps=max_steps,

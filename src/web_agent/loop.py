@@ -16,7 +16,7 @@ from collections import deque
 from pathlib import Path
 from typing import Any, Awaitable, Callable
 
-from playwright.async_api import Page
+from playwright.async_api import BrowserContext, Page
 
 from web_agent.actuator import (
     human_like_click,
@@ -35,12 +35,14 @@ from web_agent.trace import Step, Trace, end_task, init_db, start_task, write_st
 from web_agent.types import (
     Action,
     ClickAction,
+    CloseTabAction,
     DoneAction,
     ExtractAction,
     KeyboardShortcutAction,
     Mark,
     PasteAction,
     ScrollAction,
+    SwitchTabAction,
     TypeAction,
 )
 
@@ -77,14 +79,17 @@ def _action_signature(action: Action) -> str:
     return f"{action.type}:{json.dumps(_action_args_only(action), sort_keys=True, ensure_ascii=False)}"
 
 
-def _page_fingerprint(url: str, marks: list[Mark]) -> str:
+def _page_fingerprint(url: str, marks: list[Mark], active_idx: int = 0) -> str:
     """归一化页面状态用于「无变化检测」(W5-A 反思). 与 _action_signature 风格一致, 纯函数。
 
     取前 8 mark + text[:40] 抗尾部动态计数/timestamp mark 抖动; 留 url 区分 SPA 路由切换。
+    V0.21.1: 加 active_idx — 多 tab 场景下 switch_tab→back 看似 url+marks 不变但语义变了,
+    把 active_idx 进 fingerprint 防 W5-A reflect hint 误触发 + LOOP_DETECTED 误判.
+    单 tab 场景 active_idx 恒 0, 行为不变 (向后兼容默认 0).
     """
     sig_marks = [(m.id, m.tag, m.text[:40]) for m in marks[:8]]
     return json.dumps(
-        {"url": url, "n": len(marks), "marks": sig_marks},
+        {"url": url, "n": len(marks), "marks": sig_marks, "tab": active_idx},
         sort_keys=True, ensure_ascii=False,
     )
 
@@ -257,7 +262,7 @@ async def _handle_captcha(
 
 
 async def run_react_loop(
-    page: Page,
+    ctx: BrowserContext,
     client: LLMClient,
     goal: str,
     max_steps: int = 20,
@@ -267,8 +272,17 @@ async def run_react_loop(
     memories: str | None = None,
     progress_cb: ProgressCallback | None = None,
     safety_approval_cb: SafetyApprovalCallback | None = None,
+    initial_active_idx: int = 0,
 ) -> str:
     """跑 ReAct 循环直到 done / max_steps / max_wallclock_s / 死循环 / LLM 失败。返回最终结果文本。
+
+    V0.21.1: 签名 page → ctx, 内部维护 active_idx 索引到 ctx.pages[active_idx]; 每 step 顶部
+    snapshot list(ctx.pages) 防 popup 中 step 偏移. SwitchTabAction/CloseTabAction 派发改 active_idx
+    + bring_to_front + 重置 last_clicked_mark.
+
+    `initial_active_idx`: jd_extract / list_extract 半自动模式找到特定 URL match tab 后传入其
+    在 ctx.pages 中的索引 (Playwright bring_to_front 不改 pages 顺序). 默认 0 对应 cli.py
+    走 ctx.pages[0] 的 V0.20 等价行为.
 
     异常处理：
     - LLM API 失败（SDK 内置 max_retries=4 后仍挂）→ catch + 写 trace + graceful return
@@ -284,6 +298,7 @@ async def run_react_loop(
     recent_actions: deque[str] = deque(maxlen=3)
     recent_pages: deque[str] = deque(maxlen=3)  # W5-A 反思: 页面 fingerprint 跟踪
     last_clicked_mark: Mark | None = None  # type action 的 safety check 需要上次 click 的元素
+    active_idx: int = initial_active_idx  # V0.21.1: 当前 active tab 索引
     result = "(no result)"
     t_start = time.time()
 
@@ -316,6 +331,18 @@ async def run_react_loop(
 
             await think()
 
+            # V0.21.1: 每 step 顶部 snapshot ctx.pages 防 step 内 popup 偏移索引;
+            # active_idx 越界 (上一步 close_tab 后或 popup 关闭) clamp 到合法范围.
+            step_pages: list[Page] = list(ctx.pages)
+            if not step_pages:
+                result = f"NO_PAGES at step {step_i}: ctx.pages 空, browser context 已无 page"
+                logger.warning("no-pages %s", result)
+                end_task(conn, task_id, result)
+                return result
+            if active_idx >= len(step_pages):
+                active_idx = len(step_pages) - 1
+            page = step_pages[active_idx]
+
             captcha_abort = await _handle_captcha(
                 page, step_i, trace, conn, task_id,
                 max_steps=max_steps, progress_cb=progress_cb,
@@ -326,7 +353,8 @@ async def run_react_loop(
             marks, screenshot_b64 = await perceive(page)
 
             # W5-A 自反思: 页面 3 步无变化 → 软提示 (与 V0.5.0 anti-loop 硬 abort 互补)
-            fp = _page_fingerprint(getattr(page, "url", "") or "", marks)
+            # V0.21.1: fingerprint 加 active_idx 防 switch-back 看似无变化触发误报
+            fp = _page_fingerprint(getattr(page, "url", "") or "", marks, active_idx)
             recent_pages.append(fp)
             _maybe_inject_reflect_hint(trace, recent_pages, fp)
 
@@ -448,6 +476,37 @@ async def run_react_loop(
                 case PasteAction(text=text):
                     await human_like_paste(page, text)
                     obs = f"pasted {text!r}"
+                case SwitchTabAction(idx=tab_idx):
+                    # V0.21.1: 用 step_pages snapshot 解析 (防 step 内 popup 偏移);
+                    # 越界 → ERROR obs, active_idx 不变, 不重置 last_clicked_mark.
+                    if tab_idx < 0 or tab_idx >= len(step_pages):
+                        obs = (
+                            f"ERROR: switch_tab idx={tab_idx} 越界 "
+                            f"(当前 {len(step_pages)} tab, 合法 0..{len(step_pages) - 1})"
+                        )
+                    else:
+                        active_idx = tab_idx
+                        await step_pages[tab_idx].bring_to_front()
+                        last_clicked_mark = None  # 切 tab 旧 mark 失效, 防 type safety 误判
+                        obs = f"switched to tab [{tab_idx}] {step_pages[tab_idx].url[:80]}"
+                case CloseTabAction(idx=tab_idx):
+                    # V0.21.1: 2 道 guard — len==1 拒 + idx==active_idx 拒 (强迫先 switch 再 close).
+                    if tab_idx < 0 or tab_idx >= len(step_pages):
+                        obs = f"ERROR: close_tab idx={tab_idx} 越界 (当前 {len(step_pages)} tab)"
+                    elif len(step_pages) == 1:
+                        obs = "ERROR: close_tab 拒 — 不能关最后 1 个 tab"
+                    elif tab_idx == active_idx:
+                        obs = (
+                            f"ERROR: close_tab 拒 — 不能关当前 active tab "
+                            f"(idx={tab_idx}), 请先 switch_tab 切走再 close"
+                        )
+                    else:
+                        await step_pages[tab_idx].close()
+                        # idx < active_idx → active_idx 减 1; idx > active_idx → active_idx 不变
+                        if tab_idx < active_idx:
+                            active_idx -= 1
+                        last_clicked_mark = None  # 即便没切 active, 关 tab 后保险重置
+                        obs = f"closed tab [{tab_idx}], active_idx now={active_idx}"
 
             action_args = _action_args_only(action)
             if elicited_approval_rule is not None:

@@ -2,6 +2,55 @@
 
 All notable changes to web-agent. 版本号遵循 SemVer 简化形式（V<major>.<minor>.<patch>）。
 
+## [0.21.1] - 2026-05-09
+
+### Add (V0.21 multi-tab 系列第 2 commit — loop 改读 ctx + 派发 switch_tab/close_tab)
+
+V0.21.0 落档 types+schema (零行为) 后, V0.21.1 接 loop 主体改造: 真正让 LLM 能切 tab.
+
+### Changed
+
+- `src/web_agent/loop.py` `run_react_loop` 签名: `page: Page` → `ctx: BrowserContext` +
+  新 kwarg `initial_active_idx: int = 0` (jd_extract / list_extract 半自动模式找到特定 URL match
+  tab 后传入其在 ctx.pages 的 idx, Playwright bring_to_front 不改 pages 顺序).
+- `loop.py` 每 step 顶部 snapshot `step_pages = list(ctx.pages)` 防 step 内 popup 偏移; 加
+  `if not step_pages` 边界 (NO_PAGES abort) 和 `active_idx >= len(step_pages)` clamp.
+- `loop.py` `match action` 加 2 case:
+  - `SwitchTabAction(idx)`: 越界 → ERROR obs (active_idx 不变); 合法 → mutate active_idx +
+    `bring_to_front()` + 重置 `last_clicked_mark = None` (旧 mark 跨 tab 失效防 type safety 误判).
+  - `CloseTabAction(idx)`: 3 道 guard — 越界 / `len==1` (不能关最后) / `idx==active_idx` (强迫
+    先 switch 再 close, 避免 active 蒸发竞态); 合法 → `await page.close()` + idx<active 时
+    active_idx -=1 + 重置 last_clicked_mark.
+- `loop.py` `_page_fingerprint` 加 `active_idx: int = 0` kwarg 防 switch-back 看似无变化触发
+  W5-A reflect hint 误报 + V0.5.0 LOOP_DETECTED 误判. 单 tab 默认 0 向后兼容.
+- `src/web_agent/cli.py` L94 `run_react_loop(page=page, ...)` → `(ctx=ctx, ...)`.
+- `src/web_agent/jd_extract.py` L277: 同步改 ctx + `initial_active_idx=ctx.pages.index(jd_page)`.
+- `src/web_agent/list_extract.py` L140: 同 jd_extract.
+- `tests/test_loop_main.py`: `FakePage` 加 url+bring_to_front+close, 引入 `FakeContext` +
+  `_ctx()` helper, 4 处现有 callers update; 加 7 个 V0.21.1 新 test (switch_tab 改 active_idx /
+  switch_tab 越界 ERROR / close_tab 3 道 guard 各 1 个 / close_tab idx<active 调整 active_idx /
+  initial_active_idx kwarg / fingerprint 含 active_idx).
+- `tests/test_safety_loop_integration.py` (6 处) / `tests/test_captcha.py` (4 处) /
+  `tests/test_loop_reflect.py` (3 处): 各自加 FakeContext + _ctx() helper, 13 处 callers update.
+  各文件 FakePage 形态保留差异 (YAGNI, 不强行抽 conftest).
+
+### Compatibility
+
+- **行为变化**: 单 tab 场景 (cli.py 默认 + 测试 default _ctx()) 行为 100% 等价 V0.21.0 —
+  active_idx 恒 0, fingerprint 加 tab=0 字段不影响"无变化"判定 (单 tab tab 字段恒 0 不变).
+- 多 tab 场景 LLM 才能用上 SwitchTab/CloseTab (现有 Cli 工作流不受影响, 但 LLM 感知到 V0.21.0
+  schema 后会**主动尝试** switch_tab 探索 — 由 V0.21.2 加 tabs header 给完整反馈才对称).
+- jd_extract / list_extract 半自动模式: `ctx.pages.index(jd_page)` 计算 idx 传 initial_active_idx,
+  保证 LLM 第一步 perceive 看到的就是用户手开的 jd 页 (不被推到 ctx.pages[0]).
+- mypy strict 0; ruff 0; pytest 299+1+7+0=** 在 V0.21.0 基础上 +7 (test_loop_main 多 tab 派发 7 test).
+  其他 test 文件仅 fixture 重构无新 test.
+
+### Why patch (V0.21.1) 不 minor
+
+- run_react_loop 签名是**内部 Python API**而非 LLM tool surface (V0.21.0 minor 已扩 schema).
+- 影响面集中在 callers (内部) + 实现 (内部), 对外 CLI/MCP 行为零变化.
+- SemVer "向后兼容的 bug 修复 / 内部 enhance → patch", 0.21.0 → 0.21.1.
+
 ## [0.21.0] - 2026-05-09
 
 ### Add (V0.21 multi-tab 系列开篇 — types + schema, 零行为变化)

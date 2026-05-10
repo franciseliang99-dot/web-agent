@@ -127,6 +127,17 @@ class FakePage:
         return None
 
 
+class FakeContext:
+    """V0.21.1: loop 接 ctx; captcha 测试 1 tab 够用."""
+
+    def __init__(self, pages: list[FakePage]) -> None:
+        self.pages = pages
+
+
+def _ctx() -> FakeContext:
+    return FakeContext([FakePage()])
+
+
 _DUMMY_MARK = Mark(
     id=1, tag="button", role="", text="ok",
     bbox={"x": 0, "y": 0, "w": 80, "h": 30},
@@ -187,7 +198,7 @@ async def test_loop_pause_then_resume_after_captcha_cleared(
     shots = tmp_path / "shots"
 
     result = await run_react_loop(
-        FakePage(), client, goal="测试 captcha pause-resume",
+        _ctx(), client, goal="测试 captcha pause-resume",
         max_steps=3, db_path=db, screenshots_dir=shots,
     )
 
@@ -217,7 +228,7 @@ async def test_loop_captcha_timeout_writes_step_and_aborts(
     shots = tmp_path / "shots"
 
     result = await run_react_loop(
-        FakePage(), client, goal="测试 captcha timeout",
+        _ctx(), client, goal="测试 captcha timeout",
         max_steps=3, db_path=db, screenshots_dir=shots,
     )
 
@@ -262,7 +273,7 @@ async def test_loop_captcha_hit_calls_notify(
     shots = tmp_path / "shots"
 
     result = await run_react_loop(
-        FakePage(), client, goal="测试 captcha notify",
+        _ctx(), client, goal="测试 captcha notify",
         max_steps=2, db_path=db, screenshots_dir=shots,
     )
 
@@ -292,7 +303,7 @@ async def test_loop_disable_env_skips_captcha_check(
     shots = tmp_path / "shots"
 
     result = await run_react_loop(
-        FakePage(), client, goal="测试 disable",
+        _ctx(), client, goal="测试 disable",
         max_steps=2, db_path=db, screenshots_dir=shots,
     )
 

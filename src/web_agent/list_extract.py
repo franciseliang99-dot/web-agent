@@ -137,14 +137,17 @@ async def extract_list_url(
         client = make_client(model=model)
         logger.info("LLM provider=%s model=%s", client.name, client.model)
 
+        # V0.21.1: loop 改读 ctx; 传 list_page 在 ctx.pages 的 idx 作为 initial_active_idx
+        list_idx = ctx.pages.index(list_page)
         result_str = await run_react_loop(
-            page=list_page,
+            ctx=ctx,
             client=client,
             goal=_LIST_EXTRACT_GOAL,
             max_steps=LIST_EXTRACT_MAX_STEPS,
             max_wallclock_s=LIST_EXTRACT_MAX_WALLCLOCK_S,
             db_path=Path("data/trace.db"),
             screenshots_dir=Path("data/screenshots"),
+            initial_active_idx=list_idx,
         )
 
     parsed = parse_jd_result(result_str)

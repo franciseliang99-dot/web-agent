@@ -63,6 +63,17 @@ class FakePage:
         return None
 
 
+class FakeContext:
+    """V0.21.1: loop 改读 ctx; 单 tab 场景 wrap 1 个 FakePage."""
+
+    def __init__(self, pages: list[FakePage]) -> None:
+        self.pages = pages
+
+
+def _ctx() -> FakeContext:
+    return FakeContext([FakePage()])
+
+
 async def _fake_perceive(page):
     return [_SEND_BUTTON], _FAKE_SHOT_B64
 
@@ -103,7 +114,7 @@ async def test_send_click_default_blocked_writes_safety_step(
     shots = tmp_path / "shots"
 
     result = await run_react_loop(
-        FakePage(), client, goal="测试 W3-C send",
+        _ctx(), client, goal="测试 W3-C send",
         max_steps=3, db_path=db, screenshots_dir=shots,
     )
 
@@ -134,7 +145,7 @@ async def test_send_click_auto_approved_proceeds_to_done(
     shots = tmp_path / "shots"
 
     result = await run_react_loop(
-        FakePage(), client, goal="测试 W3-C send (授权)",
+        _ctx(), client, goal="测试 W3-C send (授权)",
         max_steps=4, db_path=db, screenshots_dir=shots,
     )
 
@@ -161,7 +172,7 @@ async def test_wildcard_auto_approve_also_allows_send(
     shots = tmp_path / "shots"
 
     result = await run_react_loop(
-        FakePage(), client, goal="测试 wildcard",
+        _ctx(), client, goal="测试 wildcard",
         max_steps=4, db_path=db, screenshots_dir=shots,
     )
     assert result == "ok"
@@ -190,7 +201,7 @@ async def test_safety_callback_accept_proceeds(
     shots = tmp_path / "shots"
 
     result = await run_react_loop(
-        FakePage(), client, goal="测试 elicit accept",
+        _ctx(), client, goal="测试 elicit accept",
         max_steps=4, db_path=db, screenshots_dir=shots,
         safety_approval_cb=approve_cb,
     )
@@ -227,7 +238,7 @@ async def test_safety_callback_decline_blocks(
     shots = tmp_path / "shots"
 
     result = await run_react_loop(
-        FakePage(), client, goal="测试 elicit decline",
+        _ctx(), client, goal="测试 elicit decline",
         max_steps=3, db_path=db, screenshots_dir=shots,
         safety_approval_cb=decline_cb,
     )
@@ -256,7 +267,7 @@ async def test_safety_callback_exception_treated_as_decline(
     shots = tmp_path / "shots"
 
     result = await run_react_loop(
-        FakePage(), client, goal="测试 elicit exception",
+        _ctx(), client, goal="测试 elicit exception",
         max_steps=3, db_path=db, screenshots_dir=shots,
         safety_approval_cb=buggy_cb,
     )

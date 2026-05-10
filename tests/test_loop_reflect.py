@@ -80,6 +80,17 @@ class FakePage:
         return None
 
 
+class FakeContext:
+    """V0.21.1: loop 改读 ctx; reflect 测试单 tab."""
+
+    def __init__(self, pages: list[FakePage]) -> None:
+        self.pages = pages
+
+
+def _ctx() -> FakeContext:
+    return FakeContext([FakePage()])
+
+
 _STUCK_MARKS = [_mk(1, "Submit")]
 _FAKE_SHOT = "aGVsbG8h"  # b'hello!' valid base64
 
@@ -118,7 +129,7 @@ async def test_reflect_hint_injected_when_page_stuck_3_steps(
     db = tmp_path / "trace.db"
     shots = tmp_path / "shots"
     result = await run_react_loop(
-        FakePage(), client, goal="测 reflect",
+        _ctx(), client, goal="测 reflect",
         max_steps=5, db_path=db, screenshots_dir=shots,
     )
 
@@ -161,7 +172,7 @@ async def test_reflect_not_injected_when_marks_change(
     db = tmp_path / "trace.db"
     shots = tmp_path / "shots"
     result = await run_react_loop(
-        FakePage(), client, goal="测 not stuck",
+        _ctx(), client, goal="测 not stuck",
         max_steps=5, db_path=db, screenshots_dir=shots,
     )
 
@@ -188,7 +199,7 @@ async def test_reflect_idempotent_no_double_append(
     db = tmp_path / "trace.db"
     shots = tmp_path / "shots"
     await run_react_loop(
-        FakePage(), client, goal="测 idempotent",
+        _ctx(), client, goal="测 idempotent",
         max_steps=7, db_path=db, screenshots_dir=shots,
     )
 

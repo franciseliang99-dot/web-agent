@@ -274,14 +274,18 @@ async def extract_url(
         client = make_client(model=model)
         logger.info("LLM provider=%s model=%s", client.name, client.model)
 
+        # V0.21.1: loop 改读 ctx; 传 jd_page 在 ctx.pages 的 idx 作为 initial_active_idx
+        # (Playwright ctx.pages 顺序不被 bring_to_front 改变, 必须显式传 idx).
+        jd_idx = ctx.pages.index(jd_page)
         result_str = await run_react_loop(
-            page=jd_page,
+            ctx=ctx,
             client=client,
             goal=_JD_EXTRACT_GOAL,
             max_steps=JD_EXTRACT_MAX_STEPS,
             max_wallclock_s=JD_EXTRACT_MAX_WALLCLOCK_S,
             db_path=Path("data/trace.db"),
             screenshots_dir=Path("data/screenshots"),
+            initial_active_idx=jd_idx,
         )
 
     fields = parse_jd_result(result_str)
