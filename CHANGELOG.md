@@ -2,6 +2,83 @@
 
 All notable changes to web-agent. 版本号遵循 SemVer 简化形式（V<major>.<minor>.<patch>）。
 
+## [0.23.3] - 2026-05-09
+
+### Add (V0.23 drag/upload/download 系列收尾 — 测试加固, **4 commit 全闭环**)
+
+V0.23 闭环: V0.23.0 schema → V0.23.1 actuator + spike → V0.23.2 dispatch+safety+download
+listener → V0.23.3 测试加固 (本). LLM 现完整能 drag/upload (含隐藏 input DOM walk) +
+download 自动落 task 隔离目录 + obs 注入 + safety 拦敏感路径 + 反爬侧 drag 18+ 帧拟人优势.
+
+### Changed (新增 3 真 chromium slow smoke 守护既有代码路径)
+
+- `tests/test_loop_drag_upload.py` 加 3 V0.23.3 真 chromium smoke:
+  - **`test_drag_emits_at_least_15_drag_frames_baseline`** — 反爬回归保护. V0.23.1 spike 实测
+    mouse path 18 帧 vs CDP 1 帧 是项目反爬核心卖点; 本测 `assert drag_count >= 15`
+    (留 17% 抖动 buffer) 守护未来重构不退化到 `frame.locator.drag_to` CDP 路径.
+  - **`test_download_size_over_limit_is_deleted`** — 覆盖 V0.23.2 `_save_download_async`
+    后置 size 检查 + unlink 路径. `WEB_AGENT_MAX_DOWNLOAD_MB=0` 让任何文件都超限,
+    验 save 完后被删.
+  - **`test_download_collision_appends_n_suffix`** — 覆盖 V0.23.2 `_resolve_download_path`
+    for-loop 2..1000 同名递增. 同 URL click 两次, 验 v0232.txt + v0232_2.txt 都落盘.
+
+### V0.23.3 sanity 推迟项 (V0.24+ 候选)
+
+- **Windows path 跨平台 spike** (Plan 风险 #4) — 真 Windows runner 才能验, 本 PR mark
+  TODO 写 README known-limitation.
+- **多文件 upload 真测** — Playwright `set_input_files(list)` 是上游契约, actuator
+  `file_paths = list(paths)` 没 array 拆分逻辑, 真测增量近零.
+- **空 paths 真测** — V0.23.0 factory test + V0.23.2 safety test 已覆盖, 不 e2e.
+- **跨 step obs 注入 e2e** — V0.23.2 download smoke 已 assert deque 含元信息; loop 注入
+  逻辑 mock 即可覆盖, 不需真 chromium.
+
+### Compatibility
+
+- 行为零变化 — 纯测试加固.
+- mypy strict 0; ruff 0; pytest 388 + 9 skip; 真 chromium **11 个 slow smoke 全过** (popup 2
+  + iframe 2 + V0.23.1 drag/upload 3 + V0.23.2 download 1 + V0.23.3 baseline+size+collision 3).
+
+### V0.23 系列总结 (4 commit / V0.23.0-3)
+
+| ver | commit | 解锁节点 |
+|-----|--------|---------|
+| V0.23.0 | 1c30aa7 | DragAction/UploadAction schema (零行为, dispatch placeholder) |
+| V0.23.1 | 131a2d6 | actuator human_like_drag (mouse+bezier; spike 证 mouse 触发 dragstart) + upload_file (DOM walk 4 路) |
+| V0.23.2 | 4e62031 | loop dispatch + safety upload sensitive path 黑名单 + download listener (端到端闭环) |
+| V0.23.3 | 本 | 测试加固 (反爬 baseline + size 超限删 + _N 后缀去重) |
+
+净增 ~30 单元测 + 4 真 chromium slow smoke. V0.22.4 (V0.22 收尾) → V0.23.3 跨度
+4 个版本号, 单元测从 349 → 388 (+39, 11% 增).
+
+### V0.23 关键决策落档 (subagent 推翻 plan 假设的实测沉淀)
+
+1. **V0.23.1: Plan 风险 #1 证伪** — 假设 mouse.down/move/up 不触发 HTML5 dragstart 必须
+   fallback `locator.drag_to`; 实测 chromium + 当前 Playwright **真触发** (drag 18 帧 vs
+   CDP 1 帧). 走原 mouse + bezier 拟人路径不 fallback.
+2. **V0.23.2: Plan B5 多 task 并发顾虑推翻** — 担心 download_dir ctx-level 注入被多 task
+   覆盖; 实地查 mcp_server._RUN_LOCK 已串行化 web_agent_run, ctx 同时只 1 task 持有 →
+   直接 ctx attr 安全, 不需 task_id 锁.
+3. **V0.23.2: actuator data-som-id cleanup 时机修正** — V0.22.2 sanity 推荐 _SOM_REMOVE_JS
+   清 data-som-id 防污染, 实测 actuator 后续 frame.locator 找不到元素; 改为 inject 入口清旧
+   + 末尾 REMOVE 不清, 跑期间 selector 稳定, 关 Chrome 自动清.
+
+### V0.24 候选 (V0.21 plan subagent 5 high-leverage moves 已完成 #1+#2+#3)
+
+- **#4 dialog auto-handle + 键盘导航** (window.confirm/alert/prompt) — 估 2 commit
+- **#5 smart retry + backtracking** (失败模式分类 + page.go_back) — 估 3 commit
+- **iframe 反检测 CDP 路径** (V0.22.2 留 TODO, 高反爬站 reCAPTCHA inside iframe)
+- **iframe a11y tree fallback** (V0.22.4 仅 host name; 跨域内部结构 LLM 仍瞎)
+- **eval golden corpus** (V0.25 plan 无人值守的数据底座)
+- **README/ARCHITECTURE 文档 sweep** — 现 V0.16.23 stale, 实际 V0.23.3, 跨 V0.17-V0.23
+  共 7 个 minor (multi-LLM provider routing / iframe / multi-tab / drag-upload-download).
+  独立 docs commit, 不搭车功能 commit.
+
+### Why patch (V0.23.3) 不 minor
+
+- 纯测试加固, 行为 100% 兼容 V0.23.2.
+- LLM tool surface (V0.23.0 schema) 零变化, 内部 actuator/safety/browser 全不动.
+- SemVer "向后兼容的 enhance → patch", 0.23.2 → 0.23.3.
+
 ## [0.23.2] - 2026-05-09
 
 ### Add (V0.23 第 3 commit — loop dispatch + safety upload + download listener 端到端闭环)

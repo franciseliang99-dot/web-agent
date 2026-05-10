@@ -126,6 +126,60 @@ _DOWNLOAD_HTML = (
 _DOWNLOAD_URL = "data:text/html," + urllib.parse.quote(_DOWNLOAD_HTML)
 
 
+async def test_drag_emits_at_least_15_drag_frames_baseline(tmp_path):
+    """V0.23.3 反爬回归保护: human_like_drag 真触发 drag 帧数 ≥15.
+
+    V0.23.1 spike 实测 mouse path 18 帧 vs CDP locator.drag_to 1 帧 — 反爬侧拟人优势.
+    本测守护后续重构不退化到 CDP 路径 (若有人改 actuator 走 frame.locator.drag_to 默认,
+    drag 帧数会跌到 1 失反爬优势, 本测 ≥15 立即报警).
+
+    阈值 15 留 ~17% 抖动 buffer (实测 18); 若未来 Playwright 升级把 mouse.move 调度优化
+    导致帧数减少, 本测警报可定位 root cause (V0.23.1 CHANGELOG spike 行号).
+    """
+    from playwright.async_api import async_playwright
+    from web_agent.actuator import human_like_drag
+    from web_agent.types import Mark
+
+    counter_html = (
+        "<html><body>"
+        "<div id=src draggable=true style='width:80px;height:40px;background:#cfc;"
+        "position:absolute;left:50px;top:50px'"
+        " ondragstart=\"event.dataTransfer.setData('text/plain','x');"
+        "window.__drag_count = (window.__drag_count||0) + 1\""
+        " ondrag=\"window.__drag_count = (window.__drag_count||0) + 1\">SRC</div>"
+        "<div id=dst style='width:120px;height:80px;background:#ccf;"
+        "position:absolute;left:300px;top:200px'"
+        " ondragover=\"event.preventDefault()\""
+        " ondrop=\"event.preventDefault()\">DST</div>"
+        "</body></html>"
+    )
+    counter_url = "data:text/html," + urllib.parse.quote(counter_html)
+
+    async with async_playwright() as p:
+        browser = await p.chromium.launch(headless=True)
+        try:
+            page = await (await browser.new_context()).new_page()
+            await page.goto(counter_url)
+            await page.wait_for_load_state("domcontentloaded")
+            from_m = Mark(
+                id=1, tag="div", role="", text="SRC",
+                bbox={"x": 50, "y": 50, "w": 80, "h": 40},
+            )
+            to_m = Mark(
+                id=2, tag="div", role="", text="DST",
+                bbox={"x": 300, "y": 200, "w": 120, "h": 80},
+            )
+            await human_like_drag(page, from_m, to_m)
+            drag_count = await page.evaluate("() => window.__drag_count || 0")
+            # 18 是 V0.23.1 spike 实测; 15 留 17% 抖动 buffer; CDP 路径只 1 帧
+            assert drag_count >= 15, (
+                f"V0.23.3 反爬回归: drag 帧数应 ≥15 (V0.23.1 spike 18 帧 baseline); "
+                f"got {drag_count}. 若 ≤5 怀疑 actuator 退化到 CDP 路径 (frame.locator.drag_to)"
+            )
+        finally:
+            await browser.close()
+
+
 async def test_download_listener_real_chromium_saves_file(tmp_path, monkeypatch):
     """V0.23.2 端到端: connect 装 download listener + click <a download> 真触发 → 文件落 download_dir.
 
@@ -160,6 +214,80 @@ async def test_download_listener_real_chromium_saves_file(tmp_path, monkeypatch)
             recent = getattr(ctx, "_web_agent_recent_downloads", None)
             assert recent and any("v0232.txt" in line for line in recent), (
                 f"obs deque 应含 download 元信息; got {recent}"
+            )
+        finally:
+            await browser.close()
+
+
+async def test_download_size_over_limit_is_deleted(tmp_path, monkeypatch):
+    """V0.23.3: WEB_AGENT_MAX_DOWNLOAD_MB=0 → 任何 download 超限 → save 后 stat → unlink.
+
+    覆盖 V0.23.2 _save_download_async 后置 size 检查 + 删除路径 (Playwright Download 无
+    pre-check size API, 必须 save 完才知 byte 数).
+    """
+    import asyncio
+    from playwright.async_api import async_playwright
+    from web_agent.browser import _attach_download_listeners
+
+    monkeypatch.setenv("WEB_AGENT_MAX_DOWNLOAD_MB", "0")
+    download_dir = tmp_path / "downloads" / "test_v0233_size"
+    download_dir.mkdir(parents=True, exist_ok=True)
+
+    async with async_playwright() as p:
+        browser = await p.chromium.launch(headless=True)
+        try:
+            ctx = await browser.new_context(accept_downloads=True)
+            _attach_download_listeners(ctx)
+            ctx._web_agent_download_dir = download_dir
+            page = await ctx.new_page()
+            await asyncio.sleep(0.1)
+            await page.goto(_DOWNLOAD_URL)
+            await page.wait_for_load_state("domcontentloaded")
+            await page.click("#dl")
+            await asyncio.sleep(1.0)
+            saved = download_dir / "v0232.txt"
+            # 超限被删 → 文件不应存在
+            assert not saved.exists(), (
+                f"V0.23.3: WEB_AGENT_MAX_DOWNLOAD_MB=0 应删超限文件; got {saved} 仍存在"
+            )
+        finally:
+            await browser.close()
+
+
+async def test_download_collision_appends_n_suffix(tmp_path):
+    """V0.23.3: 同 filename 多次 download → 加 _2/_3 后缀 (V0.23.2 _resolve_download_path).
+
+    覆盖 V0.23.2 _resolve_download_path for-loop 2..1000 同名递增逻辑 (timestamp 不可读,
+    _N 后缀人眼可读).
+    """
+    import asyncio
+    from playwright.async_api import async_playwright
+    from web_agent.browser import _attach_download_listeners
+
+    download_dir = tmp_path / "downloads" / "test_v0233_collision"
+    download_dir.mkdir(parents=True, exist_ok=True)
+
+    async with async_playwright() as p:
+        browser = await p.chromium.launch(headless=True)
+        try:
+            ctx = await browser.new_context(accept_downloads=True)
+            _attach_download_listeners(ctx)
+            ctx._web_agent_download_dir = download_dir
+            page = await ctx.new_page()
+            await asyncio.sleep(0.1)
+            await page.goto(_DOWNLOAD_URL)
+            await page.wait_for_load_state("domcontentloaded")
+            # 两次 click 同 download URL → v0232.txt + v0232_2.txt
+            await page.click("#dl")
+            await asyncio.sleep(0.6)
+            await page.click("#dl")
+            await asyncio.sleep(1.0)
+            first = download_dir / "v0232.txt"
+            second = download_dir / "v0232_2.txt"
+            assert first.exists(), f"第 1 次 download 应落 {first.name}; got {list(download_dir.iterdir())}"
+            assert second.exists(), (
+                f"V0.23.3: 第 2 次 download 同 filename 应加 _2 后缀; got "
+                f"{list(download_dir.iterdir())}"
             )
         finally:
             await browser.close()
