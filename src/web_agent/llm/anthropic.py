@@ -5,10 +5,12 @@
 
 from __future__ import annotations
 
-import os
-from typing import Any, cast
+from typing import TYPE_CHECKING, Any, cast
 
 from anthropic import AsyncAnthropic
+
+if TYPE_CHECKING:
+    from web_agent.vault import SecretStore
 from anthropic.types import (
     MessageParam,
     TextBlockParam,
@@ -33,14 +35,19 @@ class AnthropicClient:
         api_key: str | None = None,
         base_url: str | None = None,
         model: str = DEFAULT_MODEL,
+        secret_store: "SecretStore | None" = None,
     ) -> None:
-        api_key = api_key or os.environ.get("ANTHROPIC_API_KEY")
+        # V0.27.1: secret_store 注入让 anthropic 不再硬 import os.environ; None → EnvSecretStore
+        # 默 backend (跟现有 .env loading 100% 兼容). V0.28 加 keyring backend 时 0 改本类.
+        from web_agent.vault import default_store as _default_secret_store
+        store = secret_store or _default_secret_store()
+        api_key = api_key or store.get("ANTHROPIC_API_KEY")
         if not api_key:
             raise RuntimeError(
                 "ANTHROPIC_API_KEY 未设置 — 请填 .env 或 export 环境变量"
             )
         kwargs: dict[str, Any] = {"api_key": api_key, "max_retries": 4, "timeout": 120.0}
-        base_url = base_url or os.environ.get("ANTHROPIC_BASE_URL")
+        base_url = base_url or store.get("ANTHROPIC_BASE_URL")
         if base_url:
             kwargs["base_url"] = base_url
         self._client = AsyncAnthropic(**kwargs)

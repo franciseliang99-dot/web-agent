@@ -2,6 +2,59 @@
 
 All notable changes to web-agent. 版本号遵循 SemVer 简化形式（V<major>.<minor>.<patch>）。
 
+## [0.27.1] - 2026-05-10
+
+### Add (V0.27 凭证 vault 系列开篇 — SecretStore Protocol + EnvSecretStore + make_client 注入)
+
+V0.21 plan #6 + V0.26.5 docs 决策建议. 注: **V0.27.0 跳过** (Anthropic baseline 跑需用户提供
+ANTHROPIC_API_KEY + 烧 ~$1-3 token, 用户选 "用 Kimi-only 数据偶合 V0.27.1+ vault framework").
+V0.27 系列实际 4 commit (V0.27.1-4), V0.27.0 推迟到用户拿到 Anthropic key 时单独跑.
+
+V0.27 scope (subagent A1+A4 推迟 A2/A3):
+- ✅ A1 API key vault — 多 provider key 安全存取 + per-task selection 准备
+- ✅ A4 per-task provider routing (V0.27.2) — V0.26.5 数据驱动 select_provider
+- ⏸ A2 Web 登录态 → V0.28 (V0.16.18+ Chrome 接管已 zero-config 复用 cookie/profile)
+- ⏸ A3 加密 backend → V0.28 (KeyringSecretStore 占位 stub, V0.28 跨平台 keyring lib)
+
+### Changed
+
+- `src/web_agent/vault.py` **新建** vault framework 模块:
+  - `SecretStore` Protocol (`@runtime_checkable`, 跟 `LLMClient` Protocol V0.21.2 同模式)
+    含 `get(key, default)` + `has(key)` 两方法.
+  - `EnvSecretStore` 默 backend, 包 `os.environ.get` (跟现有 .env loading 100% 兼容,
+    cli/jd/list/eval/cli 入口已 load_dotenv 一次防 race).
+  - `KeyringSecretStore` 占位 stub raise NotImplementedError + 提示 V0.28 实现, 防 V0.27 误用;
+    接口预留让 V0.28 加 keyring backend 时 `make_client(secret_store=KeyringSecretStore())`
+    立即可用 0 改 caller.
+  - `default_store()` 默返 EnvSecretStore (V0.28 改返 keyring 时 0 改 anthropic.py / openai.py).
+- `src/web_agent/llm/anthropic.py` `AnthropicClient.__init__` 加 `secret_store: SecretStore | None
+  = None` kwarg (TYPE_CHECKING import 防循环), None → `default_store()` EnvSecretStore.
+  `os.environ.get("ANTHROPIC_API_KEY")` → `store.get("ANTHROPIC_API_KEY")`. 同样
+  ANTHROPIC_BASE_URL.
+- `src/web_agent/llm/openai.py` 同 anthropic 模式 (V0.27.1 注入 secret_store kwarg + store.get).
+- `tests/test_vault.py` **新建** 14 V0.27.1 单测:
+  - 3 Protocol/默认值 (Env Protocol satisfy / Keyring Protocol satisfy / default_store 默 Env)
+  - 5 EnvSecretStore (get existing/missing/no-default + has true/false)
+  - 2 KeyringSecretStore stub (get/has raise NotImplementedError)
+  - 4 make_client 注入 (Anthropic+OpenAI accept secret_store + Anthropic default 仍读 env +
+    Anthropic store 也无 key raise RuntimeError)
+
+### Compatibility
+
+- 老 caller / fixture 不受影响 — `secret_store: SecretStore | None = None` 默 None →
+  内部 `default_store()` EnvSecretStore() 100% 等价 V0.26.x 行为.
+- 现有 `make_client(provider="anthropic")` / cli.py / jd_extract.py / list_extract.py /
+  eval/cli.py 0 改, 仍 load_dotenv + EnvSecretStore 默读 .env.
+- mypy strict 0 (40 src files: src/web_agent 24 + eval 16); ruff 0 (自动清 anthropic.py /
+  openai.py 不再用的 `import os`); pytest 491 → **505 + 16 skip** (V0.27.1 +14 vault 测).
+- 真 chromium 15/15 全过 (无新).
+
+### Why patch (V0.27.1) 不 minor
+
+- `secret_store` 是 KW-only 默认 None 兼容扩展, 跟 V0.21.2 加 tabs/current_idx KW-only 同档.
+- 内部 module 加 (`web_agent.vault`) 不算对外 API 扩展 (LLMClient Protocol 已存在 V0.21.2).
+- SemVer "向后兼容的 enhance → patch", 0.26.5 → 0.27.1 (跳 V0.27.0).
+
 ## [0.26.5] - 2026-05-10
 
 ### Add (V0.26 系列收尾 — Kimi baseline JSON 落档 + docs 数据填充, **6 commit 全闭环**)

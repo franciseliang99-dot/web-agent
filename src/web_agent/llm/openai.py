@@ -15,10 +15,12 @@ Kimi 也是自动 cache，命中后 ~6× 折扣。
 from __future__ import annotations
 
 import json
-import os
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from openai import AsyncOpenAI
+
+if TYPE_CHECKING:
+    from web_agent.vault import SecretStore
 
 from web_agent.llm._schema import SYSTEM_PROMPT, build_user_text, to_openai_tools
 from web_agent.trace import Trace
@@ -37,14 +39,18 @@ class OpenAIClient:
         api_key: str | None = None,
         base_url: str | None = None,
         model: str = DEFAULT_MODEL,
+        secret_store: "SecretStore | None" = None,
     ) -> None:
-        api_key = api_key or os.environ.get("OPENAI_API_KEY")
+        # V0.27.1: secret_store 注入跟 anthropic.py 同模式. None → EnvSecretStore 默 backend.
+        from web_agent.vault import default_store as _default_secret_store
+        store = secret_store or _default_secret_store()
+        api_key = api_key or store.get("OPENAI_API_KEY")
         if not api_key:
             raise RuntimeError(
                 "OPENAI_API_KEY 未设置 — 请填 .env 或 export 环境变量"
             )
         kwargs: dict[str, Any] = {"api_key": api_key, "max_retries": 4, "timeout": 120.0}
-        base_url = base_url or os.environ.get("OPENAI_BASE_URL")
+        base_url = base_url or store.get("OPENAI_BASE_URL")
         if base_url:
             kwargs["base_url"] = base_url
         self._client = AsyncOpenAI(**kwargs)
