@@ -2,6 +2,55 @@
 
 All notable changes to web-agent. 版本号遵循 SemVer 简化形式（V<major>.<minor>.<patch>）。
 
+## [0.25.0] - 2026-05-09
+
+### Add (V0.25 smart retry+backtracking 系列开篇 — _classify_failure + transient retry budget)
+
+V0.21 plan subagent 第 #5 high-leverage move. SDK 内置 max_retries=4 之上再加一层 step
+级 retry — transient (RateLimit/InternalServer/timeout) 同 step 重 perceive+plan,
+fatal (BadRequest/Auth/RuntimeError) 立即 abort 维持 V0.24.2 兼容. V0.25 系列 4 commit:
+- **V0.25.0**: classifier + transient retry (本)
+- **V0.25.1**: failure_hints deque + _PRE_STEP_DRAIN_ATTRS +1 (兑现 V0.24.1 helper 承诺)
+- **V0.25.2**: backtracking — anti_loop 替 page.go_back + retry once + abort
+- **V0.25.3**: SYSTEM_PROMPT 第 14 条失败恢复策略
+
+### Changed
+
+- `src/web_agent/loop.py`:
+  - 加 `_classify_failure(e: Exception) -> "transient"|"fatal"` helper:
+    - isinstance 检查 transient 类名 (APIConnectionError/APITimeoutError/RateLimitError/
+      InternalServerError/ServiceUnavailableError/APIError/ConnectionError) — 跨 anthropic/
+      openai 两 SDK 类层级一致, 不硬 import (openai 是 optional dep).
+    - status_code 兜底 (跨第三方代理 OpenRouter/LiteLLM 包装层用 HTTP 语义): 408/429/500/502/503/504 → transient.
+    - 默认 fatal (BadRequest/Auth/Permission + 兜底 RuntimeError + 自定义 wrapper).
+  - 加 `_transient_retry_max()` env `WEB_AGENT_TRANSIENT_RETRY_MAX` 默认 3, 0 禁用回退 V0.24.2.
+  - LLM_FAILED 路径包 `for attempt in range(retry_max + 1)` retry loop:
+    - transient + 还有 budget → continue 同 step 重 perceive+plan
+    - fatal 或 budget 耗尽 → 写 step trace `action_args["classification"]` + `["transient_retries"]`
+      + abort. classification 进 trace 让用户看清是哪类失败 (运维诊断关键).
+- `tests/test_loop_smart_retry.py` **新建** 19 V0.25.0 测:
+  - `_classify_failure` 4 transient (RateLimit/InternalServer/Timeout/Connection) → 'transient'
+  - 4 fatal (BadRequest/Auth/RuntimeError/ValueError) → 'fatal'
+  - HTTP status_code 兜底 (429/503 → transient; 400 → fatal)
+  - `_transient_retry_max` env (默认 3 / override 7 / 禁用 0 / invalid fallback 3)
+  - 集成: 1 次 transient 后成功 / budget 耗尽 abort + classification 落 trace / fatal 立即
+    abort 不 retry (attempts=1) / `WEB_AGENT_TRANSIENT_RETRY_MAX=0` 等同 V0.24.2
+
+### Compatibility
+
+- 老 caller / fixture 不受影响 — env 默认 3 但 fatal exception (现有测试都用 RuntimeError)
+  立即 abort attempts=1, 测试通过路径不变.
+- existing `test_llm_exception_captured_writes_error_step` (RuntimeError → fatal) 仍过.
+- mypy strict 0; ruff 0; pytest 407 → **426 + 16 skip** (V0.25.0 +19 smart_retry 测).
+- 真 chromium 15/15 全过 (无新增).
+
+### Why minor (V0.25.0) 不 patch
+
+- 行为变化: 默认配置下 transient 失败现在会 retry 3 次 (V0.24.2 立即 abort). 跨用户感知
+  级别变化 (慢 RateLimit 站现自动 retry 提升成功率).
+- env `WEB_AGENT_TRANSIENT_RETRY_MAX=0` 给回退 escape hatch.
+- SemVer "新增向后兼容功能 (含行为增强) → minor", 0.24.2 → 0.25.0 (V0.24 收尾 → V0.25 开篇 minor 分界).
+
 ## [0.24.2] - 2026-05-09
 
 ### Add (V0.24 系列收尾 — SYSTEM_PROMPT 加键盘导航第 13 条, **3 commit 全闭环**)

@@ -205,6 +205,43 @@ def _captcha_enabled() -> bool:
     return os.environ.get("WEB_AGENT_CAPTCHA_DISABLE", "").lower() not in ("true", "1", "yes")
 
 
+# V0.25.0: transient/fatal 分类器. SDK 内置 max_retries=4 耗尽后我们再加一层 step 级 retry.
+# isinstance + status_code 双重兜底 — 跨第三方代理 (OpenRouter/LiteLLM) 包装层用 HTTP 语义.
+_TRANSIENT_HTTP_STATUSES = {408, 429, 500, 502, 503, 504}
+
+
+def _classify_failure(e: Exception) -> str:
+    """V0.25.0: 给 LLM_FAILED 异常分类 transient / fatal.
+
+    transient: 网络/timeout/RateLimit/InternalServer — 同 step 重试有意义
+    fatal: Auth/BadRequest/Permission/RuntimeError(Kimi 配置问题) — 重试无意义立即 abort
+
+    isinstance 优先 (anthropic + openai 两 SDK 类层级一致), status_code 兜底 (跨第三方代理).
+    """
+    # SDK 类型 isinstance 检查 (避免硬 import openai 因为是 optional dep)
+    name = type(e).__name__
+    if name in {
+        "APIConnectionError", "APITimeoutError", "ConnectionError",
+        "RateLimitError", "InternalServerError",
+        "ServiceUnavailableError", "APIError",
+    }:
+        return "transient"
+    # HTTP status 兜底 (第三方代理透传)
+    status = getattr(e, "status_code", None)
+    if status in _TRANSIENT_HTTP_STATUSES:
+        return "transient"
+    # 默认 fatal (含 RuntimeError / AuthenticationError / BadRequestError / PermissionDeniedError)
+    return "fatal"
+
+
+def _transient_retry_max() -> int:
+    """V0.25.0: env WEB_AGENT_TRANSIENT_RETRY_MAX 默认 3, 0 禁用 (回退 V0.24.2 行为)."""
+    try:
+        return max(0, int(os.environ.get("WEB_AGENT_TRANSIENT_RETRY_MAX", "3")))
+    except ValueError:
+        return 3
+
+
 def _frame_for_followup(page: Page, last_clicked_mark: Mark | None) -> Frame | None:
     """V0.22.3: type/paste/keyboard_shortcut 复用 last_clicked_mark.frame_path 路由 iframe.
 
@@ -474,27 +511,55 @@ async def run_react_loop(
             # V0.21.2: 算 tabs 列表传给 LLM 让它看到 multi-tab 状态. 单 tab 也传 (LLM 知道
             # tab 概念存在). 失败 fallback URL — 不 raise 防 loop 中断.
             tabs = await _gather_tab_titles(step_pages)
-            try:
-                action: Action = await client.plan(
-                    goal, screenshot_b64, marks, trace,
-                    tabs=tabs, current_idx=active_idx,
-                    cross_origin_hosts=cross_origin_hosts,
-                )
-            except Exception as e:
-                # SDK 内置 retry 已耗尽 / network / tool_call=None / 其他 LLM 异常
-                result = (
-                    f"LLM_FAILED at step {step_i}: {type(e).__name__}: {e}"
-                )
-                logger.warning("llm-failed %s", result)
-                step = Step(
-                    step=step_i, ts=time.time(), thought="(LLM 调用失败)",
-                    action_type="error", action_args={"error": str(e)[:200]},
-                    observation=result,
-                )
-                trace.append(step)
-                write_step(conn, task_id, step, str(shot_path))
-                end_task(conn, task_id, result)
-                return result
+            # V0.25.0: transient retry — SDK max_retries 之上再加 step 级重试. fatal 维持 V0.24.2
+            # abort. WEB_AGENT_TRANSIENT_RETRY_MAX=0 禁用 retry 回退 V0.24.2 行为.
+            retry_max = _transient_retry_max()
+            transient_retries = 0
+            action: Action | None = None
+            last_error: Exception | None = None
+            for attempt in range(retry_max + 1):  # 第 0 次是首发, 1..retry_max 是 retry
+                try:
+                    action = await client.plan(
+                        goal, screenshot_b64, marks, trace,
+                        tabs=tabs, current_idx=active_idx,
+                        cross_origin_hosts=cross_origin_hosts,
+                    )
+                    break  # 成功跳出 retry loop
+                except Exception as e:
+                    last_error = e
+                    classification = _classify_failure(e)
+                    if classification == "transient" and attempt < retry_max:
+                        transient_retries = attempt + 1
+                        logger.info(
+                            "step %d transient %s (attempt %d/%d): %s — retry",
+                            step_i, type(e).__name__, transient_retries, retry_max, e,
+                        )
+                        continue  # transient + 还有 budget → 同 step 重 perceive+plan
+                    # fatal 或 budget 耗尽 → abort
+                    result = (
+                        f"LLM_FAILED at step {step_i}: {type(e).__name__}: {e}"
+                    )
+                    logger.warning(
+                        "llm-failed %s (classification=%s transient_retries=%d)",
+                        result, classification, transient_retries,
+                    )
+                    step = Step(
+                        step=step_i, ts=time.time(), thought="(LLM 调用失败)",
+                        action_type="error",
+                        action_args={
+                            "error": str(e)[:200],
+                            "classification": classification,
+                            "transient_retries": transient_retries,
+                        },
+                        observation=result,
+                    )
+                    trace.append(step)
+                    write_step(conn, task_id, step, str(shot_path))
+                    end_task(conn, task_id, result)
+                    return result
+            # mypy: 若 break 出循环 action 必非 None; 若全 transient 走完 retry 走 abort 已 return.
+            # 此 assert 防御未来重构破坏不变量.
+            assert action is not None, f"V0.25.0 retry loop bug: action=None last_error={last_error!r}"
             logger.info("step %d action (%s): %s %s | thought: %s", step_i, client.name, action.type, _action_args_only(action), action.thought[:120])
 
             # safety check：在 actuator 之前 intercept 敏感 action（send/pay/delete/密码字段...）
