@@ -33,6 +33,49 @@ def _iframe_locator(frame: Frame, mark: Mark) -> Locator:
     """V0.22.2: iframe 内元素定位用 [data-som-id="N"] (perceiver V0.22.2 注入)."""
     return frame.locator(f'[data-som-id="{mark.id}"]')
 
+
+# V0.23.1: 给定 button mark, 找关联的 input[type=file] 并注入 sentinel attribute 让 Python
+# 用 Playwright locator 锚定. 4 路优先级 a→b→c→d 由显式 ARIA 关联递降到启发式兜底.
+# 现代 SPA 隐藏 file input 把 button 当 trigger, SoM visibility filter 跳 hidden input
+# (perceiver L43-46), 所以 actuator 兜底 walk DOM.
+_FIND_FILE_INPUT_JS = """
+(somId) => {
+  const btn = document.querySelector(`[data-som-id="${somId}"]`);
+  if (!btn) return null;
+  let input = null;
+  // (a) aria-controls 显式指向 (Upwork 等用此模式)
+  const controls = btn.getAttribute('aria-controls');
+  if (controls) {
+    const t = document.getElementById(controls);
+    if (t && t.tagName === 'INPUT' && t.type === 'file') input = t;
+  }
+  // (b) label[for] 反查 (button 在 label 内 / button 自身 for-like)
+  if (!input) {
+    const lab = btn.closest('label');
+    if (lab) {
+      const forId = lab.getAttribute('for');
+      if (forId) {
+        const t = document.getElementById(forId);
+        if (t && t.type === 'file') input = t;
+      }
+      if (!input) input = lab.querySelector('input[type=file]');
+    }
+  }
+  // (c) 同祖先 form/role-group/section/div 内最近的 input[type=file]
+  if (!input) {
+    const anc = btn.closest('form, [role="group"], section, div');
+    if (anc) input = anc.querySelector('input[type=file]');
+  }
+  // (d) 兜底: 整文档第一个 input[type=file] (单上传场景常见)
+  if (!input) input = document.querySelector('input[type=file]');
+  if (!input) return null;
+  // 注入 data-upload-target sentinel 让 Python 用 selector 稳定锚定 (避免动态 ID/selector 转义脆弱)
+  const tag = '__upload_input_' + somId;
+  input.setAttribute('data-upload-target', tag);
+  return tag;
+}
+"""
+
 logger = logging.getLogger(__name__)
 
 # 上次鼠标视口坐标（per-page，避免 W3 multi-tab 串扰）。Page 关闭后自动 GC。
@@ -158,6 +201,102 @@ def _is_qwerty_letter(ch: str) -> bool:
 def _type_delay() -> float:
     """截断正态 N(120, 40) ms 限到 [40, 300]。"""
     return max(0.04, min(0.30, random.gauss(0.12, 0.04)))
+
+
+async def human_like_drag(
+    page: Page, from_mark: Mark, to_mark: Mark, frame: Frame | None = None,
+) -> None:
+    """V0.23.1: 单段贝塞尔从 from 拖到 to (Trello 拖卡 / Dropbox 上传 zone / 表单 builder).
+
+    主 frame 路径: hover from → dwell 80-150ms (真人识别延迟) → mouse.down → bezier moves
+    from→to → dwell 50-100ms (放手前节奏) → mouse.up. **关键 spike (V0.23.1 commit msg)**:
+    chromium + 当前 Playwright 实测 mouse.down/move/up **真触发 HTML5 dragstart** (Plan 风险 #1
+    证伪), drag 帧数 18 vs locator.drag_to CDP 单 shot 1 — 反爬侧拟人优势明显.
+
+    iframe 路径 (frame!=None): 走 frame.locator(...).drag_to(...) (失贝塞尔, 跟 V0.22.2 click
+    iframe 同 trade-off; 高反爬站 iframe 内 drag 极罕见, YAGNI).
+    """
+    if frame is not None:
+        await think(0.2, 0.6)
+        await _iframe_locator(frame, from_mark).drag_to(_iframe_locator(frame, to_mark))
+        await asyncio.sleep(random.uniform(0.05, 0.15))
+        return
+
+    # 算 from/to 视口坐标 (page → viewport 减 scroll)
+    scroll = await page.evaluate("() => ({x: window.scrollX, y: window.scrollY})")
+    from_x, from_y = _click_point(from_mark)
+    to_x, to_y = _click_point(to_mark)
+    from_vx, from_vy = from_x - scroll["x"], from_y - scroll["y"]
+    to_vx, to_vy = to_x - scroll["x"], to_y - scroll["y"]
+
+    # Step 1: 移到 from (复用 click 起点逻辑)
+    last = _last_mouse_pos.get(page)
+    if last is None:
+        viewport = page.viewport_size or {"width": 1280, "height": 800}
+        start_vx = random.uniform(viewport["width"] * 0.3, viewport["width"] * 0.7)
+        start_vy = random.uniform(viewport["height"] * 0.3, viewport["height"] * 0.7)
+    else:
+        start_vx, start_vy = last
+    approach_dist = math.hypot(from_vx - start_vx, from_vy - start_vy)
+    approach_steps = max(15, min(40, int(approach_dist / 20) + random.randint(5, 10)))
+    delay_per_step = random.uniform(0.005, 0.015)
+    for x, y in _bezier_path((start_vx, start_vy), (from_vx, from_vy), steps=approach_steps):
+        await page.mouse.move(x, y)
+        await asyncio.sleep(delay_per_step)
+
+    # Step 2: dwell on source (真人识别物体延迟) → mouse.down
+    await asyncio.sleep(random.uniform(0.08, 0.15))
+    await page.mouse.down()
+
+    # Step 3: bezier from → to (拖动主体, 鼠标按住状态下)
+    drag_dist = math.hypot(to_vx - from_vx, to_vy - from_vy)
+    drag_steps = max(20, min(60, int(drag_dist / 15) + random.randint(8, 15)))
+    for x, y in _bezier_path((from_vx, from_vy), (to_vx, to_vy), steps=drag_steps):
+        await page.mouse.move(x, y)
+        await asyncio.sleep(delay_per_step)
+    _last_mouse_pos[page] = (to_vx, to_vy)
+
+    # Step 4: dwell on target (放手前节奏) → mouse.up
+    await asyncio.sleep(random.uniform(0.05, 0.10))
+    await page.mouse.up()
+
+
+async def upload_file(
+    page: Page, mark: Mark, paths: tuple[str, ...], frame: Frame | None = None,
+) -> None:
+    """V0.23.1: 上传本地文件到 mark (input[type=file] 或关联 button).
+
+    自适应路径:
+    - mark.tag=='input' and input_type=='file' → 直接 set_input_files (主 frame 走 page.locator,
+      iframe 走 frame.locator)
+    - 否则 (mark 是 button) → DOM walk JS 找关联 input + 注 data-upload-target sentinel +
+      page.locator(...).set_input_files
+
+    **不走拟人** — 浏览器 file dialog 系统接管, set_input_files 是 Playwright 唯一非交互绕过路径
+    (industry 标准, 拟人化对 file upload 无意义).
+
+    paths 是 tuple[str,...] (Action.UploadAction frozen+slots requires hashable);
+    set_input_files 接 list, 内部 list(paths) 转换.
+    """
+    file_paths = list(paths)
+    if mark.tag == "input" and mark.input_type == "file":
+        # 直接路径: SoM 抓到了 file input (display:none 不抓但若 visibility:hidden / opacity:1
+        # 仍能进 SoM)
+        if frame is not None:
+            await _iframe_locator(frame, mark).set_input_files(file_paths)
+        else:
+            await page.locator(f'[data-som-id="{mark.id}"]').set_input_files(file_paths)
+        return
+
+    # button 路径: DOM walk JS 找隐藏 input + 注 sentinel + locator
+    target_root: Page | Frame = frame if frame is not None else page
+    tag = await target_root.evaluate(_FIND_FILE_INPUT_JS, mark.id)
+    if not tag:
+        raise RuntimeError(
+            f"upload_file: 未找到 mark_id={mark.id} 关联的 input[type=file] "
+            f"(已尝试 aria-controls/label/同祖先/兜底); LLM 应该先 click 触发 file dialog 或选另一 mark"
+        )
+    await target_root.locator(f'[data-upload-target="{tag}"]').set_input_files(file_paths)
 
 
 async def human_like_type(

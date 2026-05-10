@@ -2,6 +2,77 @@
 
 All notable changes to web-agent. 版本号遵循 SemVer 简化形式（V<major>.<minor>.<patch>）。
 
+## [0.23.1] - 2026-05-09
+
+### Add (V0.23 第 2 commit — actuator human_like_drag + upload_file + DOM walk JS)
+
+V0.23.0 schema 落档后, V0.23.1 加 actuator 拟人 drag + 上传文件 (含隐藏 input DOM walk).
+仍**不接 loop dispatch** (V0.23.2 才 wire), 跟 V0.21.0/V0.22.0 同模式.
+
+### 关键 spike (Plan 风险 #1 证伪)
+
+V0.23.1 sanity subagent 跑真 chromium spike 验证 `page.mouse.down/move/up` 是否触发
+HTML5 dragstart (Plan 假设可能不触发, 必须 fallback `locator.drag_to`):
+
+| 测试 | dragstart | drag | dragend | drop |
+|------|-----------|------|---------|------|
+| Test 1: mouse.down + 20 步手摇 move + up | **1** | 18 | 1 | 1 |
+| Test 2: locator.drag_to (CDP 对照) | 1 | 1 | 1 | 1 |
+| Test 3: mouse.down + move(steps=25) + up | **1** | 23 | 1 | 1 |
+
+**结论**: chromium + 当前 Playwright 实测 mouse path **真触发 dragstart**, 且 drag 帧数
+18 vs CDP 单 shot 1 — 反爬侧拟人优势明显. **Plan 风险 #1 证伪, 走原 mouse + bezier 路径
+不 fallback**.
+
+### Changed
+
+- `src/web_agent/actuator.py` 加 `_FIND_FILE_INPUT_JS` (DOM walk 找 button 关联 input[type=file]):
+  4 路优先级 a→b→c→d 由显式 ARIA 关联递降到启发式兜底:
+  - (a) `button[aria-controls]` → 找 id 匹配的 input (Upwork 等 SPA 用此模式)
+  - (b) `button.closest('label')` → label[for] 反查 / label 内 querySelector
+  - (c) `button.closest('form, [role=group], section, div')` 同祖先 querySelector
+  - (d) 兜底 document.querySelector 第一个 file input (单上传场景)
+  - 找到后注入 `data-upload-target="__upload_input_<somId>"` sentinel attribute, Python 用
+    Playwright locator 锚定 (避免动态 ID/selector 转义脆弱).
+- `actuator.py` 加 `human_like_drag(page, from_mark, to_mark, frame=None)`:
+  - 主 frame: hover from (复用 click 起点逻辑) → dwell 80-150ms (真人识别物体延迟) →
+    mouse.down → 单段贝塞尔 from→to (drag_steps=20-60 按距离) → dwell 50-100ms (放手节奏) →
+    mouse.up. `_last_mouse_pos[page]` per-page WeakKeyDict (V3 multi-tab 兼容).
+  - iframe (frame!=None): `frame.locator(from).drag_to(frame.locator(to))` (失贝塞尔, 跟
+    V0.22.2 click iframe 同 trade-off; 高反爬站 iframe 内 drag 极罕见 YAGNI).
+- `actuator.py` 加 `upload_file(page, mark, paths: tuple[str,...], frame=None)`:
+  - mark.tag=='input' and input_type=='file' → 直接 `page.locator(...).set_input_files`
+    (主 frame 走 page.locator, iframe 走 frame.locator, 同 API).
+  - 否则 (button) → DOM walk JS 找隐藏 input + sentinel locator + set_input_files.
+  - DOM walk 失败 (4 路优先级都没找到) → RuntimeError (V0.23.2 loop dispatch 兜底 ERROR obs).
+  - **不走拟人** — 浏览器 file dialog 系统接管, set_input_files 是 Playwright 唯一非交互
+    绕过路径 (industry 标准).
+- `tests/test_actuator.py` 加 6 V0.23.1 mock 测:
+  - drag 主 frame: 验 down→up 顺序 + approach moves ≥15 + drag moves ≥20
+  - drag iframe: 验 frame.locator(from).drag_to(frame.locator(to)) 不调主 page.mouse
+  - upload input mark direct: 验 page.locator(...).set_input_files 不调 evaluate
+  - upload button DOM walk: 验 evaluate 含 data-upload-target + locator sentinel
+  - upload DOM walk null → RuntimeError
+  - upload iframe path: 验 frame.locator 不调 page.locator
+- `tests/test_loop_drag_upload.py` **新建** — 3 真 chromium slow smoke:
+  - drag 真触发 ondragstart + ondrop (V0.23.1 spike 闭环)
+  - file input mark + set_input_files 真投递 (input.files.length==1 + 文件名)
+  - button DOM walk + hidden input + set_input_files 真投递 (Upwork 模式覆盖)
+
+### Compatibility
+
+- 主 frame 路径走 mouse + bezier 拟人 — 反爬侧 drag 18+ 帧 vs CDP 1 帧.
+- 仍**未接 loop dispatch** (V0.23.0 placeholder ERROR obs 仍生效) — V0.23.2 才填实派发.
+- mypy strict 0; ruff 0; pytest 357 + 6 (test_actuator) = 363 + 8 skip; 真 chromium 7 个
+  slow smoke 全过 (V0.21.3 popup 2 + V0.22.1/2 iframe perceive+click 2 + V0.23.1 drag/upload 3).
+
+### Why patch (V0.23.1) 不 minor
+
+- 加新公共 actuator 函数, 不接 loop dispatch 仍零行为变化 (V0.23.0 actions 走 placeholder ERROR).
+- `_FIND_FILE_INPUT_JS` / `human_like_drag` / `upload_file` 是 actuator 内部能力, 对外 LLM
+  tool surface (V0.23.0 schema) 零变化.
+- SemVer "向后兼容的 enhance → patch", 0.23.0 → 0.23.1.
+
 ## [0.23.0] - 2026-05-09
 
 ### Add (V0.23 drag/upload/download 系列开篇 — Action union 加 DragAction/UploadAction)

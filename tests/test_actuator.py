@@ -246,3 +246,154 @@ async def test_human_like_click_main_frame_unchanged_when_frame_none():
     assert page.mouse.move.await_count >= 15  # 贝塞尔轨迹至少 15 步
     page.mouse.down.assert_awaited_once()
     page.mouse.up.assert_awaited_once()
+
+
+# --- V0.23.1 human_like_drag + upload_file ---
+
+
+def _mk_xy(id_: int, x: float, y: float) -> Mark:
+    return Mark(
+        id=id_, tag="div", role="", text=f"el-{id_}",
+        bbox={"x": x, "y": y, "w": 30, "h": 30},
+    )
+
+
+async def test_human_like_drag_main_frame_full_sequence():
+    """V0.23.1: 主 frame drag = approach moves → mouse.down → drag moves → mouse.up.
+
+    验证 down() 在所有 move 中间; down 之前的 move 是 approach (≥15 步), 之后是拖动 (≥20 步).
+    """
+    from unittest.mock import AsyncMock, MagicMock
+    from web_agent.actuator import human_like_drag
+    call_order: list[str] = []
+    page = MagicMock()
+    page.evaluate = AsyncMock(return_value={"x": 0, "y": 0})
+    page.viewport_size = {"width": 1280, "height": 800}
+    page.mouse = MagicMock()
+
+    async def rec_move(x, y):
+        call_order.append("move")
+
+    async def rec_down():
+        call_order.append("down")
+
+    async def rec_up():
+        call_order.append("up")
+
+    page.mouse.move = AsyncMock(side_effect=rec_move)
+    page.mouse.down = AsyncMock(side_effect=rec_down)
+    page.mouse.up = AsyncMock(side_effect=rec_up)
+
+    from_m = _mk_xy(1, 100, 100)
+    to_m = _mk_xy(2, 600, 400)
+    await human_like_drag(page, from_m, to_m)
+
+    assert "down" in call_order, "必须有 mouse.down"
+    assert "up" in call_order, "必须有 mouse.up"
+    down_idx = call_order.index("down")
+    up_idx = call_order.index("up")
+    assert down_idx < up_idx, "down 必须在 up 之前"
+    pre_moves = call_order[:down_idx].count("move")
+    drag_moves = call_order[down_idx + 1:up_idx].count("move")
+    assert pre_moves >= 15, f"approach moves 至少 15 步 (V0.23.1 spec); got {pre_moves}"
+    assert drag_moves >= 20, f"drag moves 至少 20 步 (V0.23.1 spec); got {drag_moves}"
+    page.mouse.down.assert_awaited_once()
+    page.mouse.up.assert_awaited_once()
+
+
+async def test_human_like_drag_iframe_uses_drag_to_locator():
+    """V0.23.1: iframe drag → frame.locator(from).drag_to(frame.locator(to))."""
+    from unittest.mock import AsyncMock, MagicMock
+    from web_agent.actuator import human_like_drag
+    from_loc = MagicMock()
+    from_loc.drag_to = AsyncMock()
+    to_loc = MagicMock()
+    frame = MagicMock()
+    frame.locator = MagicMock(side_effect=[from_loc, to_loc])
+    page = MagicMock()
+    page.mouse = MagicMock()
+    page.mouse.move = AsyncMock()
+    page.mouse.down = AsyncMock()
+    from_m = Mark(id=3, tag="div", role="", text="", bbox={"x": 0, "y": 0, "w": 1, "h": 1}, frame_path="0")
+    to_m = Mark(id=5, tag="div", role="", text="", bbox={"x": 0, "y": 0, "w": 1, "h": 1}, frame_path="0")
+    await human_like_drag(page, from_m, to_m, frame=frame)
+    assert frame.locator.call_count == 2
+    frame.locator.assert_any_call('[data-som-id="3"]')
+    frame.locator.assert_any_call('[data-som-id="5"]')
+    from_loc.drag_to.assert_awaited_once_with(to_loc)
+    page.mouse.move.assert_not_called()  # iframe 路径不走主页面 mouse
+
+
+async def test_upload_file_input_mark_direct_set_input_files():
+    """V0.23.1: mark 是 input[type=file] → 直接 page.locator(...).set_input_files."""
+    from unittest.mock import AsyncMock, MagicMock
+    from web_agent.actuator import upload_file
+    locator = MagicMock()
+    locator.set_input_files = AsyncMock()
+    page = MagicMock()
+    page.locator = MagicMock(return_value=locator)
+    page.evaluate = AsyncMock()  # 不该被调
+    mark = Mark(
+        id=7, tag="input", role="", text="",
+        bbox={"x": 0, "y": 0, "w": 1, "h": 1},
+        input_type="file",
+    )
+    await upload_file(page, mark, ("/tmp/a.txt", "/tmp/b.txt"))
+    page.locator.assert_called_once_with('[data-som-id="7"]')
+    locator.set_input_files.assert_awaited_once_with(["/tmp/a.txt", "/tmp/b.txt"])
+    page.evaluate.assert_not_called()  # input 路径不走 DOM walk
+
+
+async def test_upload_file_button_mark_dom_walk_path():
+    """V0.23.1: mark 是 button (非 input/file) → JS DOM walk 找隐藏 input + sentinel locator."""
+    from unittest.mock import AsyncMock, MagicMock
+    from web_agent.actuator import upload_file
+    sentinel_locator = MagicMock()
+    sentinel_locator.set_input_files = AsyncMock()
+    page = MagicMock()
+    page.locator = MagicMock(return_value=sentinel_locator)
+    page.evaluate = AsyncMock(return_value="__upload_input_8")
+    mark = Mark(
+        id=8, tag="button", role="", text="Upload",
+        bbox={"x": 0, "y": 0, "w": 80, "h": 30},
+    )
+    await upload_file(page, mark, ("/tmp/x.png",))
+    page.evaluate.assert_awaited_once()
+    args = page.evaluate.call_args
+    assert "data-upload-target" in args.args[0], "DOM walk JS 必须含 data-upload-target sentinel 注入"
+    assert args.args[1] == 8, "JS 接 mark.id 作 somId 参数"
+    page.locator.assert_called_once_with('[data-upload-target="__upload_input_8"]')
+    sentinel_locator.set_input_files.assert_awaited_once_with(["/tmp/x.png"])
+
+
+async def test_upload_file_button_dom_walk_returns_null_raises():
+    """V0.23.1: DOM walk 找不到 input → RuntimeError (loop dispatch V0.23.2 兜底 ERROR obs)."""
+    from unittest.mock import AsyncMock, MagicMock
+    import pytest
+    from web_agent.actuator import upload_file
+    page = MagicMock()
+    page.evaluate = AsyncMock(return_value=None)
+    mark = Mark(id=9, tag="button", role="", text="x", bbox={"x": 0, "y": 0, "w": 1, "h": 1})
+    with pytest.raises(RuntimeError, match="未找到.*关联的 input"):
+        await upload_file(page, mark, ("/tmp/a.txt",))
+
+
+async def test_upload_file_iframe_path_uses_frame_locator():
+    """V0.23.1: iframe 内 file input → frame.locator(...).set_input_files (跟主 frame 同 API)."""
+    from unittest.mock import AsyncMock, MagicMock
+    from web_agent.actuator import upload_file
+    locator = MagicMock()
+    locator.set_input_files = AsyncMock()
+    frame = MagicMock()
+    frame.locator = MagicMock(return_value=locator)
+    page = MagicMock()
+    page.locator = MagicMock()  # 不该被调
+    mark = Mark(
+        id=4, tag="input", role="", text="",
+        bbox={"x": 0, "y": 0, "w": 1, "h": 1},
+        input_type="file", frame_path="0",
+    )
+    await upload_file(page, mark, ("/tmp/y.txt",), frame=frame)
+    frame.locator.assert_called_once_with('[data-som-id="4"]')
+    locator.set_input_files.assert_awaited_once_with(["/tmp/y.txt"])
+    page.locator.assert_not_called()
