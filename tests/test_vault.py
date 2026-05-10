@@ -227,13 +227,6 @@ def test_missing_secret_error_carries_key_attr():
     assert e.key == "OPENAI_API_KEY"
 
 
-def test_missing_secret_error_custom_message():
-    """V0.27.4: 第二参数 message 覆盖默 msg (留扩展位)."""
-    e = MissingSecretError("KEY_X", message="custom abort reason")
-    assert "custom abort reason" in str(e)
-    assert e.key == "KEY_X"
-
-
 def test_anthropic_client_raises_missing_secret_error_not_plain_runtimeerror(monkeypatch):
     """V0.27.4: AnthropicClient 缺 key → raise MissingSecretError 不是 plain RuntimeError.
     V0.27.1 测 `pytest.raises(RuntimeError, match=...)` 仍触发因子类化, 但 mcp_server

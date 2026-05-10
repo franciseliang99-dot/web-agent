@@ -88,9 +88,9 @@ class MissingSecretError(RuntimeError):
     parsing 脆点 — Plan subagent 决: 比 message-startswith 检测干净).
     """
 
-    def __init__(self, key: str, message: str | None = None) -> None:
+    def __init__(self, key: str) -> None:
         self.key = key
-        super().__init__(message or f"{key} 未设置 — 请填 .env 或 export 环境变量")
+        super().__init__(f"{key} 未设置 — 请填 .env 或 export 环境变量")
 
 
 class InMemorySecretStore:
