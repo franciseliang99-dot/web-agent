@@ -2,6 +2,47 @@
 
 All notable changes to web-agent. 版本号遵循 SemVer 简化形式（V<major>.<minor>.<patch>）。
 
+## [0.24.1] - 2026-05-09
+
+### Refactor (兑现 V0.23.2 simplify subagent TODO 第 (2) 条 — 抽 _drain_pre_step_observations helper)
+
+V0.23.2 simplify subagent 标"loop pre-step mutation 第 3 处出现时抽 helper". V0.24.0
+dialog obs drain 是第 3 处 (download/dialog 同形 deque drain 模式), 触发抽取阈值.
+
+### Changed
+
+- `src/web_agent/loop.py`:
+  - 加 `_PRE_STEP_DRAIN_ATTRS = ("_web_agent_recent_downloads", "_web_agent_recent_dialogs")`
+    模块级常量 (V0.25+ 加新 deque 类型只动此元组).
+  - 加 `_drain_pre_step_observations(ctx, trace)` helper: 遍历常量元组, 对每个 ctx attr
+    deque (同形 str 列表 + maxlen=10) 执行 join → mutate trace.steps[-1].observation +
+    clear (注入幂等).
+  - 主 loop 顶部 inline for-loop 替成 `_drain_pre_step_observations(ctx, trace)` 一行.
+- `tests/test_loop_main.py` 加 3 V0.24.1 helper 单测:
+  - `test_drain_pre_step_observations_drains_all_attrs_and_clears` — 验 download+dialog 都
+    drain + 上一步 obs 含两类 + 原 obs 保留 + deque clear.
+  - `test_drain_pre_step_observations_empty_trace_skips` — 第一步 trace.steps 空时立即 return
+    (不抛, deque 不 clear 等下次 step 有 trace 时再 drain).
+  - `test_drain_pre_step_observations_empty_deques_noop` — 2 deque 都空 → trace.steps[-1]
+    obs 不变.
+
+### W5-A reflect hint **不进 helper** (设计决策)
+
+W5-A `_maybe_inject_reflect_hint` 依赖 (recent_pages, fp) 跟 ctx attr 不同源, 强行抽会引入
+跨源耦合; 进 helper 的是 ctx 上 deque attr 同形结构. **同时 mutate trace.steps[-1] 但
+信号源不同, 各自独立**.
+
+### Compatibility
+
+- 纯重构 — 行为 100% 兼容 V0.24.0; helper 结果跟原 inline for-loop 等价.
+- V0.24.0 现有 download / dialog smoke 全绿无改 (helper 实现不变 obs 注入语义).
+- mypy strict 0; ruff 0; pytest 406 + 16 skip; 真 chromium 15/15 全过.
+
+### Why patch (V0.24.1) 不 minor
+
+- 纯内部 helper 抽取, 对外 API/CLI/MCP/LLM tool surface 零变化.
+- SemVer "向后兼容的内部 enhance → patch", 0.24.0 → 0.24.1.
+
 ## [0.24.0] - 2026-05-09
 
 ### Add (V0.24 dialog auto-handle 系列开篇 — browser/loop 加 dialog listener + obs 注入)

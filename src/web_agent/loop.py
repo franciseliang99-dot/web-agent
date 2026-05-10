@@ -217,6 +217,33 @@ def _frame_for_followup(page: Page, last_clicked_mark: Mark | None) -> Frame | N
     return _resolve_frame(page, last_clicked_mark.frame_path)
 
 
+_PRE_STEP_DRAIN_ATTRS = ("_web_agent_recent_downloads", "_web_agent_recent_dialogs")
+
+
+def _drain_pre_step_observations(ctx: BrowserContext, trace: Trace) -> None:
+    """V0.24.1: 统一 browser listener 跨 step 元信息追加到上一步 trace.steps[-1].observation.
+
+    遍历 _PRE_STEP_DRAIN_ATTRS (download / dialog / V0.25+ 加新类型只动常量), 对每个
+    ctx attr deque 执行: 同形 (str 列表 + maxlen=10) → join → mutate trace.steps[-1] +
+    clear (注入幂等). 抽出兑现 V0.23.2 simplify subagent TODO 第 (2) 条 "loop pre-step
+    mutation 第 3 处出现时抽 helper".
+
+    W5-A reflect hint **不进 helper** — 它依赖 (recent_pages, fp) 跟 ctx attr 不同源,
+    强行抽会引入耦合. 进 helper 的是 ctx 上 deque attr 同形结构.
+    """
+    if not trace.steps:
+        return
+    for attr_name in _PRE_STEP_DRAIN_ATTRS:
+        deque_obj = getattr(ctx, attr_name, None)
+        if not deque_obj:
+            continue
+        obs_text = "\n".join(deque_obj)
+        trace.steps[-1].observation = (
+            trace.steps[-1].observation + "\n" + obs_text
+        ).strip()
+        deque_obj.clear()
+
+
 def _resolve_frame(page: Page, frame_path: str) -> Frame | None:
     """V0.22.2: 解析 mark.frame_path → Playwright Frame (主 frame 返 None 走 page 路径).
 
@@ -421,20 +448,8 @@ async def run_react_loop(
                 active_idx = len(step_pages) - 1
             page = step_pages[active_idx]
 
-            # V0.23.2 + V0.24.0: 上一步 step 完成后, browser listener 已 append 元信息到
-            # ctx._web_agent_recent_downloads / _web_agent_recent_dialogs deques. 把它们
-            # 追加到上一步 trace.steps[-1].observation (类似 W5-A reflect hint mutate).
-            # pop_all 防下一步重复读 (注入幂等).
-            # Note V0.24.1 simplify TODO: 第 3 处 obs drain (download/dialog/...) 命中"3 处抽
-            # helper" 阈值, 待 V0.24.1 抽 _drain_pre_step_observations(ctx, trace) helper 统一.
-            for attr_name in ("_web_agent_recent_downloads", "_web_agent_recent_dialogs"):
-                deque_obj = getattr(ctx, attr_name, None)
-                if deque_obj and trace.steps:
-                    obs_text = "\n".join(deque_obj)
-                    trace.steps[-1].observation = (
-                        trace.steps[-1].observation + "\n" + obs_text
-                    ).strip()
-                    deque_obj.clear()
+            # V0.24.1: download/dialog 跨 step 元信息追加到上一步 obs (helper 统一 drain).
+            _drain_pre_step_observations(ctx, trace)
 
             captcha_abort = await _handle_captcha(
                 page, step_i, trace, conn, task_id,

@@ -433,6 +433,58 @@ def test_page_fingerprint_includes_active_idx():
     assert fp_default == fp_tab0
 
 
+def test_drain_pre_step_observations_drains_all_attrs_and_clears():
+    """V0.24.1: helper 遍历 download/dialog 2 deque, append 到上一步 obs, clear 防重复."""
+    from collections import deque
+    from unittest.mock import MagicMock
+    from web_agent.loop import _drain_pre_step_observations
+    from web_agent.trace import Step, Trace
+    ctx = MagicMock()
+    ctx._web_agent_recent_downloads = deque(["downloaded: a.pdf"], maxlen=10)
+    ctx._web_agent_recent_dialogs = deque(["dialog confirm: 'ok?' (auto-dismissed)"], maxlen=10)
+    trace = Trace(task_id="t", goal="x")
+    trace.append(Step(step=0, ts=0.0, thought="x", action_type="click",
+                       action_args={}, observation="prior obs"))
+    _drain_pre_step_observations(ctx, trace)
+    assert "downloaded: a.pdf" in trace.steps[-1].observation
+    assert "auto-dismissed" in trace.steps[-1].observation
+    assert "prior obs" in trace.steps[-1].observation  # 原 obs 保留
+    # 注入幂等: deque clear
+    assert len(ctx._web_agent_recent_downloads) == 0
+    assert len(ctx._web_agent_recent_dialogs) == 0
+
+
+def test_drain_pre_step_observations_empty_trace_skips():
+    """V0.24.1: trace.steps 空 (loop 第一步) → helper 立即 return, 不抛."""
+    from collections import deque
+    from unittest.mock import MagicMock
+    from web_agent.loop import _drain_pre_step_observations
+    from web_agent.trace import Trace
+    ctx = MagicMock()
+    ctx._web_agent_recent_downloads = deque(["downloaded: x.pdf"], maxlen=10)
+    trace = Trace(task_id="t", goal="x")  # steps 空
+    _drain_pre_step_observations(ctx, trace)
+    # trace 未 mutate, deque 未 clear (因为没有 step 可挂)
+    assert len(trace.steps) == 0
+    assert len(ctx._web_agent_recent_downloads) == 1
+
+
+def test_drain_pre_step_observations_empty_deques_noop():
+    """V0.24.1: 2 deque 都空 → noop, trace.steps[-1] obs 不变."""
+    from collections import deque
+    from unittest.mock import MagicMock
+    from web_agent.loop import _drain_pre_step_observations
+    from web_agent.trace import Step, Trace
+    ctx = MagicMock()
+    ctx._web_agent_recent_downloads = deque(maxlen=10)
+    ctx._web_agent_recent_dialogs = deque(maxlen=10)
+    trace = Trace(task_id="t", goal="x")
+    trace.append(Step(step=0, ts=0.0, thought="x", action_type="click",
+                       action_args={}, observation="unchanged"))
+    _drain_pre_step_observations(ctx, trace)
+    assert trace.steps[-1].observation == "unchanged"
+
+
 def test_resolve_frame_main_frame_returns_none():
     """V0.22.2: frame_path="" (主 frame) → None 让 actuator 走 page 路径."""
     from unittest.mock import MagicMock
