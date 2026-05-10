@@ -2,6 +2,49 @@
 
 All notable changes to web-agent. 版本号遵循 SemVer 简化形式（V<major>.<minor>.<patch>）。
 
+## [0.21.0] - 2026-05-09
+
+### Add (V0.21 multi-tab 系列开篇 — types + schema, 零行为变化)
+
+V0.20.x 收尾 Upwork 半自动流后, 路线图转向"完全替代人 + 通用浏览器助手 + 完全无人值守". V0.21 系列
+4 commit 加多 tab 编排: V0.21.0 (types+schema 零行为) → V0.21.1 (loop 改读 ctx + 派发) → V0.21.2
+(每步 tabs header 进 user_text) → V0.21.3 (popup auto-register listener).
+
+V0.21.0 锁死 schema/类型层, **不动 loop**, 单独跑过三层 gate. 这样 V0.21.1 改 loop 时
+schema/工厂已稳定, 失败定位更精准.
+
+### Changed
+
+- `src/web_agent/types.py` Action union 7 → 9 dataclass: 加 `SwitchTabAction(idx)` /
+  `CloseTabAction(idx)`, 都 `frozen=True, slots=True`, `type: Literal[...]` 末位 (对齐 V0.17.0
+  pattern). `action_from_tool_call` match 加 2 arm, idx 走 `int(...)` cast 容错 LLM 偶尔输 string.
+- `src/web_agent/llm/_schema.py` `TOOL_SCHEMAS` 7 → 9 加 `switch_tab` / `close_tab` 中性 schema,
+  `to_anthropic_tools` / `to_openai_tools` 自动覆盖 (中性 schema 单源, 两 provider 同步无需改).
+- `src/web_agent/llm/_schema.py` `SYSTEM_PROMPT` 加第 10 条多 tab 指南: header 格式
+  `Tabs (N open, current=X)` + close_tab 2 道 guard 提示 + 切 tab 后下一步才生效提示.
+- `tests/test_llm_schema.py` `EXPECTED_TOOL_NAMES` 7 → 9; 3 处 `len(tools) == 7` 改 `== 9`;
+  加 `test_switch_tab_close_tab_schema_shape` (idx integer + required 校验).
+- `tests/test_types.py` **新建** — 此前 types.py 无独立 test 文件, 工厂 dispatch 仅靠
+  `test_llm_anthropic.py` / `test_llm_openai.py` 间接覆盖. V0.21.0 补 16 test 覆盖 9 type
+  factory + thought 默认空 + idx string→int cast + 未知 name raise + frozen 拒 mutate.
+
+### Compatibility
+
+- **零行为变化** — loop 仍只读 `ctx.pages[0]`, LLM 即便选了 switch_tab/close_tab,
+  `run_react_loop` 现版本 `match action` 没对应 case → 走 `case _: pass` 默认分支 (V0.21.1 加派发).
+  V0.21.0 单测纯 schema/工厂, 不触发 loop dispatch.
+- 但 LLM 看到 SYSTEM_PROMPT 第 10 条 + tools 多 2 个会**主动尝试**用 — V0.21.0 单 commit 落档
+  后**先不发 release**, 等 V0.21.1 派发 + V0.21.2 header 一起跑通再 ship.
+- mypy strict 0 (Action union 自动 narrow 到 9 dataclass); ruff 0; pytest 287+ → 287+16=303+
+  (新加 test_types.py 16 + test_llm_schema.py 1).
+
+### Why minor (V0.21.0) 不 patch
+
+- types.py Action union 改动是**类型 surface area 扩展** (7→9), `action_from_tool_call` 是 public
+  re-export (`web_agent/types.py` 暴露给所有 LLM provider 用), 不算内部实现 enhance.
+- `TOOL_SCHEMAS` 增条目改变 LLM 看到的 tool surface, 影响 prompt 行为 (虽然派发没接).
+- 按 SemVer "新增向后兼容功能 → minor", 0.20.8 → 0.21.0.
+
 ## [0.20.8] - 2026-05-09
 
 ### Fix (audit — V0.20.7 commit message 描述 marks_to_text href 但 Edit silent fail 实际未改)

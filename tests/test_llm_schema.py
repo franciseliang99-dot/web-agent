@@ -7,10 +7,20 @@ from __future__ import annotations
 
 from web_agent.llm._schema import TOOL_SCHEMAS, to_anthropic_tools, to_openai_tools
 
-EXPECTED_TOOL_NAMES = {"click", "type", "scroll", "extract", "done", "keyboard_shortcut", "paste"}
+EXPECTED_TOOL_NAMES = {
+    "click",
+    "type",
+    "scroll",
+    "extract",
+    "done",
+    "keyboard_shortcut",
+    "paste",
+    "switch_tab",
+    "close_tab",
+}
 
 
-def test_neutral_schemas_have_7_tools_with_thought():
+def test_neutral_schemas_have_9_tools_with_thought():
     assert {s["name"] for s in TOOL_SCHEMAS} == EXPECTED_TOOL_NAMES
     for s in TOOL_SCHEMAS:
         assert "thought" in s["properties"], f"{s['name']} 缺 thought 字段"
@@ -19,7 +29,7 @@ def test_neutral_schemas_have_7_tools_with_thought():
 
 def test_to_anthropic_tools_shape():
     tools = to_anthropic_tools()
-    assert len(tools) == 7
+    assert len(tools) == 9
     for t in tools:
         assert set(t.keys()) == {"name", "description", "input_schema"}
         assert t["input_schema"]["type"] == "object"
@@ -35,7 +45,7 @@ def test_to_openai_tools_strict_mode_invariants():
     3. parameters.required 必须包含所有 properties（即便业务上是 optional）
     """
     tools = to_openai_tools(strict=True)
-    assert len(tools) == 7
+    assert len(tools) == 9
     for t in tools:
         assert t["type"] == "function"
         f = t["function"]
@@ -62,3 +72,13 @@ def test_tool_descriptions_non_empty():
     for s in TOOL_SCHEMAS:
         assert s["description"], f"{s['name']} description 为空"
         assert len(s["description"]) >= 5
+
+
+def test_switch_tab_close_tab_schema_shape():
+    """V0.21.0: switch_tab / close_tab 中性 schema 形状校验 (idx integer required)."""
+    by_name = {s["name"]: s for s in TOOL_SCHEMAS}
+    for tool_name in ("switch_tab", "close_tab"):
+        s = by_name[tool_name]
+        assert s["properties"]["idx"]["type"] == "integer", f"{tool_name}.idx 必须 integer"
+        assert "idx" in s["required"], f"{tool_name} idx 必须 required"
+        assert "thought" in s["required"]

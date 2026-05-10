@@ -15,6 +15,9 @@ V0.19.0: Action union 扩 KeyboardShortcutAction (key) + PasteAction (text) 共 
   V0.16.31 + V0.18.5 spike-2 复刻 contenteditable 末尾追加 fail mode (anti-loop on click 试光标定位)
   根因 = actuator 缺 keyboard chord + paste action. V0.19.0 actuator 加 page.keyboard.press chord
   syntax + execCommand insertText 主路径.
+V0.21.0: Action union 扩 SwitchTabAction (idx) + CloseTabAction (idx) 共 9 dataclass.
+  零行为变化 — 仅 types/schema 加，loop 派发在 V0.21.1 接入。idx 是 perceive-step 时的
+  ctx.pages snapshot 索引（V0.21.1 loop 顶部 snapshot 防 popup 偏移）。
 """
 
 from __future__ import annotations
@@ -127,6 +130,32 @@ class PasteAction:
     type: Literal["paste"] = "paste"
 
 
+@dataclass(frozen=True, slots=True)
+class SwitchTabAction:
+    """V0.21.0: 切换到 ctx.pages[idx] 作为后续 perceive/actuate 的 active tab.
+
+    idx 是 perceive 时 LLM 看到的 step-snapshot 索引 (V0.21.1 loop 顶部 snapshot list(ctx.pages)
+    防 popup 偏移). 派发后 loop 会 ctx.pages[idx].bring_to_front() + 重置 last_clicked_mark.
+    """
+
+    thought: str
+    idx: int
+    type: Literal["switch_tab"] = "switch_tab"
+
+
+@dataclass(frozen=True, slots=True)
+class CloseTabAction:
+    """V0.21.0: 关闭 ctx.pages[idx]. 2 道 safety guard 在 loop 派发时校验.
+
+    Guard: (a) len(ctx.pages)==1 拒 (不能关最后 1 个 tab 否则 loop 孤儿);
+    (b) idx == active_idx 拒 (强迫 LLM 先 switch_tab 再 close, 避免 active 蒸发竞态).
+    """
+
+    thought: str
+    idx: int
+    type: Literal["close_tab"] = "close_tab"
+
+
 Action = (
     ClickAction
     | TypeAction
@@ -135,13 +164,16 @@ Action = (
     | DoneAction
     | KeyboardShortcutAction
     | PasteAction
+    | SwitchTabAction
+    | CloseTabAction
 )
 
 
 def action_from_tool_call(name: str, raw: dict[str, Any]) -> Action:
     """V0.17.0: LLM provider parse 用. `raw` 是 tool_use input dict (含 thought+args).
 
-    `thought` 必须在调用前已 pop 出, 或 raw 含 thought 由本函数 pop. 7 type 之一不匹配抛 RuntimeError.
+    `thought` 必须在调用前已 pop 出, 或 raw 含 thought 由本函数 pop. 9 type 之一不匹配抛 RuntimeError.
+    V0.21.0: 加 switch_tab / close_tab 2 arm.
     """
     thought = raw.pop("thought", "") if "thought" in raw else ""
     match name:
@@ -159,6 +191,10 @@ def action_from_tool_call(name: str, raw: dict[str, Any]) -> Action:
             return KeyboardShortcutAction(thought=thought, key=str(raw["key"]))
         case "paste":
             return PasteAction(thought=thought, text=str(raw["text"]))
+        case "switch_tab":
+            return SwitchTabAction(thought=thought, idx=int(raw["idx"]))
+        case "close_tab":
+            return CloseTabAction(thought=thought, idx=int(raw["idx"]))
         case _:
             raise RuntimeError(f"action_from_tool_call: unknown tool name {name!r}")
 
