@@ -150,3 +150,57 @@ def test_anthropic_client_missing_key_raises_runtimeerror(monkeypatch):
     from web_agent.llm.anthropic import AnthropicClient
     with pytest.raises(RuntimeError, match="ANTHROPIC_API_KEY 未设置"):
         AnthropicClient(secret_store=_EmptyStore())  # type: ignore[arg-type]
+
+
+# --- V0.27.1.1: bug fix make_client API drift (subagent 发现 V0.27.1 设计承诺空头支票) ---
+
+
+def test_make_client_accepts_secret_store_and_passes_through_anthropic(monkeypatch):
+    """V0.27.1.1: make_client(secret_store=...) 真透传给 AnthropicClient (subagent 实测发现 bug).
+
+    V0.27.1 vault.py docstring + CHANGELOG 反复承诺 "make_client(secret_store=...) 0 改 caller",
+    但 V0.27.1 落地时 make_client 签名根本没加 kwarg → V0.28 加 keyring 时 caller 必须直绕
+    factory 走 AnthropicClient(secret_store=...) — 违反设计承诺. V0.27.1.1 修复.
+    """
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+
+    class _StoreWithKey:
+        def get(self, key, default=None):
+            if key == "ANTHROPIC_API_KEY":
+                return "sk-ant-test-via-make-client"
+            return default
+
+        def has(self, key):
+            return key == "ANTHROPIC_API_KEY"
+
+    from web_agent.llm import make_client
+    client = make_client(provider="anthropic", secret_store=_StoreWithKey())  # type: ignore[arg-type]
+    assert client.name == "anthropic"  # 构造成功证明 store 真透传到 AnthropicClient
+
+
+def test_make_client_accepts_secret_store_and_passes_through_openai(monkeypatch):
+    """V0.27.1.1: make_client(provider='openai', secret_store=...) 透传 OpenAIClient."""
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+    monkeypatch.delenv("OPENAI_BASE_URL", raising=False)
+
+    class _StoreWithKey:
+        def get(self, key, default=None):
+            if key == "OPENAI_API_KEY":
+                return "sk-test-via-make-client"
+            return default
+
+        def has(self, key):
+            return key == "OPENAI_API_KEY"
+
+    from web_agent.llm import make_client
+    client = make_client(provider="openai", secret_store=_StoreWithKey())  # type: ignore[arg-type]
+    assert client.name == "openai"
+
+
+def test_make_client_default_secret_store_none_keeps_old_behavior(monkeypatch):
+    """V0.27.1.1: make_client() 不传 secret_store → 默 None → AnthropicClient 内部 default_store()
+    EnvSecretStore 100% 兼容老 caller (cli/jd/list/eval/runner 0 改)."""
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-from-env")
+    from web_agent.llm import make_client
+    client = make_client(provider="anthropic")  # 不传 secret_store
+    assert client.name == "anthropic"

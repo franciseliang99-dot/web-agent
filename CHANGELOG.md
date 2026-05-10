@@ -2,6 +2,51 @@
 
 All notable changes to web-agent. 版本号遵循 SemVer 简化形式（V<major>.<minor>.<patch>）。
 
+## [0.27.2] - 2026-05-10
+
+### Fix (V0.27.1 simplify subagent 实测发现 — make_client API drift bug fix)
+
+V0.27.1 落档后 simplify subagent 审 commit 时实测发现 **设计承诺 bug**: V0.27.1
+vault.py docstring + CHANGELOG L20-L24 / L33 + commit body 反复承诺 "make_client(secret_store=...)
+0 改 caller", 但 V0.27.1 落地时 `make_client` 签名根本没加 `secret_store` kwarg → V0.28
+加 keyring 时 caller 必须直绕 factory 走 `AnthropicClient(secret_store=...)`, 违反 V0.27 设计
+承诺. **subagent 实测发现 (single-agent 自检漏)** — 价值证明 V0.27.1 simplify subagent
+不是走形式, 真发现框架 bug.
+
+### Changed
+
+- `src/web_agent/llm/__init__.py` `make_client(provider, model, secret_store=None)` 加 KW-only
+  `secret_store: SecretStore | None = None` 参数 (TYPE_CHECKING import 防循环). 透传给
+  `AnthropicClient(secret_store=...)` / `OpenAIClient(secret_store=...)`. 默 None →
+  AnthropicClient/OpenAIClient 内部 `default_store()` EnvSecretStore() 100% 兼容老 caller.
+- `tests/test_vault.py` 加 3 V0.27.1.1 测:
+  - `test_make_client_accepts_secret_store_and_passes_through_anthropic` 验真透传
+  - `test_make_client_accepts_secret_store_and_passes_through_openai` openai 同款
+  - `test_make_client_default_secret_store_none_keeps_old_behavior` 兼容 cli/jd/list/eval
+
+### V0.28 keyring 时 caller 真 0 改 (V0.27.1.1 兑现 V0.27.1 承诺)
+
+```python
+# V0.28 加 keyring backend 后 caller 一行换:
+client = make_client(secret_store=KeyringSecretStore())
+# 或 cli.py 默逻辑切到 keyring (调 vault.default_store() 内部判 env enabled):
+client = make_client()  # default_store() 返 KeyringSecretStore()
+```
+
+V0.27.1 commit body 承诺的两条路径 V0.27.1.1 后真生效 (之前空头支票).
+
+### Compatibility
+
+- 老 caller / fixture 0 改动 — `secret_store=None` 默 → AnthropicClient/OpenAIClient 内部
+  `default_store()` EnvSecretStore() 跟 V0.26.x 100% 等价.
+- mypy strict 0; ruff 0; pytest 505 → **508 + 16 skip** (V0.27.1.1 +3 透传测).
+- 真 chromium 15/15 全过 (无新).
+
+### Why patch (V0.27.2) 不 minor
+
+- 纯 bug fix (V0.27.1 设计承诺断裂修复); KW-only 默 None 兼容扩展.
+- SemVer "向后兼容的 bug fix → patch", 0.27.1 → 0.27.2.
+
 ## [0.27.1] - 2026-05-10
 
 ### Add (V0.27 凭证 vault 系列开篇 — SecretStore Protocol + EnvSecretStore + make_client 注入)

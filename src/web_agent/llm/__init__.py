@@ -14,8 +14,12 @@ provider 选择优先级（参数 > env > 推断 > 默认）：
 from __future__ import annotations
 
 import os
+from typing import TYPE_CHECKING
 
 from web_agent.llm.base import LLMClient as LLMClient
+
+if TYPE_CHECKING:
+    from web_agent.vault import SecretStore
 
 
 def provider_from_model(model: str) -> str:
@@ -51,8 +55,14 @@ def provider_from_model(model: str) -> str:
 def make_client(
     provider: str | None = None,
     model: str | None = None,
+    secret_store: "SecretStore | None" = None,
 ) -> LLMClient:
     """按 env / 参数选 provider 并实例化对应 LLMClient。
+
+    V0.27.1.1: 加 secret_store 透传 — 兑现 V0.27.1 vault.py docstring + CHANGELOG 承诺
+    "make_client(secret_store=...) 0 改 caller". V0.28 加 keyring 时 caller
+    `make_client(secret_store=KeyringSecretStore())` 立即可用不必绕 factory 直调
+    AnthropicClient/OpenAIClient. 默 None → AnthropicClient/OpenAIClient 内部 default_store().
 
     Raises:
         RuntimeError: provider 不支持 / 对应 SDK 未装 / 对应 API key 未设。
@@ -66,7 +76,7 @@ def make_client(
     if provider == "anthropic":
         from web_agent.llm.anthropic import DEFAULT_MODEL, AnthropicClient
 
-        return AnthropicClient(model=model or DEFAULT_MODEL)
+        return AnthropicClient(model=model or DEFAULT_MODEL, secret_store=secret_store)
 
     if provider == "openai":
         try:
@@ -79,7 +89,7 @@ def make_client(
                 "  pip install 'web-agent[openai]'"
             ) from e
 
-        return OpenAIClient(model=model or DEFAULT_MODEL)
+        return OpenAIClient(model=model or DEFAULT_MODEL, secret_store=secret_store)
 
     raise RuntimeError(
         f"未知 provider: {provider!r}（当前支持: anthropic, openai；"
