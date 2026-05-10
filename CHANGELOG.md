@@ -2,6 +2,51 @@
 
 All notable changes to web-agent. 版本号遵循 SemVer 简化形式（V<major>.<minor>.<patch>）。
 
+## [0.22.0] - 2026-05-09
+
+### Add (V0.22 iframe 系列开篇 — Mark schema 加 frame_path, 零行为变化)
+
+V0.21 multi-tab 系列闭环后转 V0.22 iframe 感知 (V0.21 plan subagent 第 #2 high-leverage move).
+当前 perceiver SoM JS 只在主 frame 跑 → 跨域 iframe 完全不可见 (reCAPTCHA / 支付 widget /
+Stripe / 邮箱内嵌 widget LLM 全瞎). V0.22 系列 4 commit:
+- **V0.22.0**: Mark.frame_path schema (本 commit, 零行为)
+- **V0.22.1**: perceiver 同源 iframe 注入 SoM + 合并 marks (id 全局重排)
+- **V0.22.2**: actuator 按 frame_path 路由 click/type/paste (iframe 走 Playwright frame.locator)
+- **V0.22.3**: cross-origin iframe 简化提示 (列 host 让 LLM 知遇反爬不瞎点)
+
+V0.22.0 锁死 schema/序列化层不动 perceiver JS, 跟 V0.21.0 同节奏 — 后续 commit 失败定位
+更精准 (schema 不会再变).
+
+### Changed
+
+- `src/web_agent/types.py` `Mark` 加 `frame_path: str = ""` 默认空 (兼容旧 fixture 8+
+  Mark() 调用); 主 frame 元素恒空, iframe 内元素由 V0.22.1 perceiver 填深度优先索引
+  路径 (e.g. `"0"` 第 1 个 iframe / `"0.2"` 第 1 个 iframe 内第 3 个 child iframe).
+- `src/web_agent/perceiver.py` `marks_to_text` 加 frame_path 输出: `if m.frame_path: s += f" @{m.frame_path}"`,
+  顺序 `[id] <tag role=...> 'text' → href @frame_path` (frame_path 末位锚 LLM 理解 mark 在 iframe).
+- `src/web_agent/loop.py` `_page_fingerprint` `sig_marks` 加 `m.frame_path[:10]` —
+  防 iframe navigate 后 url+marks 看似不变 (父页面不变但 iframe src 切了) 触发 W5-A
+  reflect hint / V0.5.0 LOOP_DETECTED 误判. 主 frame frame_path="" 不影响行为.
+- `tests/test_perceiver.py` 加 5 V0.22.0 test (frame_path 默认空 / 显式赋值 / marks_to_text
+  无 frame_path 不加后缀兼容 V0.21.x / iframe path 加 @后缀 / 顺序 href→@path).
+- `tests/test_loop_main.py` 加 1 test: 同 url+marks 但 frame_path 不同 fingerprint 必区分.
+
+### Compatibility
+
+- **零行为变化**: frame_path 默认 ""; perceiver SoM JS 不变 (V0.22.1 才改); actuator 不变
+  (V0.22.2 才路由); marks_to_text 主 frame 输出 100% 等价 V0.21.3.
+- 老 caller / fixture / safety check / replay HTML / trace persistence 全自动兼容
+  (frame_path 是 dataclass 默认空字段, JSON 序列化安全, dict[str, Any] 透明).
+- mypy strict 0; ruff 0; pytest 317 + 5 (perceiver V0.22.0) + 1 (loop fingerprint) =
+  323 + 3 skip 全绿.
+
+### Why minor (V0.22.0) 不 patch
+
+- Mark schema 字段扩展是**类型 surface area 改变** (跟 V0.21.0 加 SwitchTabAction 同档).
+- frame_path 影响所有 perceiver 输出 → marks_to_text → LLM prompt → trace persistence,
+  多模块 surface 联动符合 SemVer "新增向后兼容功能 → minor".
+- 0.21.3 → 0.22.0 (V0.21 multi-tab 收尾 + V0.22 iframe 系列开篇 → minor 自然分界).
+
 ## [0.21.3] - 2026-05-09
 
 ### Add (V0.21 multi-tab 系列收尾 — popup auto-register listener, **4 commit 全闭环**)

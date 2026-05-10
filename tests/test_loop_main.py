@@ -432,6 +432,24 @@ def test_page_fingerprint_includes_active_idx():
     assert fp_default == fp_tab0
 
 
+def test_page_fingerprint_distinguishes_frame_path():
+    """V0.22.0: 同 url+marks 但 frame_path 不同 → 不同 fingerprint (防 iframe navigate 看似无变化)."""
+    from web_agent.loop import _page_fingerprint
+    main_mark = Mark(
+        id=1, tag="button", role="", text="ok",
+        bbox={"x": 0, "y": 0, "w": 1, "h": 1},
+        input_type="", name="", href="", frame_path="",
+    )
+    iframe_mark = Mark(
+        id=1, tag="button", role="", text="ok",
+        bbox={"x": 0, "y": 0, "w": 1, "h": 1},
+        input_type="", name="", href="", frame_path="0",
+    )
+    fp_main = _page_fingerprint("https://x.test/", [main_mark])
+    fp_iframe = _page_fingerprint("https://x.test/", [iframe_mark])
+    assert fp_main != fp_iframe, "frame_path 不同必须区分 fingerprint"
+
+
 # ---------- V0.21.2 loop 集成: plan() 收到 tabs/current_idx ----------
 
 

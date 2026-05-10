@@ -86,8 +86,10 @@ def _page_fingerprint(url: str, marks: list[Mark], active_idx: int = 0) -> str:
     V0.21.1: 加 active_idx — 多 tab 场景下 switch_tab→back 看似 url+marks 不变但语义变了,
     把 active_idx 进 fingerprint 防 W5-A reflect hint 误触发 + LOOP_DETECTED 误判.
     单 tab 场景 active_idx 恒 0, 行为不变 (向后兼容默认 0).
+    V0.22.0: sig_marks 加 frame_path[:10] 防 iframe navigate 后看似 marks 不变但 iframe
+    内容已变触发误判 (e.g. 父页面不变但 iframe src 切了).
     """
-    sig_marks = [(m.id, m.tag, m.text[:40]) for m in marks[:8]]
+    sig_marks = [(m.id, m.tag, m.text[:40], m.frame_path[:10]) for m in marks[:8]]
     return json.dumps(
         {"url": url, "n": len(marks), "marks": sig_marks, "tab": active_idx},
         sort_keys=True, ensure_ascii=False,

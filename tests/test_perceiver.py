@@ -73,6 +73,55 @@ def test_mark_dataclass_full_fields():
     assert m.href == ""
 
 
+# ---------- V0.22.0: frame_path 字段 + marks_to_text @path 后缀 ----------
+
+
+def test_mark_frame_path_default_empty():
+    """V0.22.0: 新增 frame_path 默认 "" 兼容旧 fixture (8+ Mark() 调用不带 kwarg)."""
+    m = Mark(id=1, tag="button", role="", text="", bbox={"x": 0, "y": 0, "w": 1, "h": 1})
+    assert m.frame_path == ""
+
+
+def test_mark_frame_path_explicit():
+    """V0.22.0: iframe 内 mark 用 frame_path 标深度优先索引路径."""
+    m = Mark(
+        id=5, tag="input", role="", text="",
+        bbox={"x": 0, "y": 0, "w": 1, "h": 1},
+        frame_path="0.2",
+    )
+    assert m.frame_path == "0.2"
+
+
+def test_marks_to_text_empty_frame_path_no_suffix():
+    """V0.22.0: 主 frame mark (frame_path="") 不加 @后缀, 保持 V0.21.x 输出兼容."""
+    out = marks_to_text([_mk(1, text="Click")])
+    assert "@" not in out
+
+
+def test_marks_to_text_iframe_path_appends_suffix():
+    """V0.22.0: iframe 内 mark 末尾加 @<frame_path> 让 LLM 知道路径."""
+    m = Mark(
+        id=3, tag="button", role="", text="Pay",
+        bbox={"x": 0, "y": 0, "w": 1, "h": 1},
+        frame_path="0",
+    )
+    out = marks_to_text([m])
+    assert out.endswith(" @0"), f"应以 @0 结尾, got {out!r}"
+
+
+def test_marks_to_text_iframe_path_after_href():
+    """V0.22.0: 输出顺序 text → href → @frame_path (href 先 frame_path 后)."""
+    m = Mark(
+        id=4, tag="a", role="", text="link",
+        bbox={"x": 0, "y": 0, "w": 1, "h": 1},
+        href="https://x.test/y", frame_path="0.1",
+    )
+    out = marks_to_text([m])
+    assert "→ https://x.test/y" in out
+    assert out.endswith(" @0.1")
+    assert out.index("→") < out.index("@")
+
+
 # ---------- _SOM_INJECT_JS smoke (W5-B 穿透代码段不被误删) ----------
 
 def test_som_inject_js_has_shadow_root_walker():

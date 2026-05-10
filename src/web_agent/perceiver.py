@@ -176,7 +176,11 @@ async def perceive(page: Page) -> tuple[list[Mark], str]:
 
 
 def marks_to_text(marks: list[Mark]) -> str:
-    """把 marks 列表序列化成给 LLM 的简洁文本（DOM 瘦身）。"""
+    """把 marks 列表序列化成给 LLM 的简洁文本（DOM 瘦身）。
+
+    V0.22.0: 加 `@<frame_path>` 后缀标记 iframe 内元素 (主 frame 不显示).
+    LLM 看到 `@0` / `@0.2` 知道该 mark 在嵌套 iframe; actuator V0.22.2 自动按 frame_path 路由.
+    """
     lines = []
     for m in marks:
         s = f"[{m.id}] <{m.tag}"
@@ -187,5 +191,7 @@ def marks_to_text(marks: list[Mark]) -> str:
             s += f" {m.text!r}"
         if m.href:
             s += f" → {m.href}"  # V0.20.8: a[href] 暴露给 LLM (list extract 必须看到 link target)
+        if m.frame_path:
+            s += f" @{m.frame_path}"  # V0.22.0: iframe 路径
         lines.append(s)
     return "\n".join(lines)

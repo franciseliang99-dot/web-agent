@@ -47,6 +47,7 @@ class Mark:
     input_type: str = ""  # input.type（password/tel/text/email/...），仅 input 标签有
     name: str = ""  # input.name 或 input.id（用于敏感字段名匹配 amount/cvv/...）
     href: str = ""  # a.href（绝对 URL），仅 a 标签有
+    frame_path: str = ""  # V0.22.0: iframe 深度优先索引路径 e.g. "0" / "0.2"; 主 frame 为空
 
 
 # ===== V0.17.0: Action discriminated union (5 dataclass + Literal type) =====
