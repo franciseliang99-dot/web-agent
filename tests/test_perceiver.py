@@ -122,6 +122,151 @@ def test_marks_to_text_iframe_path_after_href():
     assert out.index("→") < out.index("@")
 
 
+# ---------- V0.22.1: perceive() iframe DFS + id_offset + 跨域 catch ----------
+
+
+def _mk_raw(start: int, n: int, tag: str = "button") -> list[dict]:
+    """模拟 SoM JS evaluate 返回的 raw dict 列表 (含 id 已加 offset)."""
+    return [
+        {
+            "id": start + i, "tag": tag, "role": "", "text": f"el-{start + i}",
+            "bbox": {"x": 0, "y": 0, "w": 10, "h": 10},
+            "input_type": "", "name": "", "href": "",
+        }
+        for i in range(n)
+    ]
+
+
+def _mk_frame(child_frames=None, evaluate_returns=None, evaluate_raises=None, url: str = ""):
+    """构 fake Frame: evaluate 按调用顺序返预设, child_frames 列表."""
+    from unittest.mock import AsyncMock
+    frame = AsyncMock()
+    frame.url = url
+    frame.child_frames = child_frames or []
+    if evaluate_raises is not None:
+        frame.evaluate.side_effect = evaluate_raises
+    elif evaluate_returns is not None:
+        frame.evaluate.side_effect = evaluate_returns
+    frame.wait_for_load_state = AsyncMock()
+    return frame
+
+
+async def test_perceive_main_frame_only_no_iframes():
+    """V0.22.1: 无 iframe → 行为等价 V0.22.0 (主 frame 1 次注入, 全 frame_path='')."""
+    from unittest.mock import AsyncMock, MagicMock
+    from web_agent.perceiver import perceive
+    main_frame = _mk_frame(child_frames=[], evaluate_returns=[_mk_raw(1, 2), None])
+    page = MagicMock()
+    page.main_frame = main_frame
+    page.evaluate = AsyncMock(return_value=[])  # auto-dismiss
+    page.screenshot = AsyncMock(return_value=b"\x89PNG\r\n\x1a\n" + b"\x00" * 8)
+    marks, _ = await perceive(page)
+    assert len(marks) == 2
+    assert all(m.frame_path == "" for m in marks)
+    assert [m.id for m in marks] == [1, 2]
+
+
+async def test_perceive_iframe_dfs_id_offset_continuous():
+    """V0.22.1: 主 frame 2 marks + iframe 3 marks → id 全局连续 1-5, frame_path='' / '0'.
+
+    关键: iframe.evaluate 被调用时 opts 含 id_offset=2 (主 frame 已用 id 1-2).
+    """
+    from unittest.mock import AsyncMock, MagicMock
+    from web_agent.perceiver import _SOM_INJECT_JS, perceive
+    iframe = _mk_frame(
+        child_frames=[],
+        evaluate_returns=[_mk_raw(3, 3, tag="input"), None],  # id 3,4,5 (offset=2 → JS 内 +2)
+        url="about:srcdoc",
+    )
+    main_frame = _mk_frame(
+        child_frames=[iframe],
+        evaluate_returns=[_mk_raw(1, 2), None],
+    )
+    page = MagicMock()
+    page.main_frame = main_frame
+    page.evaluate = AsyncMock(return_value=[])
+    page.screenshot = AsyncMock(return_value=b"\x89PNG\r\n\x1a\n" + b"\x00" * 8)
+    marks, _ = await perceive(page)
+    assert [m.id for m in marks] == [1, 2, 3, 4, 5]
+    assert [m.frame_path for m in marks] == ["", "", "0", "0", "0"]
+    # iframe.evaluate 第 1 调用 (SoM inject) opts 含 id_offset=2
+    inject_call = iframe.evaluate.call_args_list[0]
+    assert inject_call.args[0] == _SOM_INJECT_JS
+    assert inject_call.args[1]["id_offset"] == 2
+
+
+async def test_perceive_cross_origin_iframe_skipped_main_continues():
+    """V0.22.1: child frame.evaluate 抛 (跨域 / detached) → warn skip 子树, 主 marks 不丢."""
+    from unittest.mock import AsyncMock, MagicMock
+    from web_agent.perceiver import perceive
+    cross_origin = _mk_frame(
+        child_frames=[],
+        evaluate_raises=RuntimeError("Frame is cross-origin"),
+        url="https://other.example/widget",
+    )
+    main_frame = _mk_frame(
+        child_frames=[cross_origin],
+        evaluate_returns=[_mk_raw(1, 2), None],
+    )
+    page = MagicMock()
+    page.main_frame = main_frame
+    page.evaluate = AsyncMock(return_value=[])
+    page.screenshot = AsyncMock(return_value=b"\x89PNG\r\n\x1a\n" + b"\x00" * 8)
+    marks, _ = await perceive(page)
+    # 主 2 marks 仍在; 跨域 0 marks; 不抛
+    assert len(marks) == 2
+    assert all(m.frame_path == "" for m in marks)
+
+
+async def test_perceive_main_frame_evaluate_failure_propagates():
+    """V0.22.1: 主 frame fail = 致命 (silent 空 marks 会让 loop 死循环), 不 catch 透抛."""
+    from unittest.mock import AsyncMock, MagicMock
+    from web_agent.perceiver import perceive
+    main_frame = _mk_frame(
+        child_frames=[],
+        evaluate_raises=RuntimeError("main frame crashed"),
+    )
+    page = MagicMock()
+    page.main_frame = main_frame
+    page.evaluate = AsyncMock(return_value=[])
+    page.screenshot = AsyncMock(return_value=b"\x89PNG\r\n\x1a\n" + b"\x00" * 8)
+    import pytest
+    with pytest.raises(RuntimeError, match="main frame crashed"):
+        await perceive(page)
+
+
+async def test_perceive_nested_iframe_path_encoding():
+    """V0.22.1: 主 → iframe[0] → iframe[1] 的嵌套 → frame_path 编码 '0.1'."""
+    from unittest.mock import AsyncMock, MagicMock
+    from web_agent.perceiver import perceive
+    inner = _mk_frame(
+        child_frames=[],
+        evaluate_returns=[_mk_raw(3, 1), None],
+    )
+    middle = _mk_frame(
+        # middle frame 自己 0 marks + 含 child[0]=skipped + child[1]=inner
+        child_frames=[
+            _mk_frame(  # child[0] 跨域跳过
+                child_frames=[],
+                evaluate_raises=RuntimeError("cross-origin"),
+            ),
+            inner,
+        ],
+        evaluate_returns=[_mk_raw(2, 1), None],
+    )
+    main_frame = _mk_frame(
+        child_frames=[middle],
+        evaluate_returns=[_mk_raw(1, 1), None],
+    )
+    page = MagicMock()
+    page.main_frame = main_frame
+    page.evaluate = AsyncMock(return_value=[])
+    page.screenshot = AsyncMock(return_value=b"\x89PNG\r\n\x1a\n" + b"\x00" * 8)
+    marks, _ = await perceive(page)
+    assert [m.frame_path for m in marks] == ["", "0", "0.1"]
+    assert [m.id for m in marks] == [1, 2, 3]
+
+
 # ---------- _SOM_INJECT_JS smoke (W5-B 穿透代码段不被误删) ----------
 
 def test_som_inject_js_has_shadow_root_walker():

@@ -7,7 +7,7 @@ import logging
 import os
 from typing import cast
 
-from playwright.async_api import Page
+from playwright.async_api import Frame, Page
 
 from web_agent.types import BBox, Mark  # V0.16.9 上提到 web_agent.types — re-export 保持旧 import 路径
 
@@ -20,6 +20,9 @@ _SOM_INJECT_JS = """
   // W5-B Shadow DOM 穿透: stack-based open shadowRoot walker
   // light DOM first → 各 open shadowRoot, WeakSet visited 防自引用; closed mode 跳过 (W3C 设计 JS 不可达)
   const SHADOW_ON = !opts || opts.shadow !== false;
+  // V0.22.1: id_offset 让 iframe 内 SoM id 跟 Python Mark.id 全局一致 (无 drift).
+  // 视觉框 tag.textContent + 返回 dict.id 都 ref 同一 id 变量, 三方自动一致.
+  const ID_OFFSET = (opts && opts.id_offset) || 0;
   const collected = [];
   const visited = new WeakSet();
   const stack = [document];
@@ -49,7 +52,7 @@ _SOM_INJECT_JS = """
   const colors = ['#FF3B30', '#34C759', '#007AFF', '#AF52DE', '#FF9500', '#5AC8FA'];
   return els.map((el, i) => {
     const r = el.getBoundingClientRect();
-    const id = i + 1;
+    const id = i + 1 + ID_OFFSET;  // V0.22.1: iframe 路径下 offset>0
     const color = colors[i % colors.length];
     const box = document.createElement('div');
     box.dataset.somMark = 'box';
@@ -150,28 +153,93 @@ async def maybe_auto_dismiss(page: Page) -> list[str]:
         return []
 
 
-async def perceive(page: Page) -> tuple[list[Mark], str]:
-    """先尝试关弹窗 → 注入 SoM 标注 → 截带标注的视口图 → 移除标注，返回 (marks, base64_png)。
+def _raw_to_marks(raw: list[dict[str, object]], frame_path: str) -> list[Mark]:
+    """V0.22.1: JS evaluate 返回的 raw dict 列表 → Mark[] 加 frame_path."""
+    return [
+        Mark(
+            id=cast(int, m["id"]), tag=cast(str, m["tag"]), role=cast(str, m["role"]),
+            text=cast(str, m["text"]),
+            bbox=cast(BBox, m["bbox"]),  # SoM JS 保证 x/y/w/h float
+            input_type=cast(str, m.get("input_type", "")),
+            name=cast(str, m.get("name", "")),
+            href=cast(str, m.get("href", "")),
+            frame_path=frame_path,
+        )
+        for m in raw
+    ]
 
-    auto-dismiss 在 SoM 注入**之前**执行，避免关弹窗后 mark 编号错位。
+
+async def _inject_som_in_frame(
+    frame: Frame, frame_path: str, shadow_on: bool, id_offset: int,
+) -> list[Mark]:
+    """V0.22.1: 单 frame 注入 SoM 并返 marks (frame_path + id_offset 已绑).
+
+    主 frame 调用方不 catch (fail-fast 跟 V0.22.0 行为对齐); 子 frame 调用方裹 try.
+    """
+    raw = await frame.evaluate(_SOM_INJECT_JS, {"shadow": shadow_on, "id_offset": id_offset})
+    return _raw_to_marks(cast(list[dict[str, object]], raw), frame_path)
+
+
+async def _remove_som_in_frame(frame: Frame) -> None:
+    """V0.22.1: 每 frame 都跑 _SOM_REMOVE_JS 防残留污染下次 perceive."""
+    try:
+        await frame.evaluate(_SOM_REMOVE_JS)
+    except Exception as e:
+        logger.warning("frame %r remove SoM failed (non-fatal): %r", frame.url[:80], e)
+
+
+async def _walk_child_frames(
+    parent: Frame, parent_path: str, shadow_on: bool, marks: list[Mark],
+) -> None:
+    """V0.22.1: DFS 递归注入 child frame SoM, 累加到 marks. 跨域/detached frame 跳过子树.
+
+    每层用 `len(marks)` 作 id_offset → 全局 id 连续无冲突. frame_path 编码深度优先索引,
+    主 frame 父调用 path="", 第 1 个 child path="0", child 的第 2 个 child path="0.1".
+    """
+    for i, child in enumerate(parent.child_frames):
+        child_path = f"{parent_path}.{i}" if parent_path else str(i)
+        try:
+            # 等 iframe load 防 timing 抢跑; timeout 短 (2s) 防慢站拖整体 perceive.
+            await child.wait_for_load_state("domcontentloaded", timeout=2000)
+            child_marks = await _inject_som_in_frame(
+                child, child_path, shadow_on, id_offset=len(marks),
+            )
+        except Exception as e:
+            logger.warning(
+                "frame %r (path=%s) SoM inject failed (cross-origin/detached?), 跳过子树: %r",
+                child.url[:80], child_path, e,
+            )
+            continue  # 跨域父跳了子也访问不到, 整子树 skip
+        marks.extend(child_marks)
+        await _walk_child_frames(child, child_path, shadow_on, marks)
+        await _remove_som_in_frame(child)
+
+
+async def perceive(page: Page) -> tuple[list[Mark], str]:
+    """先尝试关弹窗 → 注入 SoM 标注 (主 frame + 同源 iframe) → 截带标注的视口图 → 移除标注。
+
+    auto-dismiss 在 SoM 注入**之前**执行，避免关弹窗后 mark 编号错位 (只在主 frame 跑,
+    iframe dismiss 留 V0.22.4).
     截图含 SoM 红框 + 数字角标，直接给 LLM 看；返回前已清掉标注 DOM 节点不污染页面。
+
+    V0.22.1: 同源 iframe 也注入 SoM 让 LLM 看到 reCAPTCHA 风格 widget 内元素;
+    跨域 frame.evaluate fail → catch warn 跳整子树 (留 V0.22.3 加 a11y fallback);
+    主 frame fail 不 catch (fail-fast — silent 空 marks 会让 loop 误判页面无元素死循环).
+    id 全局连续: 主 frame 1..N, 第 1 个 iframe N+1..N+M, ... (用 id_offset 注入 JS, 视觉框
+    数字 == Python Mark.id 三方一致).
     """
     dismissed = await maybe_auto_dismiss(page)
     if dismissed:
         logger.info("auto-dismissed %d popup(s): %s", len(dismissed), dismissed)
     # W5-B: WEB_AGENT_SOM_SHADOW=false 退化到 V0.11.x light-DOM only 行为
     shadow_on = os.environ.get("WEB_AGENT_SOM_SHADOW", "true").lower() not in ("false", "0", "no", "off")
-    raw = await page.evaluate(_SOM_INJECT_JS, {"shadow": shadow_on})
-    marks = [
-        Mark(
-            id=m["id"], tag=m["tag"], role=m["role"], text=m["text"],
-            bbox=cast(BBox, m["bbox"]),  # JS evaluate 返回 dict[str, Any]; SoM JS 保证 x/y/w/h float
-            input_type=m.get("input_type", ""), name=m.get("name", ""), href=m.get("href", ""),
-        )
-        for m in raw
-    ]
+    # 主 frame 不 catch (fail-fast 跟 V0.22.0 行为对齐)
+    marks = await _inject_som_in_frame(page.main_frame, "", shadow_on, id_offset=0)
+    # 同源 iframe DFS
+    await _walk_child_frames(page.main_frame, "", shadow_on, marks)
     screenshot_bytes = await page.screenshot(type="png", full_page=False)
-    await page.evaluate(_SOM_REMOVE_JS)
+    # cleanup 主 frame 的 SoM (iframe 已在 _walk_child_frames 内 cleanup 完)
+    await _remove_som_in_frame(page.main_frame)
     return marks, base64.b64encode(screenshot_bytes).decode()
 
 

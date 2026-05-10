@@ -2,6 +2,57 @@
 
 All notable changes to web-agent. 版本号遵循 SemVer 简化形式（V<major>.<minor>.<patch>）。
 
+## [0.22.1] - 2026-05-09
+
+### Add (V0.22 iframe 系列第 2 commit — perceiver 同源 iframe SoM 注入 + id 全局连续)
+
+V0.22.0 schema 落档后 V0.22.1 接 perceiver 主体改造: LLM 现在能看到 iframe 内元素
+(reCAPTCHA / Stripe / 邮箱内嵌 widget 等同源 widget). 跨域 iframe 仍跳 (V0.22.3 加
+host hint), 主 frame fail-fast 不变 (silent skip 会让 loop 死循环).
+
+### Changed
+
+- `src/web_agent/perceiver.py` `_SOM_INJECT_JS` 加 `ID_OFFSET = (opts && opts.id_offset) || 0`
+  + `const id = i + 1 + ID_OFFSET` (**2 行 JS 改动**). 视觉框 tag 数字 + 返回 dict id +
+  Python Mark.id **三方自动一致** — 替代 plan B1 Python 端重排方案 (后者会让截图数字 ≠
+  marks_to_text id, 违反 SoM 论文核心契约).
+- `perceiver.py` 重写 `perceive()` 主体:
+  - 拆 `_inject_som_in_frame(frame, frame_path, shadow_on, id_offset)` 单 frame 注入返 marks
+  - 拆 `_remove_som_in_frame(frame)` cleanup (每 frame 都跑防残留污染下次 perceive)
+  - 拆 `_walk_child_frames(parent, parent_path, shadow_on, marks)` DFS 递归
+  - 拆 `_raw_to_marks(raw, frame_path)` JS dict → Mark[] 转换
+  - `perceive` 主路径: dismiss → 主 frame inject (fail-fast 不 catch) → DFS child frames
+    → screenshot → 主 frame remove SoM
+- `perceiver.py` 跨域/detached frame 处理: `_walk_child_frames` 单 frame `try/except` broad
+  (catch Exception) → `logger.warning` + 跳整子树 (跨域父跳了子也访问不到). 主 frame
+  fail 不 catch — 透抛保 fail-fast.
+- `perceiver.py` 加 `await child.wait_for_load_state("domcontentloaded", timeout=2000)`
+  防 iframe 还没 attach 完 evaluate 抛 detached. 短 timeout 防慢站拖整体 perceive RTT.
+- frame_path 编码: 深度优先索引, 主 frame `""`, 第 1 个 child `"0"`, child[0] 的 child[1]
+  `"0.1"`. Playwright `frame.child_frames` 顺序 == DOM 顺序 (race 时也稳定).
+- `tests/test_perceiver.py` 加 5 V0.22.1 测 (主 frame only / iframe DFS+id_offset 连续 /
+  跨域 catch 主 marks 不丢 / 主 frame fail 透抛 / 嵌套 frame_path 编码 "0.1").
+- `tests/test_loop_iframe.py` **新建** — 1 真 chromium srcdoc iframe smoke
+  (slow + skipif WEB_AGENT_RUN_SLOW=1, 默认跳过). 验证 srcdoc 同源 iframe 真注入 SoM 后
+  marks 全局 id 连续 + frame_path 正确 + 主/iframe button 都被抓.
+
+### Compatibility
+
+- 无 iframe 页面: child_frames=[] → DFS 立即返回, **行为 100% 等价 V0.22.0** (单次 evaluate).
+- 主 frame fail: 跟 V0.22.0 一致透抛 (V0.20.x 行为兼容).
+- iframe 内坐标系: bbox 留 iframe 内 (V0.22.2 actuator 走 frame.locator 不读 bbox; replay
+  HTML 不画框 bbox 错位无影响). 不加 iframe.bounding_box 偏移 (YAGNI + 引入坐标系混存判断负担).
+- iframe dismiss (cookie 弹窗): 暂只主 frame 跑 (Stripe iframe 不需要; 第三方广告 iframe
+  常需 — 留 V0.22.4 评估).
+- mypy strict 0; ruff 0; pytest 328 + 4 skip; 真 chromium 3 个 slow smoke 全过 (含 V0.21.3
+  popup listener 2 个 + V0.22.1 iframe SoM 1 个).
+
+### Why patch (V0.22.1) 不 minor
+
+- perceive() 签名不变 (page → tuple[list[Mark], str]); 调用方零改.
+- frame_path 字段 V0.22.0 已加 (那是 minor); V0.22.1 仅填值, 内部实现层.
+- SemVer "向后兼容的 enhance → patch", 0.22.0 → 0.22.1.
+
 ## [0.22.0] - 2026-05-09
 
 ### Add (V0.22 iframe 系列开篇 — Mark schema 加 frame_path, 零行为变化)
