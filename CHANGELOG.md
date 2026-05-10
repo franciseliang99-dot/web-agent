@@ -2,6 +2,71 @@
 
 All notable changes to web-agent. 版本号遵循 SemVer 简化形式（V<major>.<minor>.<patch>）。
 
+## [0.26.3] - 2026-05-10
+
+### Add (V0.26 第 4 commit — web-agent-eval CLI + 双 opt-in env + GitHub Actions stub)
+
+V0.26.0/1/2 框架+corpus+harness 后, V0.26.3 加 entry script + 双 opt-in env 防意外烧 token +
+GitHub Actions workflow stub maintainer 可一键启用 baseline run.
+
+### V0.26.3 关键决策 (subagent rate-limited 主 agent 自决, 基于 Step 1 现有数据 + Step 2 V0.26 plan 历史)
+
+- **vcr cassette 位置**: `eval/cassettes/` 隔离 (eval 独立顶层 vs tests/cassettes 用户登录态测).
+- **CLI 默认 --providers anthropic** (单 provider 防 OpenAI key 缺失 fail), `--corpus all`,
+  `--runs 1` (V0.26.3 仅 1 run, N=3 取均值留 V0.26.4 baseline 实现), `--output data/eval/`.
+- **双 opt-in env**: `WEB_AGENT_RUN_EVAL=1` 必须 (CLI 不设 exit 1 + 提示防意外烧 token);
+  `WEB_AGENT_EVAL_REAL=1` 二级 (真调 LLM 录 cassette 仅 maintainer baseline); 缺 cassette +
+  EVAL_REAL=0 → CLI exit 1 + 提示 "set WEB_AGENT_EVAL_REAL=1 + ANTHROPIC_API_KEY".
+- **GitHub Actions stub `if: false`** + cron 无效日期 (2 月 31 日永不触发) + secret 配置 example
+  注释 — maintainer 启用步骤 1 行注释指引.
+- **wheel packages 加 eval/** (`[tool.hatch.build.targets.wheel] packages = ["src/web_agent", "eval"]`)
+  让 console_script 真能 `from eval.cli import main`. 没这条 `web-agent-eval` 启动直接
+  `ModuleNotFoundError: No module named 'eval'` (V0.26.3 实测发现).
+
+### Changed
+
+- `eval/cli.py` **新建** argparse + main() 入口:
+  - `--corpus all|<axis>` 选 task 子集 (复用 V0.26.0 CapabilityAxis Literal 12 项)
+  - `--providers anthropic,openai,kimi` 多 provider 跨 grid
+  - `--runs N` (V0.26.3 仅 1, N=3 留 V0.26.4)
+  - `--output <dir>` JSON dump 目录
+  - `--lint-only` 跑 V0.26.1 token-specific lint 不调真 LLM/chromium (无需 RUN_EVAL=1)
+  - 帮助函数: `_parse_providers` / `_select_tasks` / `_check_opt_in_env` / `_check_real_eval_or_cassette`
+- `pyproject.toml`:
+  - `[project.scripts]` 加 `web-agent-eval = "eval.cli:main"` (现有 6 console_script 第 7 个)
+  - `[tool.hatch.build.targets.wheel] packages` 加 `eval` 让 wheel 含 eval 模块.
+- `eval/cassettes/.gitkeep` **新建** 占位目录 (V0.26.4 baseline 真跑时落 *.yaml).
+- `.github/workflows/eval-nightly.yml` **新建** stub:
+  - `if: false` 默认禁防意外烧 token
+  - `cron: '0 0 31 2 *'` 永不触发占位 (2 月 31 日不存在)
+  - maintainer 启用步骤注释 (改 `if: true` + 加 ANTHROPIC_API_KEY secret)
+  - 上传 eval JSON 到 GitHub Actions artifact (90 天保留)
+- `tests/test_eval_smoke.py` **新建** 17 V0.26.3 测:
+  - 4 `_parse_providers` 测 (默认 anthropic / comma split / strip whitespace / skip empty)
+  - 3 `_select_tasks` 测 (all 全 10 / axis filter / unknown axis 空)
+  - 2 `_check_opt_in_env` 测 (不设 exit 1 + stderr 提示 / 设 1 通过)
+  - 3 `_check_real_eval_or_cassette` 测 (EVAL_REAL=1 真 / cassette 存在回放 / 都没 exit 1)
+  - 3 `main()` 测 (--lint-only 不需 RUN_EVAL=1 / lint fail SystemExit / 不带 --lint-only 必需 RUN_EVAL=1)
+  - 1 argparse 默认值 测
+  - 1 workflow stub 默认 `if: false` + secret config 注释验证
+
+### Compatibility
+
+- 老 caller / fixture 不受影响 — eval/ 仍独立顶层模块, src/web_agent 0 改动.
+- console_script `web-agent-eval` 是新 entry (现有 6 entry 全保留: web-agent / web-agent-replay /
+  web-agent-memory / web-agent-mcp / web-agent-jd / web-agent-list-jds).
+- mypy strict 0 (39 src files: src/web_agent 23 + eval 16); ruff 0;
+  pytest 472 → **489 + 16 skip** (V0.26.3 +17 smoke 测).
+- 真 chromium 15/15 全过 (无新, V0.26.4 baseline 真跑落档 cassette + 4 个 eval slow smoke 才加).
+- 实测 `uv run web-agent-eval --lint-only` 真跑 → "LINT OK: 10 task tokens 全过 task-specific 检查".
+
+### Why patch (V0.26.3) 不 minor
+
+- 加新 console_script (web-agent-eval) 是 V0.26 系列内 plumbing (V0.26.0 minor 已开 eval 顶层
+  模块主题), patch 内 entry script 添加 (跟 V0.20.5 加 web-agent-jd entry 同档).
+- 现有 console_script 不动, opt-in env 默认禁 (RUN_EVAL=1 显式才跑) 老用户 0 影响.
+- SemVer "向后兼容的 enhance → patch", 0.26.2 → 0.26.3.
+
 ## [0.26.2] - 2026-05-10
 
 ### Add (V0.26 第 3 commit — A/B harness + token cost metrics + markdown report)
