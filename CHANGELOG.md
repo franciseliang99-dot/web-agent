@@ -2,6 +2,39 @@
 
 All notable changes to web-agent. 版本号遵循 SemVer 简化形式（V<major>.<minor>.<patch>）。
 
+## [0.22.3] - 2026-05-09
+
+### Refactor (V0.22.2 simplify subagent 判 PROCEED — 抽 _frame_for_followup helper)
+
+V0.22.2 落档后 simplify subagent 判 PROCEED: loop.py 4 个 match arm 中 Type/Paste/KS
+3 处重复 `_resolve_frame(page, last_clicked_mark.frame_path) if last_clicked_mark else None`
+三元表达式. Subagent 论据 (与主 agent 倾向分歧):
+- 读者扫 match arm 每次解析三元 < 一眼懂 helper 名字
+- V0.23 加新 follow-up action (DoubleClick 等) 时只 1 处调用
+- 防 V0.23 namespace 改时漏改某 arm 的 last_clicked_mark 引用
+
+主 agent 采纳, 跟 V0.21 系列 simplify 跳过模式有差异 (V0.21 都判跳过). 单一逻辑单元独立 commit
+不跟 V0.22.4 cross-origin 混. V0.22 系列 plan 4 commit → 实际 5 commit (V0.22.0/1/2/3 refactor/4 cross-origin).
+
+### Changed
+
+- `src/web_agent/loop.py` 加 `_frame_for_followup(page, last_clicked_mark) -> Frame | None`
+  helper (5 行); Type/Paste/KeyboardShortcut 3 个 match arm 各换 1 行三元 →
+  `_frame_for_followup(page, last_clicked_mark)` 一行调用. ClickAction 仍直接调
+  `_resolve_frame(page, m.frame_path)` (因 m 是该 arm 内 _find_mark 拿到的不是 last_clicked_mark,
+  语义不同不复用).
+
+### Compatibility
+
+- 纯重构 — 行为 100% 兼容 V0.22.2; helper 结果跟原三元等价.
+- 测试零改 (mock _resolve_frame 路径仍打 helper 内部, 单测路径不变).
+- mypy strict 0; ruff 0; pytest 341 + 5 skip; slow chromium 4/4 全过.
+
+### Why patch (V0.22.3) 不 minor
+
+- 纯内部 helper 抽取, 对外 API/CLI/MCP/LLM tool surface 零变化.
+- SemVer "向后兼容的内部 enhance → patch", 0.22.2 → 0.22.3.
+
 ## [0.22.2] - 2026-05-09
 
 ### Add (V0.22 iframe 系列第 3 commit — actuator 按 frame_path 路由, **iframe 真可点可输入**)

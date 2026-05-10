@@ -201,6 +201,18 @@ def _captcha_enabled() -> bool:
     return os.environ.get("WEB_AGENT_CAPTCHA_DISABLE", "").lower() not in ("true", "1", "yes")
 
 
+def _frame_for_followup(page: Page, last_clicked_mark: Mark | None) -> Frame | None:
+    """V0.22.3: type/paste/keyboard_shortcut 复用 last_clicked_mark.frame_path 路由 iframe.
+
+    抽出 3 处重复三元 `_resolve_frame(page, last_clicked_mark.frame_path) if last_clicked_mark else None`.
+    收益: ① 读者扫 match arm 看名字直接懂"复用 click 状态" ② V0.23 加新 follow-up action
+    时只 1 处调用 ③ 防 V0.23 加 namespace 时漏改某 arm 的 last_clicked_mark 引用.
+    """
+    if last_clicked_mark is None:
+        return None
+    return _resolve_frame(page, last_clicked_mark.frame_path)
+
+
 def _resolve_frame(page: Page, frame_path: str) -> Frame | None:
     """V0.22.2: 解析 mark.frame_path → Playwright Frame (主 frame 返 None 走 page 路径).
 
@@ -513,9 +525,8 @@ async def run_react_loop(
                         frame_suffix = f" @{m.frame_path}" if m.frame_path else ""
                         obs = f"clicked [{m.id}] {m.tag} {m.text!r}{frame_suffix}"
                 case TypeAction(text=text, submit=submit):
-                    # V0.22.2: 复用 last_clicked_mark.frame_path 路由 iframe (不加 last_clicked_frame_path
-                    # 状态; SwitchTab/CloseTab 已 reset last_clicked_mark = None)
-                    type_frame = _resolve_frame(page, last_clicked_mark.frame_path) if last_clicked_mark else None
+                    # V0.22.3: _frame_for_followup helper 抽 3 处重复三元
+                    type_frame = _frame_for_followup(page, last_clicked_mark)
                     await human_like_type(page, text, frame=type_frame, mark=last_clicked_mark)
                     if submit:
                         await page.keyboard.press("Enter")
@@ -534,13 +545,11 @@ async def run_react_loop(
                     result = res
                     obs = res
                 case KeyboardShortcutAction(key=key):
-                    # V0.22.2: 99% 场景接 click 后跳末尾, 复用 last_clicked_mark.frame_path
-                    ks_frame = _resolve_frame(page, last_clicked_mark.frame_path) if last_clicked_mark else None
+                    ks_frame = _frame_for_followup(page, last_clicked_mark)
                     await human_like_keyboard_shortcut(page, key, frame=ks_frame, mark=last_clicked_mark)
                     obs = f"keyboard_shortcut {key!r}"
                 case PasteAction(text=text):
-                    # V0.22.2: paste 同 type, 复用 last_clicked_mark.frame_path
-                    paste_frame = _resolve_frame(page, last_clicked_mark.frame_path) if last_clicked_mark else None
+                    paste_frame = _frame_for_followup(page, last_clicked_mark)
                     await human_like_paste(page, text, frame=paste_frame, mark=last_clicked_mark)
                     obs = f"pasted {text!r}"
                 case SwitchTabAction(idx=tab_idx):
