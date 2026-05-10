@@ -165,6 +165,123 @@ def test_metric_to_dict_writes_pass_key_not_pass_underscore():
 # --- run_one 集成 (mock chromium_launcher + LLMClient + run_react_loop) ---
 
 
+# --- V0.26.1: TraceContainsAction / TraceObsContains predicates ---
+
+
+def test_trace_contains_action_matched():
+    from eval.predicates import TraceContainsAction
+    p = TraceContainsAction(action_type="click", min_count=2)
+    trace = [
+        {"step": 0, "action_type": "click", "action_args": {}, "observation": "x"},
+        {"step": 1, "action_type": "type", "action_args": {}, "observation": "y"},
+        {"step": 2, "action_type": "click", "action_args": {}, "observation": "z"},
+    ]
+    r = p.evaluate("ok", trace)
+    assert r.matched is True
+    assert "2 次" in r.reason
+    assert r.name == "TraceContainsAction"
+
+
+def test_trace_contains_action_not_matched():
+    from eval.predicates import TraceContainsAction
+    p = TraceContainsAction(action_type="upload", min_count=1)
+    trace = [{"step": 0, "action_type": "click", "action_args": {}, "observation": ""}]
+    r = p.evaluate("ok", trace)
+    assert r.matched is False
+
+
+def test_trace_obs_contains_matched():
+    from eval.predicates import TraceObsContains
+    p = TraceObsContains(substring="downloaded:")
+    trace = [
+        {"step": 0, "action_type": "click", "action_args": {}, "observation": "clicked button"},
+        {"step": 1, "action_type": "click", "action_args": {}, "observation": "downloaded: report.pdf"},
+    ]
+    r = p.evaluate("ok", trace)
+    assert r.matched is True
+    assert "step 1" in r.reason
+
+
+def test_trace_obs_contains_not_matched_hints_v024_helper():
+    """V0.26.1: TraceObsContains 失败 reason 提示检查 V0.24.1 helper drain — 防 corpus 演化时静默漏."""
+    from eval.predicates import TraceObsContains
+    p = TraceObsContains(substring="dialog confirm:")
+    trace = [{"step": 0, "action_type": "click", "action_args": {}, "observation": "x"}]
+    r = p.evaluate("ok", trace)
+    assert r.matched is False
+    assert "V0.24.1" in r.reason  # 防漏 drain 的 hint
+
+
+# --- V0.26.1 corpus 完整性 + token-specific lint ---
+
+
+def test_corpus_has_10_tasks_covering_v021_v025():
+    """V0.26.1: corpus 共 10 task (含 baseline + cross-feature). drop retry/backtrack 推迟 V0.26.3."""
+    from eval.corpus import ALL_TASKS
+    assert len(ALL_TASKS) == 10
+    axes = {t.capability_axis for t in ALL_TASKS}
+    expected = {
+        "baseline", "multi-tab", "iframe", "drag", "upload",
+        "download", "dialog", "keyboard-nav", "failure-recovery",
+    }
+    missing = expected - axes
+    assert not missing, f"V0.26.1 corpus 缺 capability_axis: {missing}"
+
+
+def test_all_tasks_have_predicate_binding():
+    """V0.26.1: 每 task 必绑 1 个 predicate (lint_corpus_tokens 也验, 但显式测)."""
+    from eval.corpus import ALL_PREDICATES, ALL_TASKS
+    for t in ALL_TASKS:
+        assert t.task_id in ALL_PREDICATES, f"task {t.task_id} 缺 predicate 绑定"
+
+
+def test_lint_corpus_tokens_all_pass():
+    """V0.26.1: 所有 SubstringPredicate token 长度 ≥ 8 + 不在通用词集 (B7 强制 task-specific)."""
+    from eval.corpus import ALL_PREDICATES, ALL_TASKS, lint_corpus_tokens
+    violations = lint_corpus_tokens(ALL_TASKS, ALL_PREDICATES)
+    assert violations == [], f"V0.26.1 token-specific lint failed: {violations}"
+
+
+def test_lint_corpus_tokens_catches_short_token():
+    """V0.26.1 lint 真能拦短 token (假阳性风险)."""
+    from eval.corpus import lint_corpus_tokens
+    from eval.predicates import SubstringPredicate
+    from eval.types import EvalTask
+    task = EvalTask(task_id="bad-1", goal="x", fixture_url="data:text/html,",
+                    capability_axis="baseline", expected_step_range=(1, 3))
+    pred = SubstringPredicate(substring="ok")  # 长度 2 < 8
+    violations = lint_corpus_tokens([task], {task.task_id: pred})
+    assert any("长度 < 8" in v for v in violations)
+
+
+def test_lint_corpus_tokens_catches_generic_word():
+    """V0.26.1 lint 拦通用词 'done' (即便长度 ≥ 8 也要拦, 但 done 长度 4 也拦短)."""
+    from eval.corpus import lint_corpus_tokens
+    from eval.predicates import SubstringPredicate
+    from eval.types import EvalTask
+    task = EvalTask(task_id="bad-2", goal="x", fixture_url="data:text/html,",
+                    capability_axis="baseline", expected_step_range=(1, 3))
+    pred = SubstringPredicate(substring="completed")  # 长度 9 ≥ 8 但在 _GENERIC_WORDS
+    violations = lint_corpus_tokens([task], {task.task_id: pred})
+    assert any("通用词集" in v for v in violations)
+
+
+def test_lint_walks_allof_recursively():
+    """V0.26.1: AllOf 嵌套 SubstringPredicate 也要 lint (防 AllOf 内塞水货 token 蒙混)."""
+    from eval.corpus import lint_corpus_tokens
+    from eval.predicates import AllOf, RegexPredicate, SubstringPredicate
+    from eval.types import EvalTask
+    task = EvalTask(task_id="bad-3", goal="x", fixture_url="data:text/html,",
+                    capability_axis="baseline", expected_step_range=(1, 3))
+    pred = AllOf(predicates=(
+        SubstringPredicate(substring="long-enough-token-123"),
+        SubstringPredicate(substring="ok"),  # 嵌套水货
+        RegexPredicate(pattern=".*"),
+    ))
+    violations = lint_corpus_tokens([task], {task.task_id: pred})
+    assert any("长度 < 8" in v for v in violations)
+
+
 async def test_run_one_infra_error_returns_metric(monkeypatch):
     """V0.26.0: chromium.launch 抛 → TaskMetric.failure_bucket='EVAL_INFRA_ERROR', 不传染异常."""
     from eval.runner import run_one

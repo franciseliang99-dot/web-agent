@@ -2,6 +2,72 @@
 
 All notable changes to web-agent. 版本号遵循 SemVer 简化形式（V<major>.<minor>.<patch>）。
 
+## [0.26.1] - 2026-05-10
+
+### Add (V0.26 第 2 commit — corpus 充实 9 task 覆盖 V0.21-V0.25 能力轴 + 2 新 predicate 类)
+
+V0.26.0 落档框架骨架 (1 baseline 示范 task) 后, V0.26.1 充实到 **10 task** (含 baseline,
+9 个 V0.21-V0.25 能力测试) + 加 2 个新 trace-aware predicate. corpus 用 data:text/html
+fixture 跑端到端 — 仍是纸面定义 (V0.26.3 真跑/vcr 录回放).
+
+### V0.26.1 sanity scope 修订 (subagent 推翻 plan 部分假设)
+
+V0.26 plan 写 10 task 含 V0.25.0 transient retry + V0.25.2 backtrack. sanity 论证后:
+- **drop transient retry task** — LLM 0 主动行为, V0.25.0 单测已端到端覆盖, corpus 0 信息增量.
+- **推迟 backtrack task** 到 V0.26.3 cassette ready — `data:text/html` 单页 `page.go_back()`
+  无 history 行为不定; mock LLM 难造稳定 anti_loop trigger; 真 LLM 行为得 vcr 录回放才能
+  稳定 baseline. 见 `eval/corpus/v025_recovery.py` docstring 推迟说明.
+- 凑 10 task 加 **cross-feature stress test** `v021-v022-popup-with-iframe-click` (popup 内
+  含 iframe — 测 LLM 跨 commit 能力组合).
+
+### Changed
+
+- `eval/predicates.py` 加 2 个 trace-aware predicate (V0.26.0 Predicate Protocol 不变, 仅
+  add concrete impl):
+  - `TraceContainsAction(action_type, min_count=1)` — 验 trace 含指定 action ≥ N 次, 区分
+    LLM 真用工具 vs 凭空写 result. iframe-click / drag / upload 等 task 用.
+  - `TraceObsContains(substring)` — 验任一 step.observation 含 substring, 验 V0.24.1
+    `_drain_pre_step_observations` helper 真把 download / dialog deque 注入 LLM obs.
+    download / dialog task 用. 失败 reason 含 "检查 V0.24.1 helper drain" hint.
+- `eval/corpus/_fixtures.py` **新建** 共享 fixture HTML + URL 工厂 + 9 个 task-specific
+  token 常量 (强制 ≥ 8 字符 + 不在通用词集). 9 段 data:text/html fragment 复用 V0.21-V0.25
+  slow smoke pattern (popup target=_blank / srcdoc iframe / drag src+dst / file input /
+  download link / confirm dialog / scroll modal / multi-button decoy / popup+iframe).
+- `eval/corpus/` 加 6 task 文件 (按 version + capability 分组):
+  - `v021_multitab.py` — `MULTITAB_POPUP_EXTRACT` (popup switch_tab 提取 H1)
+  - `v022_iframe.py` — `IFRAME_CLICK_BUTTON` (iframe 内 click + AllOf trace 含 click)
+  - `v023_drag_upload_download.py` — `DRAG_DROP_TRELLO` / `UPLOAD_FILE_TO_INPUT` /
+    `DOWNLOAD_LINK_CLICK` 3 task
+  - `v024_dialog_keyboard.py` — `DIALOG_CONFIRM_OBS_READING` (验 V0.24.1 helper 把 dialog
+    obs 注入 LLM) + `KEYBOARD_NAV_PAGEDOWN` (PageDown/End 滚长 modal)
+  - `v025_recovery.py` — `FAILURE_RECOVERY_FIND_VALID_BUTTON` (3 button 选 VALID 不死磕)
+  - `v022_v021_cross_feature.py` — `POPUP_WITH_IFRAME_CLICK` (cross-feature stress)
+- `eval/corpus/__init__.py` 重构: `ALL_TASKS` 10 项 + `ALL_PREDICATES` 单 dict 反查;
+  加 `lint_corpus_tokens(tasks, predicates)` 函数 (B7 token-specific 强制) +
+  `_walk_substring_predicates` 递归遍 AllOf 嵌套 SubstringPredicate;
+  `_GENERIC_WORDS = frozenset({"完成", "成功", "done", "ok", "success", "completed", ...})`
+  通用词集.
+- 各 task 子模块加显式 `dict[str, Predicate]` 类型注解防 mypy invariant covariance 错.
+- `tests/test_eval_runner.py` 加 V0.26.1 +10 测:
+  - 4 trace predicate 测 (TraceContainsAction matched/not + TraceObsContains matched/not
+    含 V0.24.1 hint)
+  - 4 corpus 完整性测 (10 task / capability_axis 9 项 / 1:1 predicate 绑定 / lint 全过)
+  - 3 lint 真拦能力测 (短 token / 通用词 / AllOf 嵌套水货 token)
+
+### Compatibility
+
+- 老 caller / fixture 不受影响 — corpus 仍纸面定义 (V0.26.3 cassette ready 才真跑).
+- mypy strict 0 (35 source files: src/web_agent 23 + eval 12); ruff 0;
+  pytest 447 → **457 + 16 skip** (V0.26.1 +10 corpus + predicate 测).
+- 真 chromium 15/15 全过 (无新增, V0.26.3 vcr cassette 才加 eval slow smoke).
+
+### Why patch (V0.26.1) 不 minor
+
+- corpus 充实是 V0.26.0 框架的内容填充 (Predicate Protocol 不变, 仅 add concrete impl);
+  跟 V0.21.1 (loop 改 ctx) / V0.22.1 (perceiver iframe SoM) 同档 — minor 框架内 patch.
+- LLM tool surface (V0.23.0 schema) 零变化, 对外 CLI/MCP 行为零变化.
+- SemVer "向后兼容的 enhance → patch", 0.26.0 → 0.26.1.
+
 ## [0.26.0] - 2026-05-10
 
 ### Add (V0.26 eval golden corpus 系列开篇 — 框架骨架 types/predicates/runner + 1 示范 task)

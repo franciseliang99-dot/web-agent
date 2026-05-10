@@ -97,3 +97,55 @@ class AllOf:
             for r in sub_results
         )
         return PredicateResult(matched=all_matched, reason=reason, name="AllOf")
+
+
+@dataclass(frozen=True, slots=True)
+class TraceContainsAction:
+    """V0.26.1: 验 trace 含指定 action_type 至少 N 次 (验 LLM 真用了某工具而非瞎猜 result).
+
+    场景: download task 验 trace 含 click + obs append 含 ".pdf" — 区分 LLM 真读 obs deque
+    vs 凭空写 done.result. 跟 SubstringPredicate AllOf 组合用 (final_result 含 token
+    + trace 含 click → 真用工具 + 真完成).
+    """
+
+    action_type: str
+    min_count: int = 1
+
+    def evaluate(self, final_result: str, trace_steps: list[dict[str, Any]]) -> PredicateResult:
+        count = sum(1 for s in trace_steps if s.get("action_type") == self.action_type)
+        matched = count >= self.min_count
+        return PredicateResult(
+            matched=matched,
+            reason=(
+                f"trace 含 {count} 次 {self.action_type!r} (>= {self.min_count})"
+                if matched
+                else f"trace 仅 {count} 次 {self.action_type!r} (< {self.min_count})"
+            ),
+            name="TraceContainsAction",
+        )
+
+
+@dataclass(frozen=True, slots=True)
+class TraceObsContains:
+    """V0.26.1: 验 trace 任一 step.observation 含指定 substring (验 obs deque 注入真到达 LLM).
+
+    场景: download task 验某 step obs 含 "downloaded: report.pdf" (V0.24.1 helper 真 drain
+    了 _web_agent_recent_downloads deque 注入 obs); dialog task 验 obs 含 "dialog confirm: ...".
+    """
+
+    substring: str
+
+    def evaluate(self, final_result: str, trace_steps: list[dict[str, Any]]) -> PredicateResult:
+        for s in trace_steps:
+            obs = s.get("observation", "") or ""
+            if self.substring in obs:
+                return PredicateResult(
+                    matched=True,
+                    reason=f"trace step {s.get('step')} obs 含 {self.substring!r}",
+                    name="TraceObsContains",
+                )
+        return PredicateResult(
+            matched=False,
+            reason=f"trace 无 obs 含 {self.substring!r} (检查 V0.24.1 helper drain 是否到达)",
+            name="TraceObsContains",
+        )
