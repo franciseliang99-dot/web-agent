@@ -2,6 +2,38 @@
 
 All notable changes to web-agent. 版本号遵循 SemVer 简化形式（V<major>.<minor>.<patch>）。
 
+## [0.25.1] - 2026-05-09
+
+### Refactor (兑现 V0.24.1 helper 设计承诺 — _PRE_STEP_DRAIN_ATTRS 元组 +1 项 failure_hints)
+
+V0.24.1 抽 `_drain_pre_step_observations(ctx, trace)` helper 时设计: "V0.25+ 加新 deque
+类型只动常量元组, 不改 helper 实现". V0.25.1 兑现承诺加第 3 项 `_web_agent_recent_failure_hints`
+为 V0.25.2 backtracking 注入"已回退" hint 准备通道. **helper 实现 0 行改动 — 这正是
+开闭原则 (open for extension, closed for modification) 的价值证明**.
+
+### Changed
+
+- `src/web_agent/loop.py`:
+  - `_PRE_STEP_DRAIN_ATTRS` 元组 +1 项 (V0.23.2 download / V0.24.0 dialog / V0.25.1 failure_hints)
+    + 加各项行内注释标 V0.X 来源.
+  - `run_react_loop` 入口加 `_web_agent_recent_failure_hints` deque init (跟 download/dialog 同模式).
+- `tests/test_loop_main.py`:
+  - 升级 `test_drain_pre_step_observations_drains_all_attrs_and_clears` 验 3 deque 都 drain
+    (含 failure_hints "[backtrack] 已回退到上一页, 上次卡在 mark X").
+  - 加 `test_pre_step_drain_attrs_includes_failure_hints` assert 元组含新项 + 长度 == 3.
+
+### Compatibility
+
+- 纯重构 — 行为 100% 兼容 V0.25.0 (新 deque 在 V0.25.2 backtracking 写入前一直空, drain
+  noop). helper 实现不变, 现有 download/dialog 行为零变化.
+- mypy strict 0; ruff 0; pytest 427 + 16 skip; 真 chromium 15/15 全过.
+
+### Why patch (V0.25.1) 不 minor
+
+- 纯内部 helper 扩展 (元组 +1 项), 对外 API/CLI/MCP/LLM tool surface 零变化.
+- 跟 V0.24.1 (V0.23.2 simplify TODO 兑现) 同档, V0.24.1 也是 patch.
+- SemVer "向后兼容的内部 enhance → patch", 0.25.0 → 0.25.1.
+
 ## [0.25.0] - 2026-05-09
 
 ### Add (V0.25 smart retry+backtracking 系列开篇 — _classify_failure + transient retry budget)

@@ -254,7 +254,12 @@ def _frame_for_followup(page: Page, last_clicked_mark: Mark | None) -> Frame | N
     return _resolve_frame(page, last_clicked_mark.frame_path)
 
 
-_PRE_STEP_DRAIN_ATTRS = ("_web_agent_recent_downloads", "_web_agent_recent_dialogs")
+# V0.24.1 抽 helper 时设计: V0.25+ 加新 deque 类型只动此元组. V0.25.1 兑现承诺加第 3 项.
+_PRE_STEP_DRAIN_ATTRS = (
+    "_web_agent_recent_downloads",   # V0.23.2: download listener save 完元信息
+    "_web_agent_recent_dialogs",      # V0.24.0: dialog auto-handle 元信息
+    "_web_agent_recent_failure_hints",  # V0.25.1: backtracking / 失败模式 hint (V0.25.2 写入)
+)
 
 
 def _drain_pre_step_observations(ctx: BrowserContext, trace: Trace) -> None:
@@ -435,6 +440,9 @@ async def run_react_loop(
     # V0.24.0: dialog deque 同 download deque 同模式 (browser.py _make_dialog_handler 闭包读)
     if not getattr(ctx, "_web_agent_recent_dialogs", None):
         ctx._web_agent_recent_dialogs = deque(maxlen=10)  # type: ignore[attr-defined]
+    # V0.25.1: failure_hints deque — V0.25.2 backtracking 写入 "已回退到 X" 让 LLM 看到换思路
+    if not getattr(ctx, "_web_agent_recent_failure_hints", None):
+        ctx._web_agent_recent_failure_hints = deque(maxlen=10)  # type: ignore[attr-defined]
 
     trace = Trace(task_id=task_id, goal=goal)
     recent_actions: deque[str] = deque(maxlen=3)

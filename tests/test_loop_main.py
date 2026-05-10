@@ -434,7 +434,7 @@ def test_page_fingerprint_includes_active_idx():
 
 
 def test_drain_pre_step_observations_drains_all_attrs_and_clears():
-    """V0.24.1: helper 遍历 download/dialog 2 deque, append 到上一步 obs, clear 防重复."""
+    """V0.24.1+V0.25.1: helper 遍历 download/dialog/failure_hints 3 deque, append 到上一步 obs, clear."""
     from collections import deque
     from unittest.mock import MagicMock
     from web_agent.loop import _drain_pre_step_observations
@@ -442,16 +442,26 @@ def test_drain_pre_step_observations_drains_all_attrs_and_clears():
     ctx = MagicMock()
     ctx._web_agent_recent_downloads = deque(["downloaded: a.pdf"], maxlen=10)
     ctx._web_agent_recent_dialogs = deque(["dialog confirm: 'ok?' (auto-dismissed)"], maxlen=10)
+    ctx._web_agent_recent_failure_hints = deque(["[backtrack] 已回退到上一页, 上次卡在 mark 5"], maxlen=10)
     trace = Trace(task_id="t", goal="x")
     trace.append(Step(step=0, ts=0.0, thought="x", action_type="click",
                        action_args={}, observation="prior obs"))
     _drain_pre_step_observations(ctx, trace)
     assert "downloaded: a.pdf" in trace.steps[-1].observation
     assert "auto-dismissed" in trace.steps[-1].observation
+    assert "已回退" in trace.steps[-1].observation  # V0.25.1 failure_hints 也 drain
     assert "prior obs" in trace.steps[-1].observation  # 原 obs 保留
-    # 注入幂等: deque clear
+    # 注入幂等: 3 deque 都 clear
     assert len(ctx._web_agent_recent_downloads) == 0
     assert len(ctx._web_agent_recent_dialogs) == 0
+    assert len(ctx._web_agent_recent_failure_hints) == 0
+
+
+def test_pre_step_drain_attrs_includes_failure_hints():
+    """V0.25.1: 兑现 V0.24.1 helper 承诺 — 元组 +1 项 _web_agent_recent_failure_hints."""
+    from web_agent.loop import _PRE_STEP_DRAIN_ATTRS
+    assert "_web_agent_recent_failure_hints" in _PRE_STEP_DRAIN_ATTRS
+    assert len(_PRE_STEP_DRAIN_ATTRS) == 3, "downloads + dialogs + failure_hints"
 
 
 def test_drain_pre_step_observations_empty_trace_skips():
