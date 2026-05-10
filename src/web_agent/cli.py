@@ -8,6 +8,7 @@ import logging
 import os
 import sys
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from dotenv import load_dotenv
 from playwright.async_api import async_playwright
@@ -15,6 +16,9 @@ from playwright.async_api import async_playwright
 from web_agent.browser import apply_stealth, connect
 from web_agent.chrome_launcher import ensure_chrome_running
 from web_agent.llm import make_client
+
+if TYPE_CHECKING:
+    from web_agent.vault import SecretStore
 from web_agent.loop import ProgressCallback, SafetyApprovalCallback, run_react_loop
 from web_agent.memory import (
     DEFAULT_DB as _MEM_DB,
@@ -43,6 +47,7 @@ async def run_task(
     model: str | None = None,
     progress_cb: ProgressCallback | None = None,
     safety_approval_cb: SafetyApprovalCallback | None = None,
+    secret_store: "SecretStore | None" = None,
 ) -> str:
     load_dotenv()
     cdp_url = cdp_url or os.environ.get("WEB_AGENT_CDP_URL", "http://127.0.0.1:9222")
@@ -69,7 +74,7 @@ async def run_task(
             logger.info("navigating to %s", start_url)
             await page.goto(start_url, wait_until="domcontentloaded")
 
-        client = make_client(provider=provider, model=model)
+        client = make_client(provider=provider, model=model, secret_store=secret_store)
         logger.info("LLM provider=%s model=%s", client.name, client.model)
 
         # W5-D.2 长期记忆 inject: 跑 ReAct 前召回该 domain 历史, 渲染成字符串注入 trace

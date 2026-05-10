@@ -117,6 +117,74 @@ async def test_web_agent_run_passes_elicitation_callback(monkeypatch, reset_run_
     assert callable(cb), f"callback 应可调用, got {cb!r}"
 
 
+# V0.27.4: 缺 API key 时 elicit retry — accept 成功 + decline reraise
+
+async def test_web_agent_run_elicit_missing_secret_retry_success(
+    monkeypatch, reset_run_lock, fake_chrome_alive,
+):
+    """V0.27.4: cli_run_task 第一次抛 MissingSecretError → ctx.elicit accept → retry 成功 + secret_store 注入."""
+    from unittest.mock import AsyncMock, MagicMock
+
+    from mcp.server.elicitation import AcceptedElicitation
+
+    from web_agent.vault import MissingSecretError
+
+    call_count = 0
+    captured: dict[str, object] = {}
+
+    async def fake_run_task(goal, **kw):
+        nonlocal call_count
+        call_count += 1
+        if call_count == 1:
+            raise MissingSecretError("ANTHROPIC_API_KEY")
+        captured["secret_store"] = kw.get("secret_store")
+        return "OK retried"
+
+    monkeypatch.setattr("web_agent.mcp_server.cli_run_task", fake_run_task)
+
+    elicited = mcp_mod.SecretInput(value="sk-ant-elicited")
+    accepted = AcceptedElicitation(action="accept", data=elicited)
+
+    ctx = MagicMock()
+    ctx.report_progress = AsyncMock()
+    ctx.elicit = AsyncMock(return_value=accepted)
+
+    result = await mcp_mod.web_agent_run(goal="test", url="", max_steps=5, ctx=ctx)
+    assert result == "OK retried"
+    assert call_count == 2, f"应 retry 一次, 实 {call_count} 次"
+    store = captured.get("secret_store")
+    assert store is not None, "retry 时应注入 InMemorySecretStore"
+    assert store.get("ANTHROPIC_API_KEY") == "sk-ant-elicited"  # type: ignore[union-attr]
+    ctx.elicit.assert_called_once()
+
+
+async def test_web_agent_run_elicit_missing_secret_decline_reraise(
+    monkeypatch, reset_run_lock, fake_chrome_alive,
+):
+    """V0.27.4: 用户 decline (返 empty value) → reraise MissingSecretError 让 client 看 isError."""
+    from unittest.mock import AsyncMock, MagicMock
+
+    from mcp.server.elicitation import AcceptedElicitation
+
+    from web_agent.vault import MissingSecretError
+
+    async def fake_run_task(goal, **kw):
+        raise MissingSecretError("OPENAI_API_KEY")
+
+    monkeypatch.setattr("web_agent.mcp_server.cli_run_task", fake_run_task)
+
+    declined = mcp_mod.SecretInput(value="")  # 用户 accept elicitation 但留空值 = decline
+    accepted_empty = AcceptedElicitation(action="accept", data=declined)
+
+    ctx = MagicMock()
+    ctx.report_progress = AsyncMock()
+    ctx.elicit = AsyncMock(return_value=accepted_empty)
+
+    with pytest.raises(MissingSecretError) as exc_info:
+        await mcp_mod.web_agent_run(goal="test", ctx=ctx)
+    assert exc_info.value.key == "OPENAI_API_KEY"
+
+
 # ---------- Case 3: chrome_not_running ----------
 
 async def test_web_agent_run_chrome_not_running(reset_run_lock, fake_chrome_dead):

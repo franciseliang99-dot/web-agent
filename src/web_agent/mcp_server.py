@@ -44,6 +44,7 @@ from web_agent.memory import (
     recall_by_domain,
 )
 from web_agent.replay import render_to_file as replay_render_to_file
+from web_agent.vault import InMemorySecretStore, MissingSecretError
 
 
 class SafetyApproval(BaseModel):
@@ -56,6 +57,19 @@ class SafetyApproval(BaseModel):
     approve: bool = Field(
         default=False,
         description="是否放行此次敏感动作 (true=放行继续, false=拦截 abort task).",
+    )
+
+
+class SecretInput(BaseModel):
+    """V0.27.4 elicitation schema: 缺 API key 时让用户当场补.
+
+    限制同 SafetyApproval (str only). 空字符串 = 用户拒绝, abort task (跟 V0.18.0 elicit
+    decline 行为一致).
+    """
+
+    value: str = Field(
+        default="",
+        description="API key 值 (空字符串 = 拒绝 abort task)",
     )
 
 logger = logging.getLogger(__name__)
@@ -125,13 +139,42 @@ async def web_agent_run(
         safety_approval_cb = _elicit_safety
 
     async with _RUN_LOCK:
-        return await cli_run_task(
-            goal=goal,
-            start_url=url or None,
-            max_steps=max_steps,
-            progress_cb=progress_cb,
-            safety_approval_cb=safety_approval_cb,
-        )
+        try:
+            return await cli_run_task(
+                goal=goal,
+                start_url=url or None,
+                max_steps=max_steps,
+                progress_cb=progress_cb,
+                safety_approval_cb=safety_approval_cb,
+            )
+        except MissingSecretError as e:
+            # V0.27.4: 缺 API key 时 elicit 用户当场补 (类比 V0.18.0 safety_approval_cb).
+            # ctx 不可用 (cli mode 不会进 mcp tool 但防御式) → 直接 reraise 保 V0.27.1 行为.
+            # elicit decline / 异常 → reraise 让 client 看到 MissingSecretError tool error.
+            if ctx is None:
+                raise
+            msg = (
+                f"web-agent 需要 {e.key} 但未在环境变量 / .env 找到.\n"
+                f"请输入 {e.key} 值 (将仅本次 task 内存使用, 不落 env / 不落磁盘)."
+            )
+            try:
+                result = await ctx.elicit(message=msg, schema=SecretInput)
+            except Exception as elicit_exc:
+                logger.warning("ctx.elicit (secret) 失败 (%r) → reraise MissingSecretError", elicit_exc)
+                raise
+            if not isinstance(result, AcceptedElicitation) or not result.data.value:
+                logger.info("用户 decline 提供 %s → abort task", e.key)
+                raise
+            # 用户输入 → InMemorySecretStore 注入 retry 一次 (绑 V0.27.3 secret_store 透传链).
+            store = InMemorySecretStore({e.key: result.data.value})
+            return await cli_run_task(
+                goal=goal,
+                start_url=url or None,
+                max_steps=max_steps,
+                progress_cb=progress_cb,
+                safety_approval_cb=safety_approval_cb,
+                secret_store=store,
+            )
 
 
 def _render_replay(task_id: str) -> dict[str, Any]:

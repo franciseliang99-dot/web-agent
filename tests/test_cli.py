@@ -139,8 +139,9 @@ def patch_run_task_io_chain(monkeypatch):
     fake_connect = AsyncMock(return_value=(SimpleNamespace(), SimpleNamespace(), fake_page))
     monkeypatch.setattr("web_agent.cli.connect", fake_connect)
     monkeypatch.setattr("web_agent.cli.apply_stealth", AsyncMock())
+    # V0.27.4: secret_store kwarg 加到 run_task 透传链, monkeypatch lambda 兼容收 **kwargs
     monkeypatch.setattr("web_agent.cli.make_client",
-                        lambda provider=None, model=None: SimpleNamespace(name="fake", model="fake"))
+                        lambda provider=None, model=None, **kwargs: SimpleNamespace(name="fake", model="fake"))
 
     captured: dict = {}
 

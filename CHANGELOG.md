@@ -2,6 +2,95 @@
 
 All notable changes to web-agent. 版本号遵循 SemVer 简化形式（V<major>.<minor>.<patch>）。
 
+## [0.27.4] - 2026-05-10
+
+### Add (V0.27 vault 系列 commit 4/5 — mcp_server elicit retry 缺 API key 当场补)
+
+V0.27.1 vault framework + V0.27.3 routing 之后, 让 mcp_server 模式下缺 API key 时用户在
+client (Claude Desktop) 端被 prompt 输入, 输入后 InMemorySecretStore 注入 retry 一次;
+cli 模式 (无 ctx) 行为 100% 不变 (MissingSecretError 子类化 RuntimeError 走老路径). 类比
+V0.18.0 safety_approval_cb 的 elicitation pattern.
+
+### subagent 审推翻原 plan + E 路径替代
+
+主 agent 原 ABCD 4 路径 (SecretStore Protocol async 化 / asyncio.run 嵌套 / 双 Protocol /
+union 返值) 都撞 `AnthropicClient.__init__` **同步构造** 时机问题: 同步 sync `__init__`
+里不能 await `ctx.elicit`. Plan subagent 给出 **E 路径** — elicit 不进 SecretStore.get,
+进 mcp_server 入口 "pre-build inject" 层:
+
+1. vault.py 加 `MissingSecretError(RuntimeError)` 子类 + `key` attr (避免 message 字符串
+   parsing 脆点)
+2. `AnthropicClient`/`OpenAIClient` raise `MissingSecretError("ANTHROPIC_API_KEY")` 替代
+   `RuntimeError(...)`. 子类化保 V0.27.1 14 测 `pytest.raises(RuntimeError, match="未设置")`
+   全保 (msg 字符串不变).
+3. cli.py `run_task` 加 `secret_store: SecretStore | None = None` kwarg, 透传 make_client
+4. mcp_server.web_agent_run 入口 try `cli_run_task(...)` → except MissingSecretError →
+   `ctx.elicit(SecretInput)` → `InMemorySecretStore({key: value})` → retry `cli_run_task(secret_store=...)`
+5. SecretStore Protocol **同步签名 0 改**, V0.27.1 14 测全保, async/sync 矛盾绕开
+
+### Changed
+
+- `src/web_agent/vault.py` +35 行:
+  - `MissingSecretError(RuntimeError)`: `key` attr + 默 msg `"{key} 未设置 — 请填 .env 或 export 环境变量"`
+    (跟 V0.27.1 老 RuntimeError msg 一致, 14 测 match 不破).
+  - `InMemorySecretStore`: dict-wrapped SecretStore. 构造 copy 入参 dict 防 caller mutate
+    后泄漏 (1 测断言). 0 IO + 0 env mutate, per-call 生命周期, secret 不落 env / 不落磁盘.
+- `src/web_agent/llm/anthropic.py` 1 处: `RuntimeError(...)` → `MissingSecretError("ANTHROPIC_API_KEY")`
+- `src/web_agent/llm/openai.py` 1 处: 同款 `MissingSecretError("OPENAI_API_KEY")`
+- `src/web_agent/cli.py` 2 行:
+  - `run_task` 加 `secret_store: SecretStore | None = None` kwarg
+  - `make_client(provider=provider, model=model, secret_store=secret_store)` 透传 (TYPE_CHECKING import)
+- `src/web_agent/mcp_server.py` +35 行:
+  - 加 `SecretInput(BaseModel)` Pydantic schema (str field, 空字符串 = 用户 decline)
+  - `web_agent_run` 入口包 try/except `MissingSecretError` → `ctx.elicit` → `InMemorySecretStore` →
+    retry 一次. 失败/decline/异常 → reraise (client 看 isError + key 名).
+  - `ctx is None` (cli 防御式 — 实际 mcp tool 不 None) → reraise 保 V0.27.1 行为不变.
+- `tests/test_vault.py` +10 测 (V0.27.1 17 → 27):
+  - `MissingSecretError`: 子类化 RuntimeError + key attr + 自定义 message
+  - `AnthropicClient`/`OpenAIClient` 缺 key → raise `MissingSecretError` 而非 plain RuntimeError
+  - `InMemorySecretStore`: Protocol satisfy + get/has + 默 fallback + 构造 copy 防 mutate
+- `tests/test_mcp_server.py` +2 测:
+  - elicit accept retry 成功 (call_count==2 + secret_store 注入验)
+  - elicit decline (返 empty value) reraise MissingSecretError + key attr 保留
+
+### V0.27.5 真接入预留 (此版仅 mcp 链路打通)
+
+V0.27.5 cli `--capability-hint` flag 真消费时, routing 层 + vault 层 + elicit 三链 connect:
+
+```python
+# V0.27.5 cli/jd/list 内部 (capability-hint 真消费时):
+provider = select_provider(args.capability_hint)  # routing 选 axis 强项
+client = make_client(provider=provider, secret_store=default_store())  # vault 链通
+# mcp_server 模式: cli_run_task 抛 MissingSecretError → elicit → InMemorySecretStore retry
+```
+
+### V0.27 系列进度 (4/5)
+
+| ver | 状态 | 节点 |
+|-----|------|------|
+| V0.27.0 | ⏸ 推迟 | Anthropic baseline |
+| V0.27.1 | ✅ | vault framework |
+| V0.27.2 | ✅ | bug fix make_client API drift |
+| V0.27.3 | ✅ | routing.py 纯函数 |
+| V0.27.4 | ✅ | mcp_server elicit retry (E 路径 — subagent 审推翻原 ABCD) |
+| V0.27.5 | 待 | cli/jd/list `--capability-hint` flag 真接入 + 1 routing-aware corpus task + 复测 |
+
+### Compatibility
+
+- 老 caller / fixture 0 改动 — cli mode 行为 100% 不变 (无 ctx → MissingSecretError reraise
+  跟 V0.27.1 RuntimeError 等价, 子类化保 14 测 match 不破).
+- mypy strict 0 (41 src 文件); ruff 0; pytest **545 + 17 skip** (V0.27.3 533+17 → +12 V0.27.4
+  测 [10 vault + 2 mcp]).
+- 真 chromium 15/15 全过 (无新).
+- `tests/test_cli.py` patch_run_task_io_chain `make_client` mock lambda 加 `**kwargs` 收
+  V0.27.4 新增 `secret_store` 参数 (3 测红 → 修 = 1 行).
+
+### Why patch (V0.27.4) 不 minor
+
+- 新增公共 API (MissingSecretError + InMemorySecretStore + cli.run_task secret_store kwarg)
+  但属于 V0.27 vault 系列内部增量, 老 caller 0 改 (子类化 + None 默兼容).
+- V0.27.x 内统一 patch 表 V0.27 主题内嵌增量 (跟 V0.21.x/V0.22.x/V0.25.x 系列风格一致).
+
 ## [0.27.3] - 2026-05-10
 
 ### Add (V0.27 vault 系列 commit 3/5 — provider routing 纯函数)

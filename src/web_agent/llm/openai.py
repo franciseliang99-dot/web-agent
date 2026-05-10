@@ -46,9 +46,8 @@ class OpenAIClient:
         store = secret_store or _default_secret_store()
         api_key = api_key or store.get("OPENAI_API_KEY")
         if not api_key:
-            raise RuntimeError(
-                "OPENAI_API_KEY 未设置 — 请填 .env 或 export 环境变量"
-            )
+            from web_agent.vault import MissingSecretError
+            raise MissingSecretError("OPENAI_API_KEY")
         kwargs: dict[str, Any] = {"api_key": api_key, "max_retries": 4, "timeout": 120.0}
         base_url = base_url or store.get("OPENAI_BASE_URL")
         if base_url:

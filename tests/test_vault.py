@@ -2,6 +2,8 @@
 
 测 Protocol runtime check + EnvSecretStore os.environ 包装 + KeyringSecretStore raise +
 default_store 默 EnvSecretStore + make_client 注入零破坏现有 caller.
+
+V0.27.4 加 MissingSecretError + InMemorySecretStore 测 (mcp_server elicit retry 链路依赖).
 """
 
 from __future__ import annotations
@@ -10,7 +12,9 @@ import pytest
 
 from web_agent.vault import (
     EnvSecretStore,
+    InMemorySecretStore,
     KeyringSecretStore,
+    MissingSecretError,
     SecretStore,
     default_store,
 )
@@ -204,3 +208,83 @@ def test_make_client_default_secret_store_none_keeps_old_behavior(monkeypatch):
     from web_agent.llm import make_client
     client = make_client(provider="anthropic")  # 不传 secret_store
     assert client.name == "anthropic"
+
+
+# --- V0.27.4: MissingSecretError + InMemorySecretStore (mcp_server elicit retry 依赖) ---
+
+
+def test_missing_secret_error_is_runtimeerror_subclass():
+    """V0.27.4: MissingSecretError 子类化 RuntimeError 保 V0.27.1 14 测兼容
+    (`pytest.raises(RuntimeError, match=...)` 仍触发)."""
+    e = MissingSecretError("ANTHROPIC_API_KEY")
+    assert isinstance(e, RuntimeError)
+    assert "ANTHROPIC_API_KEY 未设置" in str(e)
+
+
+def test_missing_secret_error_carries_key_attr():
+    """V0.27.4: e.key 让 mcp_server 知道 elicit 哪个 key (不靠 message 字符串 parsing)."""
+    e = MissingSecretError("OPENAI_API_KEY")
+    assert e.key == "OPENAI_API_KEY"
+
+
+def test_missing_secret_error_custom_message():
+    """V0.27.4: 第二参数 message 覆盖默 msg (留扩展位)."""
+    e = MissingSecretError("KEY_X", message="custom abort reason")
+    assert "custom abort reason" in str(e)
+    assert e.key == "KEY_X"
+
+
+def test_anthropic_client_raises_missing_secret_error_not_plain_runtimeerror(monkeypatch):
+    """V0.27.4: AnthropicClient 缺 key → raise MissingSecretError 不是 plain RuntimeError.
+    V0.27.1 测 `pytest.raises(RuntimeError, match=...)` 仍触发因子类化, 但 mcp_server
+    可 catch MissingSecretError 区分 'API key 缺失' vs 其他 RuntimeError (e.g. SDK 错).
+    """
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    from web_agent.llm.anthropic import AnthropicClient
+    with pytest.raises(MissingSecretError) as exc_info:
+        AnthropicClient()
+    assert exc_info.value.key == "ANTHROPIC_API_KEY"
+
+
+def test_openai_client_raises_missing_secret_error(monkeypatch):
+    """V0.27.4: OpenAIClient 缺 key 同 anthropic — raise MissingSecretError."""
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+    monkeypatch.delenv("OPENAI_BASE_URL", raising=False)
+    from web_agent.llm.openai import OpenAIClient
+    with pytest.raises(MissingSecretError) as exc_info:
+        OpenAIClient()
+    assert exc_info.value.key == "OPENAI_API_KEY"
+
+
+def test_in_memory_secret_store_satisfies_protocol():
+    """V0.27.4: InMemorySecretStore 跟 EnvSecretStore 同满足 SecretStore Protocol runtime check."""
+    s = InMemorySecretStore({"KEY": "val"})
+    assert isinstance(s, SecretStore)
+
+
+def test_in_memory_secret_store_get_existing():
+    s = InMemorySecretStore({"FOO": "bar", "BAZ": "qux"})
+    assert s.get("FOO") == "bar"
+    assert s.get("BAZ") == "qux"
+
+
+def test_in_memory_secret_store_get_missing_returns_default():
+    s = InMemorySecretStore({"FOO": "bar"})
+    assert s.get("MISSING", "fallback") == "fallback"
+    assert s.get("MISSING") is None
+
+
+def test_in_memory_secret_store_has():
+    s = InMemorySecretStore({"K": "v"})
+    assert s.has("K") is True
+    assert s.has("MISSING") is False
+
+
+def test_in_memory_secret_store_constructor_copies_dict():
+    """V0.27.4: InMemorySecretStore 构造时 copy 入参 dict, 防 caller 后续 mutate 泄漏."""
+    src = {"K": "v"}
+    s = InMemorySecretStore(src)
+    src["K"] = "MUTATED"
+    src["NEW"] = "added"
+    assert s.get("K") == "v"  # 不受 caller mutate 影响
+    assert s.has("NEW") is False

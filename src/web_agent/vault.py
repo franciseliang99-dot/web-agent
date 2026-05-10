@@ -79,3 +79,34 @@ def default_store() -> SecretStore:
     EnvSecretStore()), make_client / anthropic.py / openai.py 0 改.
     """
     return EnvSecretStore()
+
+
+class MissingSecretError(RuntimeError):
+    """V0.27.4: SecretStore 缺 key 时 raise — RuntimeError 子类保 V0.27.1 14 测兼容.
+
+    带 `key` attr 让 mcp_server elicit retry 知道 prompt 哪个 key 名 (不靠 message 字符串
+    parsing 脆点 — Plan subagent 决: 比 message-startswith 检测干净).
+    """
+
+    def __init__(self, key: str, message: str | None = None) -> None:
+        self.key = key
+        super().__init__(message or f"{key} 未设置 — 请填 .env 或 export 环境变量")
+
+
+class InMemorySecretStore:
+    """V0.27.4: dict-wrapped SecretStore — 0 IO + 0 env mutate, mcp_server elicit 后 retry 用.
+
+    跟 EnvSecretStore 同 SecretStore Protocol, 构造接 `data: dict[str, str]` (key → value).
+    mcp_server 拿到 elicit 用户输入后 `InMemorySecretStore({"ANTHROPIC_API_KEY": value})` 注
+    `make_client(secret_store=...)` retry 一次. 内存即生命周期 (per-call), task 跑完即释放,
+    secret 不落 env / 不落磁盘.
+    """
+
+    def __init__(self, data: dict[str, str]) -> None:
+        self._data = dict(data)
+
+    def get(self, key: str, default: str | None = None) -> str | None:
+        return self._data.get(key, default)
+
+    def has(self, key: str) -> bool:
+        return key in self._data
