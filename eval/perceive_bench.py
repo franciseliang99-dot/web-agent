@@ -90,15 +90,17 @@ def build_synthetic_fixture(
             f"leaf_per_branch={leaf_per_branch} (需 iframe>=0 / shadow>=0 / leaf>=1)",
         )
     fixture_id = f"if{iframe_count}-sh{shadow_count}-leaf{leaf_per_branch}"
-    body = _build_branch_html(shadow_count, leaf_per_branch)
-    # iframe_count 层 srcdoc 嵌套 (从内向外)
-    for depth in range(iframe_count):
-        inner = body.replace('"', "&quot;")
-        body = (
-            f'<iframe srcdoc="<html><body>{inner}</body></html>" '
-            f'style="width:600px;height:400px;border:1px solid #ccc"></iframe>'
-            f'<p>iframe-depth-{depth + 1}</p>'
-        )
+    branch_html = _build_branch_html(shadow_count, leaf_per_branch)
+    # V0.34.2 fix Bug 1: iframe 改 JS DOM API 创建 (ifr.srcdoc = string via property), 不走
+    # HTML attribute srcdoc="..." 嵌套. 根因: HTML unquoted attribute value 在 space 终止,
+    # outer srcdoc="..." 内含 inner srcdoc=&quot;...&quot; 被 parser 看作 unquoted (因 &quot;
+    # 不是 raw quote char), 第一个 space 截断 → inner iframe srcdoc 残缺 button 丢. JSON.stringify
+    # JS string literal escape 处理所有 `"` `\` `\n` 不经 HTML attribute parser, browser HTML 解
+    # 0 次 entity, JS evaluate 安全 round-trip 任意层嵌套.
+    if iframe_count == 0:
+        body = branch_html
+    else:
+        body = _build_iframe_chain_html(iframe_count, branch_html)
     html = f"<!DOCTYPE html><html><head><title>{fixture_id}</title></head><body>{body}</body></html>"
     return BenchFixture(
         fixture_id=fixture_id,
@@ -109,28 +111,83 @@ def build_synthetic_fixture(
     )
 
 
+def _build_iframe_chain_html(remaining: int, leaf_html: str) -> str:
+    """V0.34.2: 递归构建 N 层 iframe HTML, 每层用 JS DOM property 设 srcdoc.
+
+    remaining=0: 返 leaf_html 原样 (基线 fixture leaf branch).
+    remaining>0: 返一段 HTML (含 host div + script), 跑 IIFE 创建 inner iframe via
+    `document.createElement("iframe") + ifr.srcdoc = inner_html`. 内层 HTML 通过 json.dumps
+    转 JS string literal (`"` → `\\"`, `\\` → `\\\\` 等), browser HTML parser 完全不参与
+    srcdoc 内容 escape (V0.34.0 走 attribute srcdoc="..." nested 在 N>=2 时被 unquoted
+    attribute value space-termination 切断, 故弃).
+
+    perceive() 跑时 iframe 已 instant load (srcdoc 加载无网络), adapter networkidle 2s
+    超时覆盖.
+    """
+    if remaining == 0:
+        return leaf_html
+    inner_html = _build_iframe_chain_html(remaining - 1, leaf_html)
+    # JS string literal escape + `</` 转 `<\/` 防 HTML parser script raw-text 模式遇 `</script>`
+    # 内嵌就 close 外层 script (HTML5 spec raw text 不识别 JS string 边界, 只识 literal </script).
+    inner_js_lit = json.dumps(inner_html).replace("</", r"<\/")
+    return (
+        '<div id="iframe-host"></div>'
+        f"<p>iframe-depth-{remaining}</p>"
+        "<script>"
+        "(function(){"
+        f"  const inner = {inner_js_lit};"
+        '  const ifr = document.createElement("iframe");'
+        "  ifr.srcdoc = inner;"
+        '  ifr.style.cssText = "width:600px;height:400px;border:1px solid #ccc";'
+        '  document.getElementById("iframe-host").appendChild(ifr);'
+        "})();"
+        "</script>"
+    )
+
+
 def _build_branch_html(shadow_count: int, leaf_per_branch: int) -> str:
-    """V0.34.0 helper: 单 frame 内的 light + shadow 嵌套 HTML.
+    """V0.34.0+: 单 frame 内的 light + shadow 嵌套 HTML.
 
     leaf button 列出 N 个 (`<button id="bN">btn-N</button>`).
-    shadow_count > 0 时, 每 button 外裹一个 host span + inline `<script>` attachShadow + 内嵌 leaf.
+    shadow_count == 0: light DOM 直接 N 个 button.
+    shadow_count > 0: 顶层一段 IIFE 用 DOM API 递归 attachShadow N 层, 最里层 createElement
+    N 个 button (V0.34.2 fix Bug 2: V0.34.0 走 innerHTML 注入 `<script>` 不执行 HTML spec, 浅层
+    shadow 仅装 leaves 时凑巧能用, 深层永远不 attach. 改 DOM API 一段顶层 script 一次跑完
+    所有层 attachShadow).
     """
-    leaves = "\n".join(
-        f'<button id="b{i}" type="button">btn-{i}</button>'
-        for i in range(leaf_per_branch)
-    )
     if shadow_count == 0:
+        leaves = "\n".join(
+            f'<button id="b{i}" type="button">btn-{i}</button>'
+            for i in range(leaf_per_branch)
+        )
         return f'<div class="branch">{leaves}</div>'
-    # shadow nested: host span + script attach shadow + 嵌套同结构 (递归)
-    inner = _build_branch_html(shadow_count - 1, leaf_per_branch)
-    inner_safe = inner.replace("`", r"\`")
+    # V0.34.2: shadow 用 DOM API 递归 attachShadow (而非 innerHTML 注入 script)
+    # depth=0 创建 N 个 button; depth>0 创建 host span + attachShadow + 嵌套调用 depth-1
     return (
-        f'<span id="shadow-host-{shadow_count}"></span>'
-        f'<script>(function(){{'
-        f'const host=document.getElementById("shadow-host-{shadow_count}");'
-        f'const sr=host.attachShadow({{mode:"open"}});'
-        f'sr.innerHTML=`{inner_safe}`;'
-        f'}})();</script>'
+        '<div id="shadow-root-host"></div>'
+        "<script>"
+        "(function(){"
+        "  function buildChain(d, n, parent){"
+        "    if (d === 0) {"
+        "      for (let i = 0; i < n; i++) {"
+        '        const btn = document.createElement("button");'
+        "        btn.id = `b${i}`;"
+        '        btn.type = "button";'
+        "        btn.textContent = `btn-${i}`;"
+        "        parent.appendChild(btn);"
+        "      }"
+        "      return;"
+        "    }"
+        '    const host = document.createElement("span");'
+        "    host.id = `shadow-host-${d}`;"
+        "    parent.appendChild(host);"
+        '    const sr = host.attachShadow({mode: "open"});'
+        "    buildChain(d - 1, n, sr);"
+        "  }"
+        f'  const root = document.getElementById("shadow-root-host");'
+        f"  buildChain({shadow_count}, {leaf_per_branch}, root);"
+        "})();"
+        "</script>"
     )
 
 

@@ -64,12 +64,17 @@ async def run_bench_against_chromium(
                     page = await context.new_page()
                     try:
                         data_url = "data:text/html;charset=utf-8," + quote(fixture.html)
-                        await page.goto(data_url, wait_until="domcontentloaded", timeout=10_000)
+                        # V0.34.2: wait_until="load" 等主 frame 含直接 child iframe 全 load;
+                        # 多层 dynamic-created (JS DOM API) iframe chain 是 async, networkidle 不
+                        # 覆盖 grand-child load → 加 500ms settle wait 让 chain JS run + 各层 load
+                        # 结算 (典型 ~50-100ms/层 × ≤5 层 = 250-500ms). 不计 perceive 段, 不污染
+                        # perceive_ms metric.
+                        await page.goto(data_url, wait_until="load", timeout=10_000)
                         try:
                             await page.wait_for_load_state("networkidle", timeout=2_000)
                         except Exception:
-                            # iframe srcdoc 不一定进 networkidle, 不阻塞 bench
                             logger.debug("networkidle timeout for fixture %s, 继续", fixture.fixture_id)
+                        await page.wait_for_timeout(500)  # iframe chain settle
 
                         tracemalloc.start()
                         t0 = time.perf_counter()

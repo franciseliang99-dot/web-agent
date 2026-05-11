@@ -42,27 +42,36 @@ def test_build_synthetic_fixture_baseline_no_iframe_no_shadow():
 
 
 def test_build_synthetic_fixture_iframe_3_layers():
-    """V0.34.0: iframe=3 → 3 层 srcdoc 嵌套, fixture_id 含 if3, srcdoc 出现 3 次."""
+    """V0.34.2: iframe=3 → 3 层 JS DOM chain (不再用 HTML srcdoc attribute), 每层 1 个
+    `iframe-depth-N` p 标签 → substring 出现 3 次 (含 JS literal escape)."""
     f = build_synthetic_fixture(iframe_count=3, shadow_count=0, leaf_per_branch=2)
     assert f.fixture_id == "if3-sh0-leaf2"
     assert f.iframe_count == 3
-    assert f.html.count("srcdoc=") == 3, f"3 层 iframe 应有 3 个 srcdoc, got {f.html.count('srcdoc=')}"
+    # V0.34.2 fix: 每层 chain 1 个 <p>iframe-depth-{N}</p>; 外层 raw + 内层 JS-escaped
+    # (json.dumps 不变 raw text, 不破 iframe-depth- substring)
+    assert f.html.count("iframe-depth-") == 3, f"3 层 chain 应有 3 个 iframe-depth-, got {f.html.count('iframe-depth-')}"
 
 
 def test_build_synthetic_fixture_shadow_2_layers():
-    """V0.34.0: shadow=2 → 嵌套 attachShadow, fixture_id 含 sh2, script attachShadow 出现 2 次."""
+    """V0.34.2: shadow=2 → 顶层 IIFE 一段 buildChain JS, 调 buildChain(2, leaf, root) 跑递归
+    attachShadow (不再每层 host span + innerHTML 注入 script, V0.34.0 broken pattern)."""
     f = build_synthetic_fixture(iframe_count=0, shadow_count=2, leaf_per_branch=3)
     assert f.fixture_id == "if0-sh2-leaf3"
     assert f.shadow_count == 2
-    assert f.html.count("attachShadow") == 2
+    # V0.34.2 fix: shadow_count 通过 buildChain(N, leaf, root) 参数传 JS, attachShadow 字符串
+    # 1 次 (在递归 fn 体内, 不每层复制).
+    assert "buildChain(2, 3," in f.html
+    assert "attachShadow" in f.html
+    # 不走 V0.34.0 broken pattern (sr.innerHTML=`...<script>...`)
+    assert "sr.innerHTML=`" not in f.html
 
 
 def test_build_synthetic_fixture_combined_iframe_shadow():
-    """V0.34.0: iframe + shadow 同时, fixture_id 三参数都拼."""
+    """V0.34.2: iframe + shadow 同时, fixture_id 三参数都拼; HTML 含 iframe chain + shadow JS."""
     f = build_synthetic_fixture(iframe_count=2, shadow_count=1, leaf_per_branch=4)
     assert f.fixture_id == "if2-sh1-leaf4"
-    assert "srcdoc=" in f.html
-    assert "attachShadow" in f.html
+    assert "iframe-depth-" in f.html  # iframe chain (V0.34.2)
+    assert "attachShadow" in f.html   # shadow chain (V0.34.2)
 
 
 def test_build_synthetic_fixture_invalid_params_raises():
@@ -222,7 +231,7 @@ def test_main_fixture_to_file(tmp_path, capsys):
     captured = capsys.readouterr()
     assert "if2-sh1-leaf2" in captured.out
     html = out_path.read_text()
-    assert "srcdoc=" in html
+    assert "iframe-depth-" in html  # V0.34.2: JS DOM chain 替代 srcdoc HTML attr
     assert "attachShadow" in html
 
 
@@ -327,3 +336,44 @@ def test_parse_fixture_spec_invalid_raises():
     # leaf=0 经 build_synthetic_fixture 抛 (规则 leaf>=1)
     with pytest.raises(ValueError, match=r"leaf"):
         _parse_fixture_spec("if0-sh0-leaf0")
+
+
+# ---------- V0.34.2 HTML 结构 fast 测 (catch script close raw / chain count / shadow buildChain) ----------
+
+
+def test_synthetic_html_iframe_chain_script_close_escaped():
+    """V0.34.2: iframe_count>=1 时 main HTML 必须 `</` JS-escape 成 `<\\/`, 否则 HTML
+    raw text parser 看到 `</script>` 在 JS string 内即终止 outer script → outer iframe
+    永远不创建 (V0.34.2 真测发现 bug 沉淀).
+    """
+    f = build_synthetic_fixture(2, 0, 3)
+    # JS string literal 内嵌的 inner HTML 必须含 escape 形 `<\/script>`
+    assert r"<\/script>" in f.html
+    # raw `</script>` 只能出现一次 (最外 script 真关闭), 中间嵌入位置不能有
+    # raw text mode 下 HTML parser 看到 `</script>` 立即 close, 严格不允许中间出现
+    assert f.html.count("</script>") == 1
+
+
+def test_synthetic_html_iframe_chain_layer_count():
+    """V0.34.2: iframe_count=N 时 HTML 含 N 个 iframe-depth-X 标签 (外层 raw + 内层 JS literal)."""
+    for n in [1, 2, 3, 5]:
+        f = build_synthetic_fixture(n, 0, 3)
+        # 每层 chain 1 个 <p>iframe-depth-{X}</p>, json.dumps 不变 raw text → substring 总 N 次
+        assert f.html.count("iframe-depth-") == n, (
+            f"if{n}: 期望 {n} 个 iframe-depth-, 真测 {f.html.count('iframe-depth-')}"
+        )
+        assert "createElement" in f.html
+        # 不走 V0.34.0 broken pattern (raw srcdoc HTML attribute 嵌套)
+        assert "srcdoc=" not in f.html
+
+
+def test_synthetic_html_shadow_chain_param():
+    """V0.34.2: shadow_count=N 时 顶层 script 调 buildChain(N, leaf, root) 传 N 参数."""
+    for n in [1, 2, 3]:
+        f = build_synthetic_fixture(0, n, 4)
+        # 主 frame 内顶层 script (shadow_count>0 模式) 调 buildChain({n}, 4, root)
+        assert f"buildChain({n}, 4," in f.html, f"sh{n}: 期望 buildChain({n}, 4, root) 调用"
+        # attachShadow 字符串出现 (DOM API 模式标志)
+        assert "attachShadow" in f.html
+        # 不走 innerHTML 注入 script 路径 (V0.34.0 broken pattern)
+        assert "sr.innerHTML=`" not in f.html

@@ -42,19 +42,39 @@ async def test_run_bench_baseline_fixture_real() -> None:
 
 
 async def test_run_bench_iframe_fixture_real() -> None:
-    """if2-sh0-leaf3 真 perceive: 3 frame (主 + 2 嵌 iframe) × 3 leaf = 9 mark."""
+    """if2-sh0-leaf3 真 perceive: V0.34.0 fixture design — leaves 仅在最深 iframe, mark == 3."""
     fixtures = [build_synthetic_fixture(2, 0, 3)]
     results = await run_bench_against_chromium(fixtures, samples_per=2, headless=True)
 
     assert len(results) == 1
     r = results[0]
     assert r.fixture_id == "if2-sh0-leaf3"
-    # iframe_count=2 → 主 + outer + inner = 3 frame, 每 frame 3 leaf button = 9 mark
-    # (8-9 容忍 srcdoc nested iframe timing race; perceive iframe DFS 偶丢边缘)
-    assert 8 <= r.mark_count <= 9, (
-        f"期望 8-9 mark (3 frame × 3 leaf), 真测 {r.mark_count}"
-    )
+    # V0.34.2 fix: iframe_count=2 → 3 frame, 仅最深 iframe 装 3 leaf → 严格 ==3
+    # (V0.34.1 期望 9 是 fixture design 误读, V0.34.2 修 + slow smoke 真测同步修正)
+    assert r.mark_count == 3, f"期望 3 mark (最深 iframe 3 leaf), 真测 {r.mark_count}"
     assert r.perceive_ms > 0.0
+
+
+async def test_run_bench_shadow_fixture_real() -> None:
+    """V0.34.2: if0-sh2-leaf5 真 perceive: shadow 2 层 最深 5 leaf → mark == 5."""
+    fixtures = [build_synthetic_fixture(0, 2, 5)]
+    results = await run_bench_against_chromium(fixtures, samples_per=2, headless=True)
+
+    r = results[0]
+    assert r.fixture_id == "if0-sh2-leaf5"
+    assert r.mark_count == 5, f"期望 5 mark (最深 shadow 5 leaf), 真测 {r.mark_count}"
+
+
+async def test_run_bench_mixed_iframe_shadow_real() -> None:
+    """V0.34.2: if2-sh2-leaf3 真 perceive: 2 层 iframe + 2 层 shadow 最深 3 leaf → mark == 3."""
+    fixtures = [build_synthetic_fixture(2, 2, 3)]
+    results = await run_bench_against_chromium(fixtures, samples_per=2, headless=True)
+
+    r = results[0]
+    assert r.fixture_id == "if2-sh2-leaf3"
+    assert r.mark_count == 3, (
+        f"期望 3 mark (最深 iframe 内最深 shadow 3 leaf), 真测 {r.mark_count}"
+    )
 
 
 async def test_run_bench_samples_median_real() -> None:

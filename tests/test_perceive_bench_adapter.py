@@ -23,6 +23,7 @@ def _build_pw_mock() -> tuple[MagicMock, MagicMock, MagicMock]:
     mock_page = MagicMock()
     mock_page.goto = AsyncMock()
     mock_page.wait_for_load_state = AsyncMock()
+    mock_page.wait_for_timeout = AsyncMock()  # V0.34.2 adapter 加 settle wait
 
     mock_context = MagicMock()
     mock_context.new_page = AsyncMock(return_value=mock_page)

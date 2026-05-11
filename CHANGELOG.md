@@ -2,6 +2,109 @@
 
 All notable changes to web-agent. 版本号遵循 SemVer 简化形式（V<major>.<minor>.<patch>）。
 
+## [0.34.2] - 2026-05-11
+
+### Fix (V0.34 F sub-route 优化系列 3/N — V0.34.1 真跑暴露 V0.34.0 framework 两个 fixture HTML bug)
+
+V0.34.1 真跑 chromium baseline 时**所有 iframe_count >= 2 或 shadow_count >= 2 的 fixture
+mark_count = 0**, 期望值远高 (e.g. if2-sh0-leaf3 期望 3, 真测 0). V0.34.0 单测全过却没抓 —
+因 V0.34.0 24 测仅验 HTML 字符串内容 (e.g. `"srcdoc=" in html`), 0 测真跑 chromium 验
+"perceive() 真收到 mark". V0.33 系列教训"没 baseline 任何优化都是猜"在 V0.34 fixture 自身
+重现 — fixture 生成正确性也要 baseline 真验.
+
+### 真发现 #15 #16 (V0.34 系列 +2)
+
+**#15 HTML unquoted attribute value 在 space 终止 (V0.34.2 plan agent + 真测发现)**
+
+V0.34.0 用 `iframe srcdoc="<html>...<iframe srcdoc=&quot;...&quot;></iframe>...</html>"`
+nested. 单层 escape 对 (outer srcdoc 解 entity 1 次 → inner raw `"`). 多层时 outer srcdoc
+attribute parse 看到 `&quot;` 当 entity 解码后是 `"`, 但 attribute value parsing 把 inner
+`srcdoc=&quot;` 当作 **unquoted attribute** (因 `&quot;` 不是 raw quote char, 在 attribute
+parser 状态机里走 unquoted state). Unquoted attribute value **在第一个 space 终止** —
+inner iframe srcdoc 残缺 → 浏览器看到的 inner iframe HTML 截断 → button element 丢失.
+
+→ V0.34.2: iframe 改 **JS DOM API 创建** (`ifr.srcdoc = string` via JS property), HTML
+parser 完全不参与 srcdoc 内容 escape, JSON.stringify 处理任意层 JS string literal escape.
+
+**教训**: HTML attribute value parsing 状态机非 quote-context-aware, 多层嵌套 web 标准
+不直接支持. 现代 DOM-driven 方案绕过 attribute parsing 才稳.
+
+**#16 `<script>` raw text 模式 `</script>` 在 JS string literal 内**即关闭外层 script
+(V0.34.2 真测发现)
+
+JS DOM API 方案改完后 1 层 work (if1 → 3 mark) 但 2+ 层仍 mark=0. 因 inner JS string
+literal 含 escape 后 inner LAYER_(N-1) HTML 内嵌套的 `<script>(function(){const inner = ".."})();</script>`,
+JSON.stringify 处理 `"` 但**不处理 `</script>`** (JSON 不含 raw text mode 概念). HTML5
+spec script element content 为 "script data" raw text mode — 整个 inner JS string 内 raw
+text **任何位置遇 `</script>`** (case-insensitive) 立即终止外层 script tag, JS parse
+中断 → outer iframe 永不创建.
+
+→ V0.34.2: `json.dumps(html).replace("</", r"<\/")` 把 inner 的所有 `</` 转 `<\/` JS 形式
+(JS string literal 解析时 `<\/` === `</` 不影响语义, HTML raw text parser 看 `<\` 不识为
+script close pattern).
+
+**教训**: HTML inline script 内嵌 raw text 任何含 `</script>` substring 的都需 `<\/script>`
+escape. 这是 30 年老坑, 现代 framework (React/Vue) 都内嵌处理.
+
+### Changed (~80 src LOC, +8 测)
+
+- `eval/perceive_bench.py`:
+  - `build_synthetic_fixture` iframe 分支重写 → 调 `_build_iframe_chain_html` (取代 srcdoc HTML attribute 嵌套)
+  - `_build_iframe_chain_html(remaining, leaf_html)` **新建**: 递归构建 N 层 JS DOM chain HTML, 每层 `<div id="iframe-host"></div><p>iframe-depth-{N}</p><script>IIFE 创建 inner iframe via createElement + ifr.srcdoc = JSON.stringify(inner)</script>`, inner_js_lit 经 `json.dumps + replace("</", r"<\/")` 双层 escape
+  - `_build_branch_html` shadow 分支重写 → 一段顶层 IIFE 调 `buildChain(shadow_count, leaf, root)` JS 函数走 DOM API 递归 `attachShadow` + `createElement("button")` (取代 `sr.innerHTML=\`<host>...<script>\`` V0.34.0 broken pattern, HTML spec 写: innerHTML 注入的 `<script>` 不执行)
+- `eval/perceive_bench_adapter.py`:
+  - `page.goto(wait_until="load")` 取代 `wait_until="domcontentloaded"` (等主 frame + 直接 child iframe 都 load)
+  - 加 `await page.wait_for_timeout(500)` settle wait — 多层 dynamic iframe chain 是 async, networkidle / load 不覆盖 grand-child iframe load, 500ms 给 chain JS run + 各层 srcdoc load 结算 (典型 ~50-100ms/层 × ≤5 层)
+- `tests/test_perceive_bench.py`:
+  - 修 4 个 V0.34.0 stale 测 (V0.34.0 测 `"srcdoc=" in html` / `attachShadow count == N` — V0.34.2 改 JS DOM 后 stale)
+  - 新加 3 fast HTML 结构测: `test_synthetic_html_iframe_chain_script_close_escaped` (catch #16) / `test_synthetic_html_iframe_chain_layer_count` (catch #15-style regression) / `test_synthetic_html_shadow_chain_param` (catch innerHTML script pattern 回潮)
+- `tests/test_perceive_bench_real.py`:
+  - 修 `test_run_bench_iframe_fixture_real` expected 9 → 3 (V0.34.0 fixture design 是 leaves 仅最深 iframe, V0.34.1 测期望误读 frame-数×leaf)
+  - 新加 `test_run_bench_shadow_fixture_real` (if0-sh2-leaf5 ==5)
+  - 新加 `test_run_bench_mixed_iframe_shadow_real` (if2-sh2-leaf3 ==3)
+- `tests/test_perceive_bench_adapter.py`:
+  - `_build_pw_mock` 加 `mock_page.wait_for_timeout = AsyncMock()` (V0.34.2 adapter 加 settle wait)
+- `pyproject.toml` / `__init__.py` 0.34.1 → 0.34.2
+- `uv.lock` 同步
+
+### Verify
+
+- `uv run pytest` → **761 passed, 23 skipped** (+3 fast HTML 结构测, +2 slow smoke shadow/mixed, 0 现测破)
+- `uv run ruff check` → all clean
+- `uv run mypy` → Success: no issues found in 49 source files
+- 真测 chromium (本提交开发途中跑 7 fixture × 2 sample): 全部 mark_count 命中期望 (5/3/3/5/5/3/3)
+
+### V0.34 系列进度更新
+
+| ver | 状态 | scope |
+|-----|------|-------|
+| V0.34.0 | ✅ | bench harness framework (24 测 — 仅验 HTML 字符串内容, 漏抓 fixture HTML 真跑 bug) |
+| V0.34.1 | ✅ | 真跑 chromium adapter — **暴露 V0.34.0 framework fixture 两个 bug** |
+| **V0.34.2** | ✅ 本提交 | fix 两 bug (#15 unquoted attribute space terminate + #16 script raw text close), JS DOM 重写 fixture chain + 加 fast HTML 结构测 catch 类似 regression |
+| V0.34.3 | 待 | F1 iframe DFS asyncio.gather 并发 — V0.34.2 fix 后 baseline ROI 评估完成: **iframe 5 层 → +278% ms, F1 显著高 ROI** (vs F2 SoM JS 合并在 microbench 几近 0 节省) |
+| V0.34.4 | 待 | F2 SoM JS 三 walker 合并 (real-world remote chromium 才显著, microbench 看不出) |
+| V0.34.5 | 待 | 系列收尾 + V0.34 retrospective |
+
+### F1/F2 决策 (V0.34.2 真测 baseline 推出)
+
+`WEB_AGENT_RUN_SLOW=1` 跑过 7 fixture × 2 sample, 数据:
+
+| fixture | ms | mark | Δ vs baseline | 解读 |
+|---------|----|----- |---------------|------|
+| if0-sh0-leaf5 | 61 | 5 | — | baseline |
+| if0-sh2-leaf5 | 62 | 5 | +1.6% | shadow 2 层 几乎 0 overhead |
+| if1-sh0-leaf3 | 117 | 3 | +92% | 单层 iframe walker ~56ms |
+| if2-sh0-leaf3 | 117 | 3 | +92% | 双层 iframe ≈ 单层 (DFS overhead 0 增) |
+| if5-sh0-leaf3 | 231 | 3 | +278% | **5 层 iframe → ~170ms 增量, F1 主战场** |
+| if3-sh1-leaf5 | 174 | 5 | +185% | 3 层 iframe 主导 |
+| if2-sh2-leaf3 | 113 | 3 | +85% | 2 层 iframe 主导 (shadow 不增) |
+
+**verdict**: F1 iframe DFS asyncio.gather 并发 **ROI 显著 > F2 SoM JS 合并**.
+- F1: 5 层 iframe 顺序 DFS ~170ms 增量, 并发 cap at slowest layer → 理论节省 ~80% = ~135ms.
+- F2: SoM JS 三 walker 合并节省主要是 RTT, microbench local chromium RTT ~1ms × 3 = ~3ms — 看不出, real-world remote chromium 才显著.
+
+→ V0.34.3 = F1 优先. V0.34.4 = F2.
+
 ## [0.34.1] - 2026-05-11
 
 ### Add (V0.34 F sub-route 优化系列 2/N — 真跑 chromium adapter 兑现 V0.34.0 deferred)
