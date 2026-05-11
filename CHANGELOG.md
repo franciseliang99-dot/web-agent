@@ -2,6 +2,95 @@
 
 All notable changes to web-agent. 版本号遵循 SemVer 简化形式（V<major>.<minor>.<patch>）。
 
+## [0.29.0] - 2026-05-10
+
+### Add (V0.29 W6-C 长 task chain 系列开篇 1/4 — chain.py 纯函数 + spec 校验)
+
+V0.28 W6 reflective 系列收尾后, 用户选 V0.29 主线 = **W6-C 长 task chain** (V0.28 W6-A/B
+cross-task memory 是 memory 层, W6-C chain 编排器是 plan 层, 不同抽象层独立 milestone).
+
+W6-C 设计意图: 多 task DAG 编排器 + 中间失败 reflect → 调下一 task plan + 跨 task 数据流, 替代
+真人级多步任务 (e.g. "GitHub topic search → fetch first repo README → 摘要 → 跨 HF 找类似 model").
+
+### Plan subagent 6 决策点全采纳
+
+- **A spec 格式**: Python `list[ChainNode]` frozen+slots dataclass + V0.29.1 加 yaml loader
+  (caller 调 yaml.safe_load 传 dict, chain.py 不引 yaml dep). 拒 DSL string (LLM 自决 V0.30+) +
+  纯 JSON (chain spec 人会反复改 注释友好关键, YAML > JSON).
+- **B 数据流**: simple `${node_id.result}` substitution (V0.21.2 Protocol 模式). 拒 structured
+  pipeline (DoneAction.result: str 已平字符串, 强加 schema 等于把 LLM 输出再 parse 一遍) + 拒
+  LLM 自决 (太 leaky 没法 debug, 跟 V0.28.2 reflections inject 走同 channel 浪费 token).
+- **C 失败处理**: 默 `continue` + 复用 V0.28.1+V0.28.2 reflect 自动桥接 (复用即胜利, chain 内
+  下个 node 同 domain 天然继承 reflection 零额外代码). per-node `on_failure: abort|continue` 配置.
+  拒 fallback task (备用 plan = chain spec 嵌套, V0.29 不开口子).
+- **D DAG 复杂度**: V0.29 限 linear (topo sort 后 sequential emit). 真 DAG 涉并发 Chrome
+  tab/CDP race + 跟 V0.21 multi-tab 风险叠加. depends_on 字段 V0.29.0 就建好 (校验环 + 强制
+  topo) 让 V0.30 加并发 emit 时复用. **架构留口子, 行为先收口**.
+- **E 入口**: 独立 `web-agent-chain` CLI + 新 mcp tool `web_agent_run_chain` (V0.29.1+/V0.29.2).
+  跟 V0.26.3 `web-agent-eval` 同模式 (拒复用 `web-agent --chain spec.yaml` 因为 CLI 帮助/--help
+  立刻分裂, mcp tool schema 也乱).
+- **F spec 来源**: V0.29 仅用户写 YAML / mcp client 传 dict, 不做 LLM 自动拆 chain (Auto-GPT
+  模式留 V0.31+, V0.29 先把执行器钉好).
+
+### V0.29 W6-C 系列拆解 (subagent 推, 5 commit)
+
+| ver | 状态 | scope |
+|-----|------|-------|
+| **V0.29.0** | ✅ 本提交 | chain.py 纯函数 + 测 (不接 cli/loop/mcp/eval) |
+| V0.29.1 | 待 | chain runner async run_chain + cli wire `web-agent-chain` |
+| V0.29.2 | 待 | mcp tool `web_agent_run_chain` (接 spec dict inline) |
+| V0.29.3 | 待 | eval --chain 集成 + 2-3 chain corpus + chain_completion_rate metric |
+| V0.29.4 | 待 | simplify subagent 审 + uv.lock chore + 收尾 |
+
+### Changed
+
+- `src/web_agent/chain.py` **新建** ~150 行:
+  - `ChainNode` frozen+slots dataclass: id/goal/depends_on=()/on_failure=Literal["abort","continue"]/inputs={} (跟 web_agent.types Action/Mark/Usage 同模式)
+  - `ChainSpec` frozen+slots dataclass: nodes tuple
+  - 3 Exception 子类化 ValueError: `ChainSpecError` (结构异常) / `ChainCycleError` (Kahn detect 环) / `ChainVarError` (substitute miss key)
+  - `parse_chain_spec(data: dict) -> ChainSpec` — 校验缺字段/重复 id/未知 dep id/on_failure 非法
+  - `topological_order(spec) -> list[ChainNode]` — Kahn 算法 + 检环抛 ChainCycleError
+  - `substitute_vars(template, results) -> str` — re sub `\\$\\{(\\w+)\\.result\\}` (限 [\\w-] 防 injection)
+  - `build_node_goal(node, prev_results) -> str` — substitute_vars(node.goal, prev_results)
+- `tests/test_chain.py` **新建** 22 测:
+  - parse_chain_spec: minimal/with_deps/missing nodes/duplicate id/unknown dep/missing goal/
+    invalid on_failure/inputs 非 dict/non-dict input (9)
+  - topological_order: linear/diamond/cycle 抛/disconnected multi-root (4)
+  - substitute_vars: single/multi/no var/missing key 抛/[\\w-] pattern (5)
+  - build_node_goal: no vars/with prev (2)
+  - ChainNode/ChainSpec frozen 守护 (2)
+
+### Compatibility
+
+- 0 改老 caller (新 module + 单测, 不接 loop / cli / memory / mcp / eval)
+- mypy strict 0 (43 src, +1); ruff 0; pytest **614 + 17 skip** (V0.28.3 592+17 → +22)
+- 真 chromium 15/15 全过 (无新)
+
+### Why minor (V0.29.0) 不 patch
+
+- V0.29 主题切换 (V0.28 W6-A/B reflective memory → V0.29 W6-C chain 编排器), 是 SemVer minor
+  "向后兼容功能新增" 级别 — 跟 V0.21.0 / V0.22.0 / V0.25.0 / V0.26.0 / V0.27.0 / V0.28.0 主题
+  开篇 minor 风格一致.
+- V0.29.1-4 patch 累加 runner / cli wire / mcp tool / eval 验证.
+
+### V0.29 隐藏风险 (subagent 提前识别, V0.29.1+ 处理)
+
+1. **Chrome state leak between nodes** (最关键): chain 多 task 共享 browser ctx, node A 留下
+   logged-in cookie/popup/history 影响 node B perception. V0.29.1 决: 默不 reset (跨 node session
+   复用是 chain 真价值) + opt-in `node.reset_session: bool`.
+2. **Loop wallclock 累加**: 单 task 300s, 5 node chain 1500s. V0.29.1 加 `chain.max_total_wallclock_s`
+   (默 1800s) + 已用时 propagate 到 per-node max_wallclock.
+3. **task_id / trace.db 关联缺失**: chain 5 node 5 个 task_id, replay 时人需要看 chain-level.
+   V0.29.1 trace.db schema 加 chain_id 列? 还是 V0.29.0 算 chain_id = hash(spec)? **倾向 V0.29.1
+   + alembic-style migration**.
+4. **Reflection 跨 node 污染** (V0.29 系列最大未知): node A 失败 reflection 进 reflections 表,
+   node B 同 domain 启动 inject 进 prompt — 但 reflection 文本可能误导 (e.g. "上次 click X 失败"
+   但 chain 内 node B 真要 click X). V0.29.3 eval 必须真跑一个 chain 验.
+5. **YAML 解析安全**: V0.29.1 caller 用 yaml.safe_load (无 !!python/object), 跟 V0.27 vault
+   同 risk class.
+6. **substitute_vars 与 LLM 输出冲突**: LLM 写 result 含 `${...}` 字面量会被下个 node 当变量,
+   V0.29.0 substitute 已限 pattern 在 node.goal 模板里 (不解析 result content).
+
 ## [0.28.3] - 2026-05-10
 
 ### Add (V0.28 W6 reflective 系列收尾 commit 4/4 — eval --reflect 2-pass + reflective_uplift metric)
