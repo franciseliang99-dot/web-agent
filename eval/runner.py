@@ -133,7 +133,10 @@ async def run_one(
     # 修 V0.26.x silent bug #11 (eval/runner 没真接 vcr, V0.26.4 baseline 全真烧 token vcr_replay
     # 总 False). chromium WebSocket CDP 不被 vcr 拦 (走 ws://, vcrpy 仅 hook httpx). 老 data:html
     # task 不接 vcr (无 overhead).
-    import vcr  # lazy import 防 vcrpy lib not in prod 时 import error
+    # V0.30.4 lazy import 注释更新 (subagent V0.30.3 R3 deferred): vcr 仅 requires_real_net=True
+    # task 路径需要; 模块级 import 让 prod console_script `web-agent-eval` 跑非 real-net corpus 时
+    # 也强依赖 vcrpy (现 dev dep), 不必要; 推延 cassette_ctx 构造时按需 import.
+    import vcr
     cassette_ctx: Any
     if task.requires_real_net:
         cassette_path = _resolve_cassette_path(task, client.name)

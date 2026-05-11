@@ -216,10 +216,10 @@ def test_trace_obs_contains_not_matched_hints_v024_helper():
 # --- V0.26.1 corpus 完整性 + token-specific lint ---
 
 
-def test_corpus_has_13_tasks_covering_v021_v030():
-    """V0.26.1+V0.29.4+V0.29.5+V0.30.2: corpus 共 13 task (V0.26.1 10 + V0.29.4-5 2 chain + V0.30.2 1 wikipedia)."""
+def test_corpus_has_15_tasks_covering_v021_v030():
+    """V0.26.1+V0.29.4-5+V0.30.2+V0.30.4: corpus 共 15 task (10 + 2 chain + 1 V0.30.2 wiki + 2 V0.30.4 (wiki+github))."""
     from eval.corpus import ALL_TASKS
-    assert len(ALL_TASKS) == 13
+    assert len(ALL_TASKS) == 15
     axes = {t.capability_axis for t in ALL_TASKS}
     expected = {
         "baseline", "multi-tab", "iframe", "drag", "upload",
@@ -231,9 +231,9 @@ def test_corpus_has_13_tasks_covering_v021_v030():
     # V0.29.4+V0.29.5 W6-C: 至少 2 chain task (CHAIN_REVEAL_2NODE + CHAIN_REFLECT_TRIGGER)
     chain_tasks = [t for t in ALL_TASKS if t.chain_spec is not None]
     assert len(chain_tasks) >= 2, "V0.29.4+V0.29.5 加 2 chain task"
-    # V0.30.2 D real-world: 至少 1 task (requires_real_net=True)
+    # V0.30.2+V0.30.4 D real-world: ≥ 3 task (requires_real_net=True) — 1 V0.30.2 wiki + 2 V0.30.4 (wiki Apple_Inc + github octocat)
     real_net_tasks = [t for t in ALL_TASKS if t.requires_real_net]
-    assert len(real_net_tasks) >= 1, "V0.30.2 加 1 wikipedia task"
+    assert len(real_net_tasks) >= 3, "V0.30.2+V0.30.4 加 3 real-net task"
 
 
 def test_all_tasks_have_predicate_binding():
@@ -614,3 +614,103 @@ def test_resolve_record_mode_strict_when_only_one_env_set(monkeypatch):
     monkeypatch.delenv("WEB_AGENT_EVAL_REAL", raising=False)
     monkeypatch.setenv("WEB_AGENT_EVAL_LIVE_NET", "1")
     assert _resolve_record_mode() == "none"
+
+
+# ---------- V0.30.4 D real-world: +2 tasks loaded + cli double-env assert ----------
+
+
+def test_v030_apple_inc_task_loaded():
+    """V0.30.4: WIKIPEDIA_APPLE_INC + requires_real_net=True + flaky_repeat=3 + predicate Cupertino."""
+    from eval.corpus import ALL_PREDICATES
+    from eval.corpus.v030_real_world import WIKIPEDIA_APPLE_INC
+
+    assert WIKIPEDIA_APPLE_INC.requires_real_net is True
+    assert WIKIPEDIA_APPLE_INC.flaky_repeat == 3
+    assert WIKIPEDIA_APPLE_INC.capability_axis == "real-world"
+    assert "Apple_Inc" in WIKIPEDIA_APPLE_INC.fixture_url
+    assert WIKIPEDIA_APPLE_INC.task_id in ALL_PREDICATES
+
+
+def test_v030_github_octocat_task_loaded():
+    """V0.30.4: GITHUB_OCTOCAT_README + requires_real_net=True + max_steps=10 (web UI 重)."""
+    from eval.corpus import ALL_PREDICATES
+    from eval.corpus.v030_real_world import GITHUB_OCTOCAT_README
+
+    assert GITHUB_OCTOCAT_README.requires_real_net is True
+    assert GITHUB_OCTOCAT_README.flaky_repeat == 3
+    assert GITHUB_OCTOCAT_README.capability_axis == "real-world"
+    assert "github.com/octocat/Hello-World" in GITHUB_OCTOCAT_README.fixture_url
+    assert GITHUB_OCTOCAT_README.max_steps == 10  # 比 wiki 大 (web UI JS bundle)
+    assert GITHUB_OCTOCAT_README.task_id in ALL_PREDICATES
+
+
+def test_v030_real_world_tasks_pass_lint_corpus_tokens():
+    """V0.30.4: 新 token (Cupertino + 'My first repository') 不违 lint_corpus_tokens 规则."""
+    from eval.corpus import ALL_PREDICATES, ALL_TASKS, lint_corpus_tokens
+
+    violations = lint_corpus_tokens(ALL_TASKS, ALL_PREDICATES)
+    assert violations == [], f"V0.30.4 corpus lint 违: {violations}"
+
+
+# ---------- V0.30.4 cli double-env assert (subagent V0.30.3 R3 收) ----------
+
+
+def test_assert_live_net_consistency_real_real_no_live_with_real_task_exits(monkeypatch):
+    """V0.30.4 R3: EVAL_REAL=1 + tasks 含 requires_real_net=True 但 LIVE_NET 未设 → SystemExit."""
+    from eval.cli import _assert_live_net_consistency
+    from eval.types import EvalTask
+
+    monkeypatch.setenv("WEB_AGENT_EVAL_REAL", "1")
+    monkeypatch.delenv("WEB_AGENT_EVAL_LIVE_NET", raising=False)
+    real_task = EvalTask(
+        task_id="t-real", goal="g", fixture_url="https://x.test/",
+        capability_axis="real-world", expected_step_range=(1, 3),
+        requires_real_net=True,
+    )
+    with pytest.raises(SystemExit):
+        _assert_live_net_consistency([real_task])
+
+
+def test_assert_live_net_consistency_both_env_set_passes(monkeypatch):
+    """V0.30.4 R3: EVAL_REAL=1 + LIVE_NET=1 + real-net task → 不 raise."""
+    from eval.cli import _assert_live_net_consistency
+    from eval.types import EvalTask
+
+    monkeypatch.setenv("WEB_AGENT_EVAL_REAL", "1")
+    monkeypatch.setenv("WEB_AGENT_EVAL_LIVE_NET", "1")
+    real_task = EvalTask(
+        task_id="t-real", goal="g", fixture_url="https://x.test/",
+        capability_axis="real-world", expected_step_range=(1, 3),
+        requires_real_net=True,
+    )
+    _assert_live_net_consistency([real_task])  # 不 raise
+
+
+def test_assert_live_net_consistency_no_real_net_tasks_passes(monkeypatch):
+    """V0.30.4 R3: EVAL_REAL=1 + LIVE_NET=0 + 无 real-net task → 不 raise (老 corpus)."""
+    from eval.cli import _assert_live_net_consistency
+    from eval.types import EvalTask
+
+    monkeypatch.setenv("WEB_AGENT_EVAL_REAL", "1")
+    monkeypatch.delenv("WEB_AGENT_EVAL_LIVE_NET", raising=False)
+    fake_task = EvalTask(
+        task_id="t1", goal="g", fixture_url="data:text/html,",
+        capability_axis="baseline", expected_step_range=(1, 3),
+        requires_real_net=False,  # 老 task
+    )
+    _assert_live_net_consistency([fake_task])  # 不 raise
+
+
+def test_assert_live_net_consistency_no_eval_real_passes(monkeypatch):
+    """V0.30.4 R3: EVAL_REAL 未设 (cassette replay) + real-net task → 不 raise (cassette 模式无需 LIVE_NET)."""
+    from eval.cli import _assert_live_net_consistency
+    from eval.types import EvalTask
+
+    monkeypatch.delenv("WEB_AGENT_EVAL_REAL", raising=False)
+    monkeypatch.delenv("WEB_AGENT_EVAL_LIVE_NET", raising=False)
+    real_task = EvalTask(
+        task_id="t-real", goal="g", fixture_url="https://x.test/",
+        capability_axis="real-world", expected_step_range=(1, 3),
+        requires_real_net=True,
+    )
+    _assert_live_net_consistency([real_task])  # 不 raise (cassette 严回放路径)

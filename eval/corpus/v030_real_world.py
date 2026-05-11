@@ -43,3 +43,54 @@ WIKIPEDIA_QUANTUM_FIRST_PARA = EvalTask(
 REAL_WORLD_PREDICATES: dict[str, Predicate] = {
     WIKIPEDIA_QUANTUM_FIRST_PARA.task_id: SubstringPredicate(substring="phenomenon"),
 }
+
+
+# V0.30.4 D real-world: 第 2 wikipedia (公司 page 跨 academic page baseline) — Apple_Inc.
+# predicate "Cupertino" 总部地名 5+ 年稳, 编辑改总部概率 < 月度 (subagent A 决).
+WIKIPEDIA_APPLE_INC = EvalTask(
+    task_id="v030-wikipedia-apple-inc",
+    goal=(
+        "去 https://en.wikipedia.org/wiki/Apple_Inc. 页面, 提取首段含总部所在地的句子, "
+        "done(result=完整句子)."
+    ),
+    fixture_url="https://en.wikipedia.org/wiki/Apple_Inc.",
+    capability_axis="real-world",
+    expected_step_range=(2, 6),
+    max_steps=8,
+    max_wallclock_s=120.0,
+    description=(
+        "V0.30.4 D real-world: 第 2 wikipedia (公司 page 跨 V0.30.2 academic page baseline). "
+        "predicate Cupertino 总部地名 5+ 年稳."
+    ),
+    tags=("v030", "d-real-world", "wikipedia"),
+    requires_real_net=True,
+    flaky_repeat=3,
+)
+REAL_WORLD_PREDICATES[WIKIPEDIA_APPLE_INC.task_id] = SubstringPredicate(substring="Cupertino")
+
+
+# V0.30.4 D real-world: GitHub octocat repo (web UI 含 description, SoM-friendly).
+# predicate "My first repository" octocat 招牌账户 description 永不会改 (不像普通 repo, subagent B 决).
+# max_steps=10 + max_wallclock_s=180 因 GitHub web UI 比 wiki 重 (JS bundle + login banner).
+GITHUB_OCTOCAT_README = EvalTask(
+    task_id="v030-github-octocat-hello-world",
+    goal=(
+        "去 https://github.com/octocat/Hello-World 页面, 找到 repository description 文本 "
+        "(About section / 右栏), done(result=完整 description 文本)."
+    ),
+    fixture_url="https://github.com/octocat/Hello-World",
+    capability_axis="real-world",
+    expected_step_range=(3, 8),
+    max_steps=10,  # GitHub web UI 重 (JS + banner) 留 buffer 防 LLM 多探一步
+    max_wallclock_s=180.0,
+    description=(
+        "V0.30.4 D real-world: GitHub web UI description 提取. predicate 'My first repository' "
+        "octocat 招牌账户描述永稳, 不像普通 repo description 漂移."
+    ),
+    tags=("v030", "d-real-world", "github"),
+    requires_real_net=True,
+    flaky_repeat=3,
+)
+REAL_WORLD_PREDICATES[GITHUB_OCTOCAT_README.task_id] = SubstringPredicate(
+    substring="My first repository",
+)

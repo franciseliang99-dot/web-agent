@@ -55,6 +55,32 @@ def _check_opt_in_env() -> None:
         sys.exit(1)
 
 
+def _assert_live_net_consistency(tasks: list[EvalTask]) -> None:
+    """V0.30.4 (subagent V0.30.3 R3 收尾): EVAL_REAL=1 + selected tasks 含 requires_real_net=True
+    时, LIVE_NET 必须 = 1 (一致性: 既要烧 token 又要走真网).
+
+    防 maintainer 设 EVAL_REAL=1 但忘 LIVE_NET=1 → record_mode='none' + 真 LLM call → vcr 拒
+    → INFRA_ERROR 困惑 (V0.30.3 hidden risk #3). fail-fast exit 1 显式报错优于 silently fall back.
+
+    顺序关键: 必须在 _filter_requires_real_net **之前** call (filter 后 LIVE_NET=0 时 real-net
+    task 已被剔, assert 无意义).
+
+    EVAL_REAL=0 (cassette 严回放) + real-net task → 不 assert (cassette 模式无需 LIVE_NET).
+    """
+    if os.environ.get("WEB_AGENT_EVAL_REAL", "") != "1":
+        return  # cassette replay 模式不需 LIVE_NET assert
+    has_real_net_task = any(t.requires_real_net for t in tasks)
+    if not has_real_net_task:
+        return  # 无 real-net task EVAL_REAL=1 OK (老 data:html corpus)
+    if os.environ.get("WEB_AGENT_EVAL_LIVE_NET", "") != "1":
+        sys.stderr.write(
+            "ERROR: EVAL_REAL=1 + selected tasks 含 requires_real_net=True 必须配 EVAL_LIVE_NET=1\n"
+            "  (一致性: 既要烧 token 又要走真网录 cassette).\n"
+            "  解: 加 WEB_AGENT_EVAL_LIVE_NET=1 真录 cassette, 或 unset EVAL_REAL 走 cassette 严回放.\n"
+        )
+        sys.exit(1)
+
+
 def _filter_requires_real_net(tasks: list[EvalTask]) -> list[EvalTask]:
     """V0.30.1 D real-world: requires_real_net=True task 默跳, EVAL_LIVE_NET=1 才放行.
 
@@ -114,6 +140,8 @@ async def _run_async(args: argparse.Namespace) -> int:
     load_dotenv()
 
     tasks = _select_tasks(args.corpus)
+    # V0.30.4 D real-world: EVAL_REAL=1 + real-net task → LIVE_NET 必须一致 (subagent V0.30.3 R3 收)
+    _assert_live_net_consistency(tasks)
     # V0.30.1 D real-world: filter requires_real_net=True 默跳 (LIVE_NET=1 才放行)
     tasks = _filter_requires_real_net(tasks)
     if not tasks:

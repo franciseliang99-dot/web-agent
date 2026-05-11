@@ -2,6 +2,80 @@
 
 All notable changes to web-agent. 版本号遵循 SemVer 简化形式（V<major>.<minor>.<patch>）。
 
+## [0.30.4] - 2026-05-10
+
+### Add (V0.30 系列 commit 5/6 — +2 real-world tasks (Apple_Inc + GitHub octocat) + cli 双 env assert R3)
+
+V0.30.0/1/2/3 之上, 加 +2 real-world corpus task 跨 source baseline (academic + corporate +
+GitHub web UI) + 收 V0.30.3 R3 (cli 双 env 一致 fail-fast assert) + lazy import vcr 注释更新.
+
+### Plan subagent 4 决策点全采纳
+
+- **A** WIKIPEDIA_APPLE_INC + predicate "Cupertino" (总部地名 5+ 年稳)
+- **B** GITHUB_OCTOCAT_README + predicate "My first repository" (octocat 招牌账户 description 永稳),
+  max_steps=10 / max_wallclock_s=180 (web UI 比 wiki 重 — JS bundle + login banner)
+- **C** `_assert_live_net_consistency(tasks)` helper 加在 `_filter_requires_real_net` **之前** call
+  (subagent 顺序关键), EVAL_REAL=1 + selected tasks 含 requires_real_net=True → LIVE_NET 必须=1
+  否 fail-fast exit 1
+- **D** lazy import vcr 仅更新注释 (V0.30.3 simplify R3 deferred 收) — 不真提模块级因 vcr 是
+  dev dep, 模块级 import 让 prod console_script 跑非 real-net corpus 也强依赖
+
+### Changed (~165 LOC)
+
+- `eval/corpus/v030_real_world.py` +50 行:
+  - WIKIPEDIA_APPLE_INC EvalTask (en.wikipedia.org/wiki/Apple_Inc., requires_real_net=True,
+    flaky_repeat=3, axis="real-world", max_wallclock_s=120)
+  - GITHUB_OCTOCAT_README EvalTask (github.com/octocat/Hello-World, max_steps=10,
+    max_wallclock_s=180 — web UI 重)
+  - REAL_WORLD_PREDICATES 加 SubstringPredicate("Cupertino") + SubstringPredicate("My first repository")
+- `eval/corpus/__init__.py` +5 行: import 2 task + ALL_TASKS append
+- `eval/cli.py` +25 行:
+  - `_assert_live_net_consistency(tasks)` helper — EVAL_REAL=1 + real-net task → LIVE_NET 必须=1,
+    否 sys.exit(1) + 友好 msg ("既要烧 token 又要走真网"). cassette replay 模式 (EVAL_REAL=0) 不 assert.
+  - `_run_async` 内 `_select_tasks` 后 / `_filter_requires_real_net` **前** call (subagent 顺序关键)
+- `eval/runner.py` +3 行: lazy import vcr 注释更新 (subagent V0.30.3 R3 deferred — 不真提模块级)
+- `tests/test_eval_runner.py` +3 测 (Apple_Inc loaded / GitHub loaded / lint_corpus_tokens 不违规)
+- `tests/test_eval_smoke.py` +4 测 (cli double-env assert 4 case: REAL+!LIVE+real_task→exit /
+  REAL+LIVE+real_task→pass / REAL+!LIVE+无real_task→pass / !REAL+real_task→pass)
+- `tests/test_eval_runner.py + test_eval_smoke.py` 改 1 测各: corpus 13→15 task
+
+### V0.30 系列进度 (5/6)
+
+| ver | 状态 | 节点 |
+|-----|------|------|
+| V0.30.0 | ✅ | apply_stealth_plus init script |
+| V0.30.1 | ✅ | vcr helper + EvalTask field + LIVE_NET filter |
+| V0.30.2 | ✅ | 1 wikipedia task (Quantum_entanglement) + sannysoft probe |
+| V0.30.3 | ✅ | vcr 真接 in run_one (修 #11 silent bug + R4 playback_repeats) |
+| V0.30.4 | ✅ | 本提交 — +2 tasks (Apple_Inc + GitHub octocat) + cli 双 env assert (R3) + lazy import 注释 |
+| V0.30.5 | 待 | --corpus real-world axis filter + report + docs 收尾 |
+
+### 隐藏风险 (V0.30.5 处理 / maintainer 操作)
+
+1. **GitHub web UI dynamic** (subagent #1): banner/JS 可能盖 description, max_steps=10 留 buffer;
+   首次 cassette 录会捕到 banner state, 后续 replay 稳
+2. **cassette 录开销** (subagent #2): 3 task × 2 provider × flaky_repeat=3 = 18 cassette 录次首次,
+   anthropic+openai LIVE 真烧 ~$0.5-1 (推 maintainer 一次录定)
+3. **breaking change** (subagent #3): `_assert_live_net_consistency` 新增 fail-fast 可能 break
+   现有 EVAL_REAL=1 路径若误用; 现 CI workflows 没跑 requires_real_net task → 无影响
+4. **predicate 假阳性 "Cupertino"** (subagent #4): wiki nav/sidebar 也可能含, 但 predicate 设计
+   本就 lenient
+5. **lint_corpus_tokens** (subagent #5): "Cupertino" 9字符 + "My first repository" 19字符都
+   ≥8 + 不在 _GENERIC_WORDS, 已加测保护
+
+### V0.27+V0.28+V0.29+V0.30 累计 subagent 真发现 = **12 处** (V0.30.4 0 新)
+
+### Compatibility
+
+- 老 caller 0 改 (新 task 默 LIVE_NET=0 时被 _filter_requires_real_net 跳)
+- mypy strict 0 (45 src); ruff 0; pytest **662 + 18 skip** (V0.30.3 655+18 → +7)
+- 真 chromium 15/15 全过 (无新; cassette 真录 maintainer 跑)
+
+### Why patch (V0.30.4) 不 minor
+
+- V0.30 主题 minor bump 已发生在 V0.30.0; V0.30.1+ patch 累加 framework / corpus / vcr / 真接
+- 跟 V0.21.x/V0.27.x/V0.28.x/V0.29.x patch 风格一致
+
 ## [0.30.3] - 2026-05-10
 
 ### Add (V0.30 系列 commit 4/6 — vcr 真接 in run_one 修 V0.26.x silent bug #11)
