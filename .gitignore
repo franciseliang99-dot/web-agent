@@ -28,6 +28,8 @@ data/upwork.db
 data/*.db-journal
 data/*.db-wal
 data/*.db-shm
+data/.backup/
+data/*.bak
 # V0.26.4: eval task-isolated 子目录 — baseline JSON 单独 commit, trace/screenshots gitignore
 data/eval/trace.db
 data/eval/screenshots/
