@@ -105,6 +105,8 @@ escape. 这是 30 年老坑, 现代 framework (React/Vue) 都内嵌处理.
 
 → V0.34.3 = F1 优先. V0.34.4 = F2.
 
+完整 7-fixture 数据 + 环境 stamp + V0.34.3 F1 期望节省估算见 [`docs/perceive-bench-baseline-V0.34.2.md`](../docs/perceive-bench-baseline-V0.34.2.md).
+
 ## [0.34.1] - 2026-05-11
 
 ### Add (V0.34 F sub-route 优化系列 2/N — 真跑 chromium adapter 兑现 V0.34.0 deferred)
