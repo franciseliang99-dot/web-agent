@@ -163,3 +163,80 @@ def test_render_reflective_uplift_markdown_empty_no_pairs():
     report = CorpusReport(run_id="r", started_at=0.0, ended_at=1.0, metrics=[])
     md = render_reflective_uplift_markdown(report, [])
     assert "no reflective data" in md
+
+
+# ---------- V0.29.5 W6-C 收口: chain task --reflect + V0.28.3 bucket bug fix ----------
+
+
+def test_compute_reflective_uplift_includes_chain_task_pair():
+    """V0.29.5: chain task 跑 --reflect 2-pass 产 2 metric 配对, V0.28.3 compute_reflective_uplift
+    自然适用 (按 (task_id, provider) 配对 inject_reflections=False/True). 0 改 metrics 层."""
+    metrics = [
+        # chain task run1: max_steps fail → bucket "(max_steps" (含左括号, V0.28.3 bug)
+        _mk_metric("v029-chain-reflect-trigger", "anthropic",
+                   pass_=False, inject_reflections=False, failure_bucket="(max_steps"),
+        # chain task run2: inject reflection 后 PASS
+        _mk_metric("v029-chain-reflect-trigger", "anthropic",
+                   pass_=True, inject_reflections=True),
+    ]
+    task_axis = cast("dict[str, CapabilityAxis]", {"v029-chain-reflect-trigger": "failure-recovery"})
+
+    rep = compute_reflective_uplift(metrics, task_axis)
+    assert "v029-chain-reflect-trigger" in rep.per_task
+    assert rep.per_task["v029-chain-reflect-trigger"] == +1
+    assert rep.overall == pytest.approx(1.0)
+    assert "failure-recovery" in rep.per_axis
+    assert rep.per_axis["failure-recovery"] == pytest.approx(1.0)
+
+
+def test_reflections_written_handles_max_steps_bucket_with_paren_v0285_fix():
+    """V0.29.5 fix V0.28.3 bucket 命名 bug: runner.py:67 marker.split(' ')[0] 处理
+    '(max_steps 耗尽未完成)' 返 '(max_steps' (含左括号), V0.28.3 reflections_written
+    `failure_bucket in ("max_steps", "LOOP_DETECTED")` 永不命中 → silent 0.
+
+    V0.29.5 改 startswith 容错, 兼容 'max_steps' / '(max_steps' / 'LOOP_DETECTED'.
+    """
+    metrics = [
+        # bucket "(max_steps" (实际 V0.26.0 _classify_failure_bucket 输出格式)
+        _mk_metric("t1", "anthropic", pass_=False, inject_reflections=False,
+                   failure_bucket="(max_steps"),
+        _mk_metric("t1", "anthropic", pass_=True, inject_reflections=True),
+        # bucket "LOOP_DETECTED" (无前缀, 也命中)
+        _mk_metric("t2", "anthropic", pass_=False, inject_reflections=False,
+                   failure_bucket="LOOP_DETECTED"),
+        _mk_metric("t2", "anthropic", pass_=False, inject_reflections=True),
+        # bucket "PREDICATE_FAIL" 不该命中
+        _mk_metric("t3", "anthropic", pass_=False, inject_reflections=False,
+                   failure_bucket="PREDICATE_FAIL"),
+        _mk_metric("t3", "anthropic", pass_=False, inject_reflections=True),
+    ]
+    task_axis = cast("dict[str, CapabilityAxis]", {
+        "t1": "failure-recovery", "t2": "failure-recovery", "t3": "iframe",
+    })
+
+    rep = compute_reflective_uplift(metrics, task_axis)
+    # V0.28.3 silent bug: t1+t2 都触发 reflect 但 reflections_written=0
+    # V0.29.5 fix: t1 ((max_steps) + t2 (LOOP_DETECTED) 都命中 = 2
+    assert rep.reflections_written == 2, (
+        f"V0.29.5 fix 未生效 — t1 '(max_steps' bucket + t2 'LOOP_DETECTED' 都该计 "
+        f"reflections_written, 实 {rep.reflections_written}"
+    )
+
+
+def test_chain_reflect_trigger_corpus_task_loaded():
+    """V0.29.5: eval.corpus.v029_chain.CHAIN_REFLECT_TRIGGER 含 chain_spec 2 node + node a
+    on_failure='continue' (信号双向 — 让 node b 跑) + predicate 绑."""
+    from eval.corpus import ALL_PREDICATES
+    from eval.corpus.v029_chain import CHAIN_REFLECT_TRIGGER
+
+    assert CHAIN_REFLECT_TRIGGER.chain_spec is not None
+    assert len(CHAIN_REFLECT_TRIGGER.chain_spec.nodes) == 2
+    # node a 必须 on_failure=continue (signal 双向, V0.29.5 设计)
+    assert CHAIN_REFLECT_TRIGGER.chain_spec.nodes[0].id == "a"
+    assert CHAIN_REFLECT_TRIGGER.chain_spec.nodes[0].on_failure == "continue"
+    # node b 依赖 a
+    assert CHAIN_REFLECT_TRIGGER.chain_spec.nodes[1].depends_on == ("a",)
+    # predicate 绑入 ALL_PREDICATES
+    assert CHAIN_REFLECT_TRIGGER.task_id in ALL_PREDICATES
+    # capability_axis 是 failure-recovery (V0.29.5 chain trigger reflect = failure recovery 轴)
+    assert CHAIN_REFLECT_TRIGGER.capability_axis == "failure-recovery"

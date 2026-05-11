@@ -116,8 +116,14 @@ def compute_reflective_uplift(
             per_axis_pass1.setdefault(axis, []).append(int(m1.pass_))
             per_axis_pass2.setdefault(axis, []).append(int(m2.pass_))
         # run1 失败且 W6-A 触发了反思 (m2 看到 inject 不空 — 但本层无法判) →
-        # 简化判: m1 failure_bucket in {max_steps, LOOP_DETECTED} 跟 reflect.should_reflect 对齐
-        if not m1.pass_ and m1.failure_bucket in ("max_steps", "LOOP_DETECTED"):
+        # 简化判: m1 failure_bucket startswith "max_steps"/"(max_steps"/"LOOP_DETECTED"
+        # 跟 reflect.should_reflect 对齐. V0.29.5 fix V0.28.3 bucket 命名 bug — runner.py:67
+        # `marker.split(" ")[0].split(":")[0]` 处理 "(max_steps 耗尽未完成)" 返 "(max_steps"
+        # (带左括号), V0.28.3 in 检查永不命中 → reflections_written 永 0. startswith 容错修.
+        if not m1.pass_ and any(
+            m1.failure_bucket.startswith(p)
+            for p in ("max_steps", "(max_steps", "LOOP_DETECTED")
+        ):
             reflections_written += 1
 
     per_axis: dict[CapabilityAxis, float] = {}

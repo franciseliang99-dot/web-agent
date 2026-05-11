@@ -215,10 +215,11 @@ def test_trace_obs_contains_not_matched_hints_v024_helper():
 # --- V0.26.1 corpus 完整性 + token-specific lint ---
 
 
-def test_corpus_has_11_tasks_covering_v021_v029():
-    """V0.26.1+V0.29.4: corpus 共 11 task (V0.26.1 10 + V0.29.4 1 chain). drop retry/backtrack 推迟 V0.26.3."""
+def test_corpus_has_12_tasks_covering_v021_v029():
+    """V0.26.1+V0.29.4+V0.29.5: corpus 共 12 task (V0.26.1 10 + V0.29.4 1 chain + V0.29.5 1 chain reflect).
+    drop retry/backtrack 推迟 V0.26.3."""
     from eval.corpus import ALL_TASKS
-    assert len(ALL_TASKS) == 11
+    assert len(ALL_TASKS) == 12
     axes = {t.capability_axis for t in ALL_TASKS}
     expected = {
         "baseline", "multi-tab", "iframe", "drag", "upload",
@@ -226,9 +227,9 @@ def test_corpus_has_11_tasks_covering_v021_v029():
     }
     missing = expected - axes
     assert not missing, f"corpus 缺 capability_axis: {missing}"
-    # V0.29.4 W6-C: 至少 1 chain task (含 chain_spec field)
+    # V0.29.4+V0.29.5 W6-C: 至少 2 chain task (CHAIN_REVEAL_2NODE + CHAIN_REFLECT_TRIGGER)
     chain_tasks = [t for t in ALL_TASKS if t.chain_spec is not None]
-    assert len(chain_tasks) >= 1, "V0.29.4 加 1 chain task (CHAIN_REVEAL_2NODE)"
+    assert len(chain_tasks) >= 2, "V0.29.4+V0.29.5 加 2 chain task"
 
 
 def test_all_tasks_have_predicate_binding():

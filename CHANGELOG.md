@@ -2,6 +2,93 @@
 
 All notable changes to web-agent. 版本号遵循 SemVer 简化形式（V<major>.<minor>.<patch>）。
 
+## [0.29.5] - 2026-05-10
+
+### Add (V0.29 W6-C 收口 — chain --reflect 接通 + 修 V0.28.3 bucket 命名 silent bug)
+
+V0.29.4 W6-C 收尾未主动验"reflection 跨 chain run 污染" (V0.29 系列最大未知). V0.29.5 收口加
+1 chain task 故意触发 W6-A reflect + 复用 V0.28.3 reflective_uplift 框架, **顺带 subagent 真发现
+#9** — V0.28.3 reflections_written 计数 silent bug.
+
+### Plan subagent 5 决策点全采纳 + 揭真 bug
+
+- **A** 选 (B) cross-chain-run V0.28.3 模式 (chain task 跑 --reflect 2-pass, 0 改 metrics 层).
+  拒 (A) per-node 重 build_inject_string (破 V0.29.4 _run_chain_branch 设计 + ALTER reflections
+  schema 加 chain_node_id, 留 V0.30 单做)
+- **B** max_steps 触发 (mock 简单 + reproducible, LOOP_DETECTED 路径长更脆)
+- **C** on_failure="continue" (信号双向, chain 跑完 2 node 验 node a 反思帮 vs 误导)
+- **D** fixture 复用 V0.29.4 URL_CHAIN_REVEAL (data:text/html domain="" 实际 SQL `WHERE domain = ?`
+  接受 "" 字面比较, recall_reflections_by_domain("") 真返同 domain 写入 → 简化, 不加假 https URL)
+- **E** 3 测 (compute_reflective_uplift chain task 配对 + bucket bug fix 回归 + corpus loaded)
+
+### Subagent 真发现 #9 — V0.28.3 reflections_written silent bug
+
+V0.26.0 `_classify_failure_bucket` (runner.py:67) 用 `marker.split(" ")[0].split(":")[0]` 处理
+`"(max_steps 耗尽未完成)"` 返 **`"(max_steps"`** (含左括号).
+
+V0.28.3 metrics.py:120 检查 `m1.failure_bucket in ("max_steps", "LOOP_DETECTED")` — 永不命中
+`"(max_steps"` (带左括号) → **reflections_written 永 0** (silent, V0.28.3 单测 fake bucket="max_steps"
+没暴露). V0.29.5 改 startswith 容错 1 行修:
+
+```python
+if not m1.pass_ and any(
+    m1.failure_bucket.startswith(p)
+    for p in ("max_steps", "(max_steps", "LOOP_DETECTED")
+):
+    reflections_written += 1
+```
+
+### Changed (~120 LOC)
+
+- `eval/metrics.py` +5 行 / -2: `compute_reflective_uplift` reflections_written 检查改 startswith
+  容错 (V0.28.3 silent bug fix). 跟 reflect.should_reflect 对齐 (max_steps + LOOP_DETECTED 集合).
+- `eval/corpus/v029_chain.py` +35 行: `CHAIN_REFLECT_TRIGGER` EvalTask 含 chain_spec 2 node:
+  - node a goal "click impossible button" + on_failure="continue" (max_steps 故意耗尽触发 W6-A reflect)
+  - node b goal extract H1 (depends_on=["a"], 验 chain 跑完 + reflective_uplift signal)
+  - capability_axis="failure-recovery" (chain trigger reflect = failure recovery 轴)
+  - 复用 V0.29.4 URL_CHAIN_REVEAL fixture (domain="" recall 自然走通)
+- `eval/corpus/__init__.py` +5 行: import + ALL_TASKS append + ALL_PREDICATES update
+- `tests/test_eval_reflective.py` +60 行: 3 V0.29.5 测:
+  - `test_compute_reflective_uplift_includes_chain_task_pair` chain task 配对自然走 V0.28.3 框架
+  - `test_reflections_written_handles_max_steps_bucket_with_paren_v0285_fix` 验 bucket bug fix
+    (3 case: "(max_steps" + "LOOP_DETECTED" 命中, "PREDICATE_FAIL" 不命中, expected 2)
+  - `test_chain_reflect_trigger_corpus_task_loaded` 验 corpus 加载 + on_failure=continue + axis
+- `tests/test_eval_runner.py` 改 1: `test_corpus_has_11_tasks_covering_v021_v029` →
+  `..._has_12_tasks` + chain_tasks ≥ 2 验
+- `tests/test_eval_smoke.py` 改 1: --corpus all → 12 task
+
+### V0.29 W6-C 系列总闭环 (6 commit)
+
+| ver | 状态 | 节点 |
+|-----|------|------|
+| V0.29.0 | ✅ | chain.py 纯函数 + 22 测 |
+| V0.29.1 | ✅ | async run_chain + cli wire web-agent-chain (8 测) |
+| V0.29.2 | ✅ | mcp tool web_agent_run_chain (6 测) |
+| V0.29.3 | ✅ | simplify _make_safety_cb refactor (subagent 自主) |
+| V0.29.4 | ✅ | eval --chain + 1 chain corpus + chain_node_pass_rate (4 测) |
+| V0.29.5 | ✅ | 本提交 — chain --reflect 收口 + V0.28.3 bucket bug fix (3 测) |
+
+### V0.27 + V0.28 + V0.29 累计 subagent 真发现 = **9 处** (本系列 +1)
+
+| # | 提出 | 内容 |
+|---|------|------|
+| 1-7 | V0.27/V0.28 | (上轮已列) |
+| 8 | V0.29.3 simplify | `_make_safety_cb` helper 抽 |
+| **9** | **V0.29.5 Plan** | **V0.28.3 reflections_written silent bug ((max_steps bucket 带左括号 → in 检查永不命中)** |
+
+### Compatibility
+
+- 老 caller 0 改 — 新 corpus task + 1 行 metrics fix (兼容老 fake bucket="max_steps" 测)
+- mypy strict 0 (44 src); ruff 0; pytest **634 + 17 skip** (V0.29.4 631+17 → +3)
+- 真 chromium 15/15 全过 (无新)
+- corpus 测 11→12 task 改 2 处 (test_eval_runner.py + test_eval_smoke.py)
+
+### Why patch (V0.29.5) 不 minor
+
+- V0.29 主题 minor bump 已发生在 V0.29.0; V0.29.1+ patch 累加 (含 V0.29.3 simplify refactor)
+- 跟 V0.21.x/V0.27.x/V0.28.x 系列 patch 风格一致
+- 顺带修 V0.28.3 bucket bug 不 bump 单独 patch (跟 V0.29.5 主体强相关 + 1 行)
+
 ## [0.29.4] - 2026-05-10
 
 ### Add (V0.29 W6-C 收尾 commit 5/5 — eval --chain dispatch + 1 chain corpus + chain_node_pass_rate)
