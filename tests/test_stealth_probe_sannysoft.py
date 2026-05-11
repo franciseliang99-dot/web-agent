@@ -36,7 +36,7 @@ pytestmark = [
 _PROBE_DIR = Path("data/stealth_probes")
 
 
-async def test_stealth_probe_sannysoft_screenshot(tmp_path):
+async def test_stealth_probe_sannysoft_screenshot():
     """V0.30.2: 真 launch chromium → apply_stealth+plus → goto sannysoft → screenshot 存 dir.
 
     artifact 路径: data/stealth_probes/<UTC YYYYMMDD>.png (gitignored, 仅 maintainer review).
