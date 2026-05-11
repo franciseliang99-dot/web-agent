@@ -37,11 +37,29 @@ def _parse_providers(raw: str) -> list[str]:
     return [p.strip() for p in raw.split(",") if p.strip()]
 
 
+def _select_tasks_chain_real_world() -> list:  # type: ignore[type-arg]
+    """V0.32.3: 虚拟 axis 'chain-real-world' — V0.32 D' 双轴交叉 (real-world axis ∩ chain_spec≠None).
+
+    现 _select_tasks 支单 axis 选 (CapabilityAxis 12 项), 'chain-real-world' 不在 Literal 内,
+    走 special case if 分支返 V0.32.0 + V0.32.2 加的 2 chain real-world task (跨 V0.29.4 chain
+    framework + V0.30 D real-world axis 双轴叠加).
+    """
+    from eval.corpus import ALL_TASKS
+    return [t for t in ALL_TASKS if t.capability_axis == "real-world" and t.chain_spec is not None]
+
+
 def _select_tasks(corpus_filter: str) -> list:  # type: ignore[type-arg]
-    """V0.26.3: --corpus all / <axis> 选 task 子集 (axis 复用 V0.26.0 CapabilityAxis Literal 12 项)."""
+    """V0.26.3+V0.32.3: --corpus all / <axis> / 'chain-real-world' 选 task 子集.
+
+    - "all": 全 corpus (default)
+    - "chain-real-world" (V0.32.3 虚拟 axis): real-world ∩ chain_spec≠None (V0.32 D' 双轴交叉)
+    - 其他: capability_axis 单选 (V0.26.0 CapabilityAxis Literal 12 项)
+    """
     from eval.corpus import ALL_TASKS
     if corpus_filter == "all":
         return list(ALL_TASKS)
+    if corpus_filter == "chain-real-world":
+        return _select_tasks_chain_real_world()
     return [t for t in ALL_TASKS if t.capability_axis == corpus_filter]
 
 
@@ -215,7 +233,8 @@ def main() -> None:
         "--corpus", default="all",
         help=(
             "task 选择: 'all' 跑全 corpus; 或 capability_axis 单选 (e.g. 'iframe' / 'multi-tab' / "
-            "'real-world' V0.30 真外网 task 默 LIVE_NET=1 才放行)"
+            "'real-world' V0.30 真外网 task 默 LIVE_NET=1 才放行); 或虚拟 axis "
+            "'chain-real-world' (V0.32 D' 双轴交叉: real-world ∩ chain_spec)"
         ),
     )
     parser.add_argument(

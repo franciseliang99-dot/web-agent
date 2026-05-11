@@ -2,6 +2,80 @@
 
 All notable changes to web-agent. 版本号遵循 SemVer 简化形式（V<major>.<minor>.<patch>）。
 
+## [0.32.3] - 2026-05-10
+
+### Add (V0.32 D' chain × real-world 系列收尾 4/4 — cli 'chain-real-world' 虚拟 axis filter)
+
+V0.32 D' chain × real-world 交叉系列收尾. cli 加 `--corpus chain-real-world` 虚拟 axis filter
+(real-world ∩ chain_spec≠None) 让 maintainer 单跑 V0.32 chain task 真录 cassette + CHANGELOG
+V0.32 系列正式总结 (跟 V0.27.5/.28.3/.29.5/.30.5/.31.3 收尾节奏一致).
+
+### Plan subagent 4 决策点全采纳
+
+- A cli `_select_tasks` 加虚拟 axis "chain-real-world" 1 if 分支 + `_select_tasks_chain_real_world()`
+  helper (real-world ∩ chain_spec≠None)
+- B predicate dict **NOT merge** (V0.30.4 subagent 已审 testdata 不 DRY, 各 corpus 文件即本体,
+  merge 破 module-level 表达力)
+- C CHANGELOG V0.32 系列总结 (跟 V0.27.5/.28.3/.29.5/.30.5/.31.3 收尾节奏一致)
+- D maintainer how-to (V0.32.1 真录 cassette 命令)
+
+### Changed (~110 LOC)
+
+- `eval/cli.py` +15 行: `_select_tasks_chain_real_world()` helper + `_select_tasks` "chain-real-world"
+  分支 + `--corpus` help 文案加虚拟 axis 提示
+- `tests/test_eval_smoke.py` +2 测: filter 返 2 task (V0.32.0 + V0.32.2) + cli help 含 'chain-real-world'
+
+### V0.32 D' chain × real-world 系列总闭环 (3 commit 实做 + 1 deferred)
+
+| ver | commit | 节点 |
+|-----|--------|------|
+| V0.32.0 | 300c36b | 1 chain real-world task (GitHub topic→README) — fixture github.com/topics/python + node a click first repo / b extract README, predicate "programming language" |
+| V0.32.1 | ⏸ deferred | maintainer 真录 cassette (烧 token user-gated, ~$0.05-0.10 chain × 2 = $0.20) — SemVer 跳 0.32.1 patch 数字 |
+| V0.32.2 | f620936 | +1 chain real-world (Wikipedia cross-ref Apple_Inc → Cupertino link → Cupertino page) — predicate "Santa Clara County" 抗漂 |
+| V0.32.3 | 本提交 | cli `--corpus chain-real-world` 虚拟 axis filter + 系列总结 |
+
+### V0.32 设计目标 (D' chain × real-world 双轴叠加) 验证
+
+- **0 改 framework**: V0.29.4 chain_spec field + V0.30.1 requires_real_net field + V0.30.3 vcr 真接
+  wrap LLM call 已就绪, V0.32 task 直接组合, framework 0 改 (subagent V0.32.0 plan F 已验)
+- **2 chain real-world task**: GitHub web UI 域 (V0.32.0) + Wikipedia 域 (V0.32.2) 跨 source baseline
+- **chain runner 跨 page navigation**: V0.29.4 _run_chain_branch 跨 node 复用 ctx, node a click 后
+  page 已 navigate, node b 直接 perceive 当前 page (V0.32.0+V0.32.2 同 pattern)
+- **predicate 抗漂**: GitHub "programming language" (Python topic universal) + Wikipedia "Santa Clara
+  County" (county 行政信息 5+ 年稳)
+
+### V0.32 maintainer how-to (cassette 真录, V0.32.1 deferred)
+
+```bash
+# 三级 env opt-in 真录 cassette (烧 ~$0.20 token, 18 cassette 录次首次:
+# 2 chain task × 1 provider × ~6-10 LLM call ≈ $0.10-0.20):
+WEB_AGENT_RUN_EVAL=1 WEB_AGENT_EVAL_REAL=1 WEB_AGENT_EVAL_LIVE_NET=1 \
+  ANTHROPIC_API_KEY=sk-ant-... \
+  uv run web-agent-eval --corpus chain-real-world --providers anthropic
+
+# cassette 落 eval/cassettes/real_world/v032-*.yaml, commit 进 git
+# (V0.30.1 _VCR_FILTER_HEADERS 已 redact 11 项 LLM key 安全)
+
+# 后续 PR 默 cassette 回放 (EVAL_REAL=0 + 默 record_mode=none 严回放)
+WEB_AGENT_RUN_EVAL=1 uv run web-agent-eval --corpus chain-real-world
+```
+
+### V0.27 + V0.28 + V0.29 + V0.30 + V0.31 + V0.32 累计 subagent 真发现 = **12 处** (V0.32 系列 0 新)
+
+V0.32 系列 0 新真发现 (主体复用 V0.29.4 chain framework + V0.30 D real-world 框架, subagent 角色
+为 plan 拆解 + 关键 mitigation 提议 (e.g. node a goal 明指 Cupertino wikilink 防误点 California)).
+
+### Compatibility
+
+- 老 caller 0 改 (cli `--corpus all` / 单 axis 路径不变, 新 'chain-real-world' 虚拟 axis 加 if 分支)
+- mypy strict 0 (46 src); ruff 0; pytest **698 + 18 skip** (V0.32.2 696+18 → +2)
+- 真 chromium 15/15 全过 (无新; cassette 真录 V0.32.1 maintainer 跑)
+
+### Why patch (V0.32.3) 不 minor
+
+- V0.32 主题 minor bump 已发生在 V0.32.0; V0.32.1+ patch 累加 (V0.32.1 跳数字 deferred)
+- 跟 V0.21.x/V0.27.x/V0.28.x/V0.29.x/V0.30.x/V0.31.x patch 风格一致
+
 ## [0.32.2] - 2026-05-10
 
 ### Add (V0.32 系列 commit 3/4 — Wikipedia cross-ref chain real-world 验非 GitHub 域)

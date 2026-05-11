@@ -214,3 +214,36 @@ def test_argparse_help_mentions_real_world_axis(capsys):
     assert "real-world" in captured.out, (
         f"V0.30.5 cli help 应含 'real-world' axis 例, captured: {captured.out[:500]}"
     )
+
+
+# ---------- V0.32.3 D' 收尾: 虚拟 axis 'chain-real-world' filter ----------
+
+
+def test_select_tasks_chain_real_world_returns_2_tasks():
+    """V0.32.3: --corpus chain-real-world → 2 task (V0.32.0 GitHub + V0.32.2 wiki cross-ref).
+
+    虚拟 axis (real-world ∩ chain_spec≠None) 不在 CapabilityAxis Literal 12 项, 走 special case.
+    """
+    tasks = _select_tasks("chain-real-world")
+    assert len(tasks) == 2
+    assert all(t.capability_axis == "real-world" for t in tasks)
+    assert all(t.chain_spec is not None for t in tasks)
+    assert all(t.requires_real_net for t in tasks)
+    task_ids = {t.task_id for t in tasks}
+    assert "v032-github-topic-python-first-readme" in task_ids
+    assert "v032-wikipedia-apple-to-cupertino-chain" in task_ids
+
+
+def test_argparse_help_mentions_chain_real_world_axis(capsys):
+    """V0.32.3: --corpus help 文案含 'chain-real-world' 虚拟 axis."""
+    import contextlib
+    import sys
+    from eval.cli import main
+
+    sys.argv = ["web-agent-eval", "--help"]
+    with contextlib.suppress(SystemExit):
+        main()
+    captured = capsys.readouterr()
+    assert "chain-real-world" in captured.out, (
+        f"V0.32.3 cli help 应含 'chain-real-world' 虚拟 axis, captured: {captured.out[:600]}"
+    )
