@@ -2,6 +2,124 @@
 
 All notable changes to web-agent. 版本号遵循 SemVer 简化形式（V<major>.<minor>.<patch>）。
 
+## [0.33.4] - 2026-05-11
+
+### Doc (V0.33 E 性能优化系列收尾 5/5 — 系列总结 + maintainer baseline how-to + env reference)
+
+V0.33.0-V0.33.3 4 commit 落地 token / image 性能优化框架后, 本提交是**系列收尾文档**:
+不动 src 代码, 只补 CHANGELOG 系列总结 + maintainer 真录 baseline how-to + 4 env 用法 reference.
+跟 V0.31.3 / V0.32.3 系列收尾同节奏 (defer 真跑 baseline 给 maintainer, 跟 V0.30.5 / V0.32.1 同模式).
+
+### V0.33 E 性能优化系列回顾 (4 commit + 1 收尾)
+
+| ver | 主题 | scope | 真节省 (估算, 未量化) |
+|-----|------|-------|----------------------|
+| V0.33.0 | token baseline framework | eval/token_baseline.py + CLI compare/stats + 11 测 | 0 (基础设施) |
+| V0.33.1 | per-step token accumulator 修 silent bug #14 | trace.Step + loop + runner sum 替 last × N | 矫正 baseline 报数准确度 (高估 → 真值) |
+| V0.33.2 | SoM 字段 lean mode opt-in | perceiver.marks_to_text 加 env 分支 | text token: ~50% mark 行 ≈ ~16k tok/run (N=20 marks × 20 step) |
+| V0.33.3 | screenshot WebP opt-in | perceiver / anthropic / openai / loop 4 caller 单源 helper | **token 0** (image tile 固定计费); 磁盘 ~70%; 上传 latency 边际改善 |
+| V0.33.4 | 系列收尾 + 文档 | CHANGELOG + env reference + maintainer how-to | 0 (文档) |
+
+### 真发现 #13 / #14 累计沉淀 (V0.33 系列贡献 2 个)
+
+**#13 WebP token 不直减** (V0.33.0 plan subagent 真发现): Anthropic Vision 按 image tile 固定计费
+~1568 tok/image (`detail=high`), OpenAI Vision detail=high 同按 tile (765 base + 170×tiles).
+WebP 减 70% bytes **不直接转 token**. 否则 V0.33.3 误以为 byte 减 = token 减就栽了. → V0.33.3 实施时
+诚实降级定位为"省磁盘+网络不省 token", CHANGELOG 必标. **教训**: image 优化主战场是 tile 数 (用
+`detail=low` 或裁更小区域), 不是格式 / 字节大小.
+
+**#14 V0.26.2 token 累加 silent bug** (V0.33.0 plan subagent 真发现): runner.py:174 算
+`last_usage.input_tokens × len(trace_steps)`. Anthropic prompt cache 命中后第 2+ step input_tokens
+大降, 末次 × N **高估**首 step + **漏算** cache miss 阶段方差. **4 commit (V0.26.2 → V0.30.5) 没人审**;
+V0.33.0 系统性审 V0.26-V0.32 整链才挖出. → V0.33.1 修. **教训**: 自评注释 ("精度 ~80%") 写死后没人回头,
+后续 commit 在错算法上跑. systemd-style 批量 audit 比单 commit reviews 更易发现这类 silent bug.
+
+(累计真发现至 V0.33: 14 个; V0.33 系列 +2: #13 #14).
+
+### 4 个 env opt-in reference (V0.33.x 引入)
+
+| env | 默认 | 行为 | 引入版本 |
+|-----|------|------|---------|
+| `WEB_AGENT_SOM_FIELDS` | "full" | "lean" 砍 href + 条件砍 role (button/a/input 砍, div/span/li/section/article 保) | V0.33.2 |
+| `WEB_AGENT_SCREENSHOT_FORMAT` | "png" | "webp" 切 WebP (Anthropic + OpenAI vision 原生支持) | V0.33.3 |
+| `WEB_AGENT_SCREENSHOT_QUALITY` | 75 | WebP lossy quality [1, 100], 越界/非整数 fallback 75 | V0.33.3 |
+
+跟 V0.27-V0.32 已有 env opt-in 同节奏 (lazy 取值 / 默 "保守" / "true/yes/1" 文化沿用).
+
+完整 env 列表请查 `docs/ARCHITECTURE.md` (`WEB_AGENT_AUTO_DISMISS` / `WEB_AGENT_SOM_SHADOW` /
+`WEB_AGENT_AUTO_SPAWN_CHROME` / `WEB_AGENT_CDP_URL` / `WEB_AGENT_MEMORY_DB` / `WEB_AGENT_SPIKE_W5C2` /
+`WEB_AGENT_AUTO_APPROVE` / `WEB_AGENT_TRANSIENT_RETRY_MAX` / `WEB_AGENT_DIALOG_POLICY` /
+`WEB_AGENT_USE_KEYRING` 等).
+
+eval CLI 三级 opt-in (V0.30 沉淀, V0.33 系列不动): `WEB_AGENT_RUN_EVAL=1` (跑 eval 测) +
+`WEB_AGENT_EVAL_REAL=1` (跑 requires_real_net=True 任务) + `WEB_AGENT_EVAL_LIVE_NET=1` (live 不复放 cassette).
+
+### Maintainer how-to: V0.33 baseline 双跑 (deferred)
+
+跟 V0.30.5 / V0.32.1 同 deferred maintainer 模式. 当前 `eval/cassettes/real_world/` 仅 `.gitkeep`,
+0 真 cassette. 若 maintainer 决意真录量化 V0.33.2 lean / V0.33.3 WebP 的真节省, 4 配置矩阵命令:
+
+```bash
+# 配置 1: full + png (V0.33.0 baseline 重跑, 修 #14 后基准)
+WEB_AGENT_RUN_EVAL=1 WEB_AGENT_EVAL_REAL=1 WEB_AGENT_EVAL_LIVE_NET=1 \
+  uv run web-agent-eval --provider anthropic --output data/eval/v033-full-png.json
+
+# 配置 2: lean + png (验 V0.33.2 SoM 真节省)
+WEB_AGENT_RUN_EVAL=1 WEB_AGENT_EVAL_REAL=1 WEB_AGENT_EVAL_LIVE_NET=1 \
+  WEB_AGENT_SOM_FIELDS=lean \
+  uv run web-agent-eval --provider anthropic --output data/eval/v033-lean-png.json
+
+# 配置 3: full + webp (验 V0.33.3 WebP 不省 token)
+WEB_AGENT_RUN_EVAL=1 WEB_AGENT_EVAL_REAL=1 WEB_AGENT_EVAL_LIVE_NET=1 \
+  WEB_AGENT_SCREENSHOT_FORMAT=webp \
+  uv run web-agent-eval --provider anthropic --output data/eval/v033-full-webp.json
+
+# 配置 4: lean + webp (双优化叠加)
+WEB_AGENT_RUN_EVAL=1 WEB_AGENT_EVAL_REAL=1 WEB_AGENT_EVAL_LIVE_NET=1 \
+  WEB_AGENT_SOM_FIELDS=lean WEB_AGENT_SCREENSHOT_FORMAT=webp \
+  uv run web-agent-eval --provider anthropic --output data/eval/v033-lean-webp.json
+
+# A vs B compare (V0.33.0 framework)
+uv run web-agent-token-baseline compare \
+  data/eval/v033-full-png.json data/eval/v033-lean-png.json \
+  --a-label "full+png" --b-label "lean+png"
+```
+
+**预估 cost**: 5 task × 4 配置 × 1 provider ≈ ~$1-2 / 30-60 min wallclock (Anthropic).
+跟 V0.30.5 估的 "$0.5-1" + V0.32.1 估的 "$0.20" 同量级. 双 provider × flaky_repeat=3 → ~$5-10.
+
+### 限制与遗留
+
+- **真节省未量化**: V0.33.2 lean ~16k tok/run 估 / V0.33.3 WebP ~70% 磁盘估都未真跑验. cassette
+  deferred 跟 V0.32.1 同 user-gated 模式 (token 烧不可逆).
+- **decide-after-baseline**: lean 是否改默 "lean" / WebP 是否改默 "webp" 等到 V0.33.4 maintainer
+  跑完 baseline 验 success rate 不掉 (>= V0.33.0 baseline) 后再决.
+- **systemd-style 批量 audit 缺**: V0.33.0 plan subagent 一次性挖出 #14 silent bug 的方法值得制度化,
+  V0.34+ 推 (a) 加固 / (b) 性能 / (c) 引入"每 5 commit 一次跨 commit audit"流程.
+
+### Changed (~0 src LOC, ~120 doc LOC)
+
+- `CHANGELOG.md` V0.33.4 entry (本): ~120 行 (系列总结 + #13/#14 复盘 + env reference + how-to + 限制)
+- `pyproject.toml` / `__init__.py` 0.33.3 → 0.33.4
+- `uv.lock` 同步
+
+### Verify
+
+- `uv run pytest` → **727 passed, 18 skipped** (V0.33.3 状态, 0 src 改 → 0 测变)
+- 0 src 改 → 0 ruff/mypy 重检需求
+
+### V0.33 系列状态
+
+| ver | 状态 | scope |
+|-----|------|-------|
+| V0.33.0 | ✅ | token baseline framework + CLI subcommand |
+| V0.33.1 | ✅ | per-step token accumulator 修 V0.26.2 silent bug #14 |
+| V0.33.2 | ✅ | SoM 字段 lean mode opt-in (WEB_AGENT_SOM_FIELDS=lean) |
+| V0.33.3 | ✅ | screenshot WebP opt-in (WEB_AGENT_SCREENSHOT_FORMAT=webp) |
+| **V0.33.4** | ✅ 本提交 | 系列收尾 + maintainer baseline how-to + env reference |
+
+**V0.33 E 性能优化系列闭环 (5 commit 全闭环)**. V0.34 主题待 user 选 (主推路径: F sub-route 优化 / G stealth 加固 / B' lean 改默后验 / 其他).
+
 ## [0.33.3] - 2026-05-11
 
 ### Add (V0.33 E 性能优化系列 4/5 — screenshot WebP opt-in via WEB_AGENT_SCREENSHOT_FORMAT=webp)
