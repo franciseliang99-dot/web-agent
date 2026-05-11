@@ -27,7 +27,8 @@ class TaskMetric:
     """V0.26.0+V0.26.2: 单 task 单 provider 单 run 的 metric.
 
     V0.26.2: 加 input/output_tokens (累自 client.last_usage 跨 step) + cost_usd
-    (eval/pricing.py PRICING 反查) + llm_calls (step 数代理, 1 step ≈ 1 plan 调用).
+    (eval/pricing.py PRICING 反查) + llm_calls (步数代理).
+    V0.28.3: 加 inject_reflections 区分 reflect 2-pass 的 run1 (False) vs run2 (True).
     """
 
     task_id: str
@@ -45,6 +46,8 @@ class TaskMetric:
     output_tokens: int = 0
     input_cost_usd: float = 0.0
     output_cost_usd: float = 0.0
+    # V0.28.3 W6 收尾: reflect 2-pass 时区分 run1 (False) vs run2 (True)
+    inject_reflections: bool = False
 
 
 # V0.26.0: failure_bucket 复用 memory.py FAILURE_MARKERS + 加 4 类 eval 专属
@@ -77,6 +80,8 @@ async def run_one(
     db_path: Path,
     screenshots_dir: Path,
     chromium_launcher: Any,  # Playwright Chromium browser_type, 让 caller 决定 launch 时机
+    memory_db_path: Path | None = None,
+    inject_reflections: bool = False,
 ) -> TaskMetric:
     """V0.26.0+V0.26.2: 跑单 task 单 client 单 run, 返 TaskMetric (含 token cost).
 
@@ -102,6 +107,20 @@ async def run_one(
         except Exception:
             pass
 
+    # V0.28.3 W6 收尾: inject_reflections=True 时构造 memories_str 注入 (复用 cli build_inject_string).
+    # eval task fixture 多为 data:text/html → extract_domain 返 "" → recall 返 [] → 自然 None
+    # (除非 task fixture 是 https:// + memory_db_path 已有同 domain 反思). isolated db 防 Risk #1.
+    memories_str: str | None = None
+    eval_domain = ""
+    if inject_reflections and memory_db_path is not None:
+        from web_agent.memory import build_inject_string, extract_domain
+        eval_domain = extract_domain(task.fixture_url)
+        memories_str = build_inject_string(
+            memory_db_path, eval_domain,
+            include_memories=False,  # eval 隔离: 只 inject reflections, 不掺 memories
+            include_reflections=True,
+        )
+
     try:
         browser = await chromium_launcher.launch(headless=True, args=["--no-sandbox"])
         try:
@@ -114,6 +133,9 @@ async def run_one(
                 max_steps=task.max_steps,
                 max_wallclock_s=task.max_wallclock_s,
                 db_path=db_path, screenshots_dir=screenshots_dir,
+                memories=memories_str,
+                domain=eval_domain,
+                memory_db_path=memory_db_path,  # W6-A reflect 写入路径
             )
             # 从 trace.db 拿 web_agent_task_id (run_react_loop 内 uuid 生成的, 不返出来)
             web_agent_task_id = _last_task_id(db_path)
@@ -126,6 +148,7 @@ async def run_one(
             steps=0, wallclock_s=time.time() - t_start,
             web_agent_task_id="", final_result=f"INFRA: {type(e).__name__}: {e}",
             predicate_result=PredicateResult(matched=False, reason=str(e)[:200], name="N/A"),
+            inject_reflections=inject_reflections,
         )
 
     trace_steps = _read_trace_steps(db_path, web_agent_task_id)
@@ -155,6 +178,7 @@ async def run_one(
         output_tokens=out_tok,
         input_cost_usd=in_cost,
         output_cost_usd=out_cost,
+        inject_reflections=inject_reflections,
     )
 
 
@@ -176,10 +200,18 @@ async def run_corpus(
     db_path: Path,
     screenshots_dir: Path,
     chromium_launcher: Any,
+    reflect: bool = False,
+    memory_db_path: Path | None = None,
 ) -> CorpusReport:
     """V0.26.2: 跑 task × provider grid (串行 N task × M provider, fresh chromium per cell).
 
-    sanity B: cross-provider 也 fresh launch (cookie/storage 隔离 > 内存; 18 cells 串行 ~3 min).
+    V0.28.3 W6 收尾: reflect=True → 每 task 跑 2 次 (subagent B 决, task-by-task 配对):
+    - run1 inject_reflections=False (baseline)
+    - run2 inject_reflections=True (W6-A 反思 inject 后)
+    每 task 跑前清 reflections 表 (Risk #1 修: 跨 task 共 domain 污染 防止) + isolated
+    memory_db_path (caller 传 output_dir / "eval_memory.db" 防写脏主用户 db).
+
+    cost: reflect=True 烧 token 翻倍 (每 task 2 次 LLM call), opt-in.
     """
     run_id = uuid.uuid4().hex[:12]
     started_at = time.time()
@@ -189,12 +221,35 @@ async def run_corpus(
         if pred is None:
             continue  # 缺 predicate 的 task 跳过 (lint_corpus_tokens 会拦)
         for client in clients:
-            m = await run_one(
-                task, client, pred,
-                db_path=db_path, screenshots_dir=screenshots_dir,
-                chromium_launcher=chromium_launcher,
-            )
-            metrics.append(m)
+            if reflect and memory_db_path is not None:
+                # V0.28.3 W6 2-pass: 每 task 清 reflections 表防跨 task 污染 (Risk #1)
+                from web_agent.memory import clear_reflections
+                clear_reflections(memory_db_path)
+                # run1: baseline 不 inject (W6-A 触发会写表给 run2)
+                m1 = await run_one(
+                    task, client, pred,
+                    db_path=db_path, screenshots_dir=screenshots_dir,
+                    chromium_launcher=chromium_launcher,
+                    memory_db_path=memory_db_path,
+                    inject_reflections=False,
+                )
+                metrics.append(m1)
+                # run2: inject reflections (run1 写的反思 — 同 task 配对, 不跨 task)
+                m2 = await run_one(
+                    task, client, pred,
+                    db_path=db_path, screenshots_dir=screenshots_dir,
+                    chromium_launcher=chromium_launcher,
+                    memory_db_path=memory_db_path,
+                    inject_reflections=True,
+                )
+                metrics.append(m2)
+            else:
+                m = await run_one(
+                    task, client, pred,
+                    db_path=db_path, screenshots_dir=screenshots_dir,
+                    chromium_launcher=chromium_launcher,
+                )
+                metrics.append(m)
     return CorpusReport(
         run_id=run_id, started_at=started_at, ended_at=time.time(), metrics=metrics,
     )
@@ -265,4 +320,6 @@ def metric_to_dict(m: TaskMetric) -> dict[str, Any]:
         "output_tokens": m.output_tokens,
         "input_cost_usd": round(m.input_cost_usd, 6),
         "output_cost_usd": round(m.output_cost_usd, 6),
+        # V0.28.3 W6 收尾: reflect 2-pass 区分 run1 vs run2
+        "inject_reflections": m.inject_reflections,
     }

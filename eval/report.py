@@ -15,8 +15,10 @@ from typing import Any
 
 from eval.metrics import (
     ProviderSummary,
+    ReflectiveUpliftReport,
     aggregate,
     aggregate_by_capability_axis,
+    compute_reflective_uplift,
 )
 from eval.runner import CorpusReport, metric_to_dict
 from eval.types import CapabilityAxis, EvalTask
@@ -49,6 +51,8 @@ def dump_json(
     summaries = aggregate(report.metrics)
     task_axis = {t.task_id: t.capability_axis for t in tasks}
     by_axis = aggregate_by_capability_axis(report.metrics, task_axis)
+    # V0.28.3 W6 收尾: --reflect 跑时 metrics 含 inject_reflections 配对, 加 uplift 报告
+    uplift = compute_reflective_uplift(report.metrics, task_axis)
     payload: dict[str, Any] = {
         "run_id": report.run_id,
         "started_at": round(report.started_at, 2),
@@ -61,9 +65,21 @@ def dump_json(
         "metrics": [metric_to_dict(m) for m in report.metrics],
         "aggregate": {p: _summary_to_dict(s) for p, s in summaries.items()},
         "by_capability_axis": {axis: per_provider for axis, per_provider in by_axis.items()},
+        "reflective_uplift": _uplift_to_dict(uplift),
     }
     out_path.write_text(json.dumps(payload, indent=2, ensure_ascii=False), encoding="utf-8")
     return out_path
+
+
+def _uplift_to_dict(u: ReflectiveUpliftReport) -> dict[str, Any]:
+    """V0.28.3: ReflectiveUpliftReport → JSON dict. 空 (per_task={}) 仍 dump 让 caller
+    能区分 "没跑 reflect" (key 缺) vs "跑了但全 0 配对" (key 在 + 空 dict)."""
+    return {
+        "per_task": u.per_task,
+        "per_axis": {axis: round(v, 3) for axis, v in u.per_axis.items()},
+        "overall": round(u.overall, 3),
+        "reflections_written": u.reflections_written,
+    }
 
 
 def _summary_to_dict(s: ProviderSummary) -> dict[str, Any]:
@@ -125,4 +141,42 @@ def render_capability_axis_markdown(
         per_provider = by_axis[axis]
         cells = [f"{per_provider.get(p, 0.0):.1%}" for p in providers]
         rows.append(f"| {axis} | " + " | ".join(cells) + " |")
+    return "\n".join(rows)
+
+
+def render_reflective_uplift_markdown(
+    report: CorpusReport, tasks: list[EvalTask],
+) -> str:
+    """V0.28.3 W6 收尾: 渲染 reflect 2-pass uplift markdown 表 (--reflect 跑后输出).
+
+    格式:
+    | scope        | uplift   | n配对  |
+    | overall      | +25.0%   | 4     |
+    | iframe       | +50.0%   | 2     |
+    | multi-tab    | 0.0%     | 1     |
+    | (per-task)   | t1: +1, t2: 0 |
+    | reflections_written | 2 / 4 配对 (50.0%) |
+
+    空 metrics / 0 配对 → "(no reflective data — run with --reflect)".
+    axis ≥2 task 才稳信号 (subagent C 提示).
+    """
+    task_axis: dict[str, CapabilityAxis] = {t.task_id: t.capability_axis for t in tasks}
+    uplift = compute_reflective_uplift(report.metrics, task_axis)
+    if not uplift.per_task:
+        return "(no reflective data — run with --reflect)"
+    rows = [
+        "| scope | uplift | notes |",
+        "|-------|--------|-------|",
+        f"| **overall** | {uplift.overall:+.1%} | {len(uplift.per_task)} task 配对 |",
+    ]
+    for axis in sorted(uplift.per_axis.keys()):
+        v = uplift.per_axis[axis]
+        rows.append(f"| {axis} | {v:+.1%} | per-axis (≥2 task 才稳) |")
+    # per-task 散点
+    per_task_str = ", ".join(f"{tid}: {d:+d}" for tid, d in sorted(uplift.per_task.items()))
+    rows.append(f"| per-task | {per_task_str} | -1/0/+1 二元差 |")
+    rows.append(
+        f"| reflections_written | {uplift.reflections_written} / {len(uplift.per_task)} | "
+        "run1 触发反思 task 数 (max_steps + LOOP_DETECTED) |"
+    )
     return "\n".join(rows)

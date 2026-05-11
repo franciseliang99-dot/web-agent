@@ -81,6 +81,7 @@ async def _run_async(args: argparse.Namespace) -> int:
         dump_json,
         render_capability_axis_markdown,
         render_provider_summary_markdown,
+        render_reflective_uplift_markdown,
     )
     from eval.runner import run_corpus
     from web_agent.llm import make_client
@@ -118,11 +119,16 @@ async def _run_async(args: argparse.Namespace) -> int:
     db_path = output_dir / "trace.db"
     shots_dir = output_dir / "screenshots"
 
+    # V0.28.3 W6 收尾: --reflect 触发 2-pass + isolated memory.db 防 Risk #1 跨 task 污染
+    eval_memory_db = output_dir / "eval_memory.db" if args.reflect else None
+
     async with async_playwright() as playwright:
         report = await run_corpus(
             tasks, clients, ALL_PREDICATES,
             db_path=db_path, screenshots_dir=shots_dir,
             chromium_launcher=playwright.chromium,
+            reflect=args.reflect,
+            memory_db_path=eval_memory_db,
         )
 
     # dump JSON + 渲染 markdown
@@ -139,6 +145,9 @@ async def _run_async(args: argparse.Namespace) -> int:
     sys.stdout.write(render_provider_summary_markdown(report) + "\n")
     sys.stdout.write("\n=== 按 capability_axis 分组 ===\n")
     sys.stdout.write(render_capability_axis_markdown(report, tasks) + "\n")
+    if args.reflect:
+        sys.stdout.write("\n=== W6 reflective uplift (V0.28.3 --reflect 2-pass) ===\n")
+        sys.stdout.write(render_reflective_uplift_markdown(report, tasks) + "\n")
     return 0
 
 
@@ -168,6 +177,14 @@ def main() -> None:
     parser.add_argument(
         "--lint-only", action="store_true",
         help="仅跑 lint_corpus_tokens 不跑真 eval (V0.26.1 token-specific 强制检查)",
+    )
+    parser.add_argument(
+        "--reflect", action="store_true",
+        help=(
+            "V0.28.3 W6 收尾: 同 task 跑 2 次 (run1 baseline / run2 inject reflections) 算 "
+            "reflective_uplift = pass2_rate - pass1_rate. **token cost 翻倍** (~$0.4-0.8 单 corpus), "
+            "默关 opt-in. 必须配 isolated memory.db (output_dir/eval_memory.db)."
+        ),
     )
     args = parser.parse_args()
 

@@ -2,6 +2,110 @@
 
 All notable changes to web-agent. 版本号遵循 SemVer 简化形式（V<major>.<minor>.<patch>）。
 
+## [0.28.3] - 2026-05-10
+
+### Add (V0.28 W6 reflective 系列收尾 commit 4/4 — eval --reflect 2-pass + reflective_uplift metric)
+
+V0.28 W6 系列闭环 commit. V0.28.0 reflect.py 纯函数 + V0.28.1 LLMClient.reflect Protocol+loop wire+
+reflections 表 + V0.28.2 cli inject memories_str (W6-B) 之上, 加 eval/runner 验证层: 同 task
+跑 2 次 (run1 baseline / run2 inject reflections), 算 reflective_uplift = pass2_rate - pass1_rate
+(三粒度: per_task / per_axis / overall) 验 W6 整链路真有 lift signal.
+
+### Plan subagent 6 决策点 + 揭关键 Risk #1
+
+- **A 选 Z** (memory.py 抽 build_inject_string helper, cli + eval 共用): 避免 X 复刻双源 stale +
+  Y 走 cli_run_task blast radius 大 (eval 引 browser 真依赖)
+- **B 内部 2-pass** (run_corpus 内 task-by-task 配对): reflections 写表是 task 失败 side effect,
+  必须 task-by-task 顺序两跑保证 run2 只看到自己 run1 的反思 (跨 task 配对会污染)
+- **C 三粒度 uplift** (per_task -1/0/+1 散点 + per_axis 趋势 + overall headline): per_axis ≥2 task
+  才稳信号, 文档化 warning
+- **D --reflect opt-in** (默关 + cost 翻倍警告): 跑 2 次单 corpus ~$0.4-0.8
+- **E mock 策略** (FakeLLMClient + 纯逻辑测): 真跑推迟 V0.27.0 cross-provider 一并
+- **F 真跑推迟** V0.27.0
+
+**Risk #1 关键 (subagent 揭, 主 agent 原 plan 漏)**: reflections 按 **domain** 索引非 task_id,
+两 task 共 domain (e.g. github.com 上 2 task) → task A run1 写的反思 task B run2 也会拉到 → 跨
+task 协变量污染 uplift signal. 修方案: eval/runner.py 用 isolated `output_dir/eval_memory.db`
++ 每 task 跑前调 `clear_reflections()` 清表. **不能** fallback to 主 `data/memory.db` (会写脏
+用户主 db, 重大事故).
+
+### Changed (~430 LOC, V0.26.3 单 commit ~250 先例对齐)
+
+- `src/web_agent/memory.py` +60 行:
+  - `build_inject_string(db_path, domain, *, include_memories=True, include_reflections=True,
+    memories_limit=5, reflections_limit=3) -> str | None` — cli + eval 共用 helper, 抽 V0.28.2
+    cli inline 路径 (recall + format + merge), 任一 recall 失败 silent swallow
+  - `clear_reflections(db_path)` — eval 跨 task 跑前清表防 Risk #1, DB/表不存在 silent
+- `src/web_agent/cli.py` 净 -7 行 (调 helper 替代 inline 9 行, 减重复 + 让 eval 复用同函数):
+  - import 改: 删 recall_by_domain / recall_reflections_by_domain / format_*, 加 build_inject_string
+  - run_task 改: env opt-in (MEMORY_DISABLE / REFLECTIONS_DISABLE) → include_* 布尔, 一行 build_inject_string 调用
+- `eval/runner.py` +50 行:
+  - `TaskMetric` 加 `inject_reflections: bool = False` 字段 (默兼容老 metrics)
+  - `run_one(..., memory_db_path=None, inject_reflections=False)` — inject 时调 build_inject_string
+    构造 memories_str (eval 隔离: include_memories=False 只 inject reflections); 透传 domain +
+    memory_db_path 让 W6-A 写到 isolated db
+  - `run_corpus(..., reflect=False, memory_db_path=None)` — reflect=True → 每 task 清表 + 跑
+    2 次 (run1 inject_reflections=False / run2 inject_reflections=True), task-by-task 配对防 Risk #1
+  - `metric_to_dict` 加 inject_reflections 字段
+- `eval/metrics.py` +75 行:
+  - `ReflectiveUpliftReport` dataclass (per_task / per_axis / overall / reflections_written)
+  - `compute_reflective_uplift(metrics, task_axis) -> ReflectiveUpliftReport`:
+    by (task_id, provider) → {False: m1, True: m2} pair, 算 per_task = int(m2.pass) - int(m1.pass);
+    per_axis = avg(p2_rate) - avg(p1_rate); overall = mean(per_task);
+    reflections_written = sum(m1.failure_bucket in {max_steps, LOOP_DETECTED}) — 透明化假阴性
+- `eval/report.py` +50 行:
+  - `_uplift_to_dict(u)` JSON dump payload 加 `reflective_uplift` key (空 per_task 仍 dump 区分
+    "没跑 reflect" vs "跑了但 0 配对")
+  - `render_reflective_uplift_markdown(report, tasks)` markdown 表 (overall + per-axis + per-task
+    散点 + reflections_written 行); 0 配对 → "(no reflective data — run with --reflect)"
+- `eval/cli.py` +15 行:
+  - 加 `--reflect` flag (action="store_true", help 含 cost 翻倍警告)
+  - args.reflect=True 时 `eval_memory_db = output_dir / "eval_memory.db"` isolated db
+  - 透传 `run_corpus(reflect=args.reflect, memory_db_path=eval_memory_db)`
+  - stdout 渲染 reflective uplift markdown 表 (--reflect 跑后)
+- `tests/test_memory.py` +6 测:
+  - build_inject_string memories_only / reflections_only / both_concatenated / both_disabled_returns_none
+  - clear_reflections deletes_all_rows + db_missing_silent
+- `tests/test_eval_reflective.py` **新建** 6 测:
+  - compute_reflective_uplift per_task / per_axis / overall 4-task 4-pair 矩阵
+  - reflections_written 计数 (failure_bucket 触发集合验)
+  - 缺配对 / 空 metrics 边界
+  - render_reflective_uplift_markdown full + empty no-pairs
+- `tests/test_cli.py` 修 V0.28.2 3 测 (cli refactor 后 monkeypatch helper 不 recall) + 加 1 测
+  (memory_disable env passes False to helper)
+
+### V0.28 W6 系列总闭环 (4/4)
+
+| ver | 状态 | 节点 |
+|-----|------|------|
+| V0.28.0 | ✅ | reflect.py 纯函数 + 16 测 (含 simplify lstrip bug fix 回归测) |
+| V0.28.1 | ✅ | LLMClient.reflect Protocol + loop wire + reflections 表 (E 路径推翻 ABC) |
+| V0.28.2 | ✅ | cli inject reflections via memories_str (A 路径推翻 B) |
+| V0.28.3 | ✅ | 本提交 — eval --reflect 2-pass + reflective_uplift metric (Z 路径 + Risk #1 修) |
+
+### Compatibility
+
+- 老 caller 0 改 — `--reflect` 默关 (老 eval CLI 调用等价); cli.py refactor 用 helper 但行为
+  100% 等价; TaskMetric 加 inject_reflections=False 默兼容老 metrics dict
+- mypy strict 0 (42 src); ruff 0; pytest **592 + 17 skip** (V0.28.2 579+17 → +13 V0.28.3 测
+  [6 memory + 6 eval reflective + 1 cli memory_disable])
+- 真 chromium 15/15 全过 (无新)
+
+### V0.27 + V0.28 累计 subagent 真发现 = 7 处 (本系列 +1)
+
+1. V0.27.2: simplify 发 V0.27.1 设计承诺空头支票 (make_client 漏 kwarg)
+2. V0.27.3: Plan 发 baseline JSON 不在 wheel + D 砍 cli/mcp/jd/list dead flag
+3. V0.27.4: Plan 推 E 路径替代 ABCD 4 同步/异步死路
+4. V0.27.4: simplify 删 MissingSecretError(message=None) YAGNI
+5. V0.27.5: Plan 缩 scope 6→2 + 揭 P1/P2 隐藏 bug
+6. V0.28.0: simplify 发 lstrip('json') 字符集陷阱
+7. V0.28.3: Plan 揭 Risk #1 (reflections by domain 跨 task 污染 + isolated db 必要性)
+
+### Why patch (V0.28.3) 不 minor
+
+- V0.28 主题 (W6 reflective) minor bump 已发生在 V0.28.0; V0.28.1+ patch 累加
+- W6 系列收尾, V0.29+ 进新主题 (W6-C 长 task chain 推 V0.29 独立 milestone)
+
 ## [0.28.2] - 2026-05-10
 
 ### Add (V0.28 W6 reflective 系列 commit 3/4 — cli inject reflections via memories_str, W6-B)

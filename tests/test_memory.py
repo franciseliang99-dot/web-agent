@@ -331,3 +331,85 @@ def test_format_reflections_renders_hint_and_truncates(tmp_path):
     # 长 hint 截到 120
     assert "h" * 120 in out
     assert "h" * 121 not in out
+
+
+# ---------- V0.28.3 W6 收尾: build_inject_string + clear_reflections (cli + eval 共用 helper) ----------
+
+
+def test_build_inject_string_memories_only(tmp_path):
+    """V0.28.3: include_memories=True + include_reflections=False → 只 memories 段."""
+    from web_agent.memory import build_inject_string, record_task
+
+    db = tmp_path / "memory.db"
+    record_task(db, "x.test", "g1", "result1", success=True)
+    out = build_inject_string(db, "x.test", include_memories=True, include_reflections=False)
+    assert out is not None
+    assert "过去在该 domain 跑过" in out
+    assert "失败教训" not in out
+
+
+def test_build_inject_string_reflections_only(tmp_path):
+    """V0.28.3: include_reflections=True + include_memories=False → 只 reflections 段."""
+    from web_agent.memory import build_inject_string, record_reflection
+
+    db = tmp_path / "memory.db"
+    record_reflection(
+        db, task_id="t1", domain="x.test", goal="g", final_result="(max_steps)",
+        root_cause="rc", hint="h",
+    )
+    out = build_inject_string(db, "x.test", include_memories=False, include_reflections=True)
+    assert out is not None
+    assert "失败教训" in out
+    assert "rc → h" in out
+    assert "过去在该 domain 跑过" not in out
+
+
+def test_build_inject_string_both_concatenated(tmp_path):
+    """V0.28.3: 双 True → memories 在前 + reflections 在后 (双 \\n\\n 分隔)."""
+    from web_agent.memory import build_inject_string, record_reflection, record_task
+
+    db = tmp_path / "memory.db"
+    record_task(db, "x.test", "g1", "result1", success=True)
+    record_reflection(db, task_id="t1", domain="x.test", goal="g",
+                      final_result="(max_steps)", root_cause="rc", hint="h")
+    out = build_inject_string(db, "x.test")
+    assert out is not None
+    mem_idx = out.index("过去在该 domain")
+    refl_idx = out.index("失败教训")
+    assert mem_idx < refl_idx, "memories 在前 reflections 在后"
+
+
+def test_build_inject_string_both_disabled_returns_none(tmp_path):
+    """V0.28.3: 双 False / 两 db 都空 → None (caller 可 if-truthy 跳)."""
+    from web_agent.memory import build_inject_string
+
+    db = tmp_path / "memory.db"
+    assert build_inject_string(db, "x.test", include_memories=False, include_reflections=False) is None
+    assert build_inject_string(db, "missing.test") is None  # db 不存在
+
+
+def test_clear_reflections_deletes_all_rows(tmp_path):
+    """V0.28.3 Risk #1 修: eval 跨 task 跑前清 reflections 表防 domain 污染."""
+    from web_agent.memory import (
+        clear_reflections,
+        recall_reflections_by_domain,
+        record_reflection,
+    )
+
+    db = tmp_path / "memory.db"
+    for i in range(3):
+        record_reflection(db, task_id=f"t{i}", domain="x.test",
+                          goal="g", final_result="r", root_cause="rc", hint=f"h{i}")
+    assert len(recall_reflections_by_domain(db, "x.test")) == 3
+
+    clear_reflections(db)
+
+    assert recall_reflections_by_domain(db, "x.test") == []
+
+
+def test_clear_reflections_db_missing_silent(tmp_path):
+    """V0.28.3: db 不存在 → silent (跟 recall 同模式)."""
+    from web_agent.memory import clear_reflections
+
+    db = tmp_path / "nonexistent.db"
+    clear_reflections(db)  # 不抛

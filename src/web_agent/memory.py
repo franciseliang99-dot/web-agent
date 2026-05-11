@@ -240,6 +240,71 @@ def recall_by_domain(
     ]
 
 
+def build_inject_string(
+    db_path: Path,
+    domain: str,
+    *,
+    include_memories: bool = True,
+    include_reflections: bool = True,
+    memories_limit: int = 5,
+    reflections_limit: int = 3,
+) -> str | None:
+    """V0.28.3 W6-B 收尾: cli + eval 共用的 memories + reflections 构造器 (subagent Z 路径).
+
+    抽 cli.py V0.28.2 inline 路径 (recall + format + merge_into_memories) 让 eval/runner.py
+    也能复用. 任一 recall 失败 silent swallow + 返 None (caller 可 if-truthy 跳 inject).
+
+    Args:
+        db_path: memory.db Path
+        domain: extract_domain(start_url) 输出
+        include_memories: opt-in W5-D.2 memories (cli 用 WEB_AGENT_MEMORY_DISABLE env, eval 直传 bool)
+        include_reflections: opt-in W6-B reflections (cli 用 WEB_AGENT_REFLECTIONS_DISABLE env)
+        memories_limit / reflections_limit: 各自 recall limit (cli 默 5/3, eval 可调)
+
+    Returns:
+        memories_str + reflections_str 拼接 (memories 在前, reflections 在后), 都空返 None.
+    """
+    parts: list[str] = []
+    if include_memories:
+        try:
+            mem_entries = recall_by_domain(db_path, domain, limit=memories_limit)
+            mem_str = format_memories_for_trace(mem_entries)
+            if mem_str:
+                parts.append(mem_str)
+        except Exception:
+            pass
+    if include_reflections:
+        try:
+            refl_entries = recall_reflections_by_domain(db_path, domain, limit=reflections_limit)
+            refl_str = format_reflections_for_trace(refl_entries)
+            if refl_str:
+                parts.append(refl_str)
+        except Exception:
+            pass
+    return "\n\n".join(parts) if parts else None
+
+
+def clear_reflections(db_path: Path) -> None:
+    """V0.28.3 eval 隔离: 跨 task 跑前清 reflections 表防 domain 污染 (Risk #1 修).
+
+    Plan subagent 揭关键 bug: reflections 按 **domain** 索引非 task_id, 两 task 共 domain
+    时 task A run1 写的反思会被 task B run2 拉到 → 跨 task 污染 uplift signal. eval/runner.py
+    每 task 跑 2 次前必清表, 保证 run2 只看到自己 run1 的反思.
+
+    DB 不存在 / 表不存在 silent (跟 recall_reflections_by_domain 同模式).
+    """
+    if not db_path.exists():
+        return
+    conn = sqlite3.connect(db_path)
+    try:
+        conn.execute("DELETE FROM reflections")
+        conn.commit()
+    except sqlite3.OperationalError:
+        pass  # reflections 表不存在 (W6-A 失败时才建) — 没数据可清, OK
+    finally:
+        conn.close()
+
+
 def format_reflections_for_trace(
     entries: list[ReflectionEntry],
     hint_trunc: int = 120,

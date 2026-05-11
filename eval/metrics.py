@@ -63,6 +63,83 @@ def aggregate(metrics: list[TaskMetric]) -> dict[str, ProviderSummary]:
     return out
 
 
+@dataclass(frozen=True, slots=True)
+class ReflectiveUpliftReport:
+    """V0.28.3 W6 收尾: --reflect 2-pass 跑后 pass2_rate - pass1_rate uplift 报告.
+
+    三粒度信号 (subagent C 决):
+    - per_task: dict[task_id, int] 取 -1/0/+1 (run2-run1 二元差), 散点诊断哪个 task 真受益
+    - per_axis: dict[CapabilityAxis, float] 中间层趋势 (axis ≥2 task 才稳, 文档化 warning)
+    - overall: float total uplift, headline 写入 JSON top-level
+    - reflections_written: int run1 触发反思 task 数 (透明化假阴性 — 跟 V0.28.1 触发一致)
+    """
+
+    per_task: dict[str, int]
+    per_axis: dict[CapabilityAxis, float]
+    overall: float
+    reflections_written: int
+
+
+def compute_reflective_uplift(
+    metrics: list[TaskMetric], task_axis: dict[str, CapabilityAxis],
+) -> ReflectiveUpliftReport:
+    """V0.28.3 W6 收尾: 算 reflect 2-pass uplift (subagent C 三粒度).
+
+    Args:
+        metrics: run_corpus(reflect=True) 返的 metrics list, 每 task × provider 配 2 条
+            (inject_reflections=False/True)
+        task_axis: task_id → CapabilityAxis 反查 (跟 aggregate_by_capability_axis 同)
+
+    Returns:
+        ReflectiveUpliftReport — 空 metrics / 缺配对 → per_task={}/per_axis={}/overall=0.0/reflections_written=0
+    """
+    # group by (task_id, provider) → {False: m1, True: m2}
+    by_pair: dict[tuple[str, str], dict[bool, TaskMetric]] = {}
+    for m in metrics:
+        key = (m.task_id, m.provider)
+        by_pair.setdefault(key, {})[m.inject_reflections] = m
+
+    per_task: dict[str, int] = {}
+    per_axis_pass1: dict[CapabilityAxis, list[int]] = {}
+    per_axis_pass2: dict[CapabilityAxis, list[int]] = {}
+    reflections_written = 0
+    for (task_id, _provider), pair in by_pair.items():
+        m1 = pair.get(False)
+        m2 = pair.get(True)
+        if m1 is None or m2 is None:
+            continue  # 缺配对 (e.g. 老 metrics 不带 inject_reflections), 跳过
+        # per_task 二元差: run2 pass - run1 pass ∈ {-1, 0, +1}
+        per_task[task_id] = int(m2.pass_) - int(m1.pass_)
+        # per_axis 累加 task 维 pass count
+        axis = task_axis.get(task_id)
+        if axis is not None:
+            per_axis_pass1.setdefault(axis, []).append(int(m1.pass_))
+            per_axis_pass2.setdefault(axis, []).append(int(m2.pass_))
+        # run1 失败且 W6-A 触发了反思 (m2 看到 inject 不空 — 但本层无法判) →
+        # 简化判: m1 failure_bucket in {max_steps, LOOP_DETECTED} 跟 reflect.should_reflect 对齐
+        if not m1.pass_ and m1.failure_bucket in ("max_steps", "LOOP_DETECTED"):
+            reflections_written += 1
+
+    per_axis: dict[CapabilityAxis, float] = {}
+    for axis, p1_list in per_axis_pass1.items():
+        p2_list = per_axis_pass2.get(axis, [])
+        if not p1_list or len(p1_list) != len(p2_list):
+            continue
+        rate1 = sum(p1_list) / len(p1_list)
+        rate2 = sum(p2_list) / len(p2_list)
+        per_axis[axis] = rate2 - rate1
+
+    # overall: total uplift (sum of per_task 差) / 配对总数
+    overall = sum(per_task.values()) / len(per_task) if per_task else 0.0
+
+    return ReflectiveUpliftReport(
+        per_task=per_task,
+        per_axis=per_axis,
+        overall=overall,
+        reflections_written=reflections_written,
+    )
+
+
 def aggregate_by_capability_axis(
     metrics: list[TaskMetric], task_axis: dict[str, CapabilityAxis],
 ) -> dict[CapabilityAxis, dict[str, float]]:
