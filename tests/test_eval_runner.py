@@ -544,3 +544,73 @@ def test_wikipedia_corpus_filtered_when_no_live_net_env(monkeypatch):
     assert "v030-wikipedia-quantum-entanglement" not in out_ids, (
         "V0.30.2 wikipedia task 默应被 LIVE_NET filter 跳"
     )
+
+
+# ---------- V0.30.3 D real-world: vcr 真接 (修 #11 silent bug) ----------
+
+
+def test_get_eval_vcr_config_record_mode_param():
+    """V0.30.3: _get_eval_vcr_config 接 record_mode kwarg + 默 'once'."""
+    from eval.runner import _get_eval_vcr_config
+
+    cfg_default = _get_eval_vcr_config()
+    assert cfg_default["record_mode"] == "once"
+
+    cfg_strict = _get_eval_vcr_config(record_mode="none")
+    assert cfg_strict["record_mode"] == "none"
+
+
+def test_get_eval_vcr_config_allows_playback_repeats():
+    """V0.30.3 R4 修: allow_playback_repeats=True 让 flaky_repeat=N 复用同 cassette N 次."""
+    from eval.runner import _get_eval_vcr_config
+
+    cfg = _get_eval_vcr_config()
+    assert cfg["allow_playback_repeats"] is True
+
+
+def test_resolve_cassette_path_per_provider():
+    """V0.30.3: cassette path = eval/cassettes/real_world/{task_id}_{provider}.yaml (per-provider)."""
+    from eval.runner import _resolve_cassette_path
+    from eval.types import EvalTask
+
+    t = EvalTask(
+        task_id="v030-test", goal="g", fixture_url="https://x.test/",
+        capability_axis="real-world", expected_step_range=(1, 3),
+        requires_real_net=True,
+    )
+    p_anthropic = _resolve_cassette_path(t, "anthropic")
+    p_openai = _resolve_cassette_path(t, "openai")
+    assert p_anthropic.name == "v030-test_anthropic.yaml"
+    assert p_openai.name == "v030-test_openai.yaml"
+    assert "cassettes/real_world" in str(p_anthropic)
+
+
+def test_resolve_record_mode_strict_replay_default(monkeypatch):
+    """V0.30.3: env 未设 → 'none' (严回放, cassette 缺则 raise)."""
+    from eval.runner import _resolve_record_mode
+
+    monkeypatch.delenv("WEB_AGENT_EVAL_REAL", raising=False)
+    monkeypatch.delenv("WEB_AGENT_EVAL_LIVE_NET", raising=False)
+    assert _resolve_record_mode() == "none"
+
+
+def test_resolve_record_mode_once_when_both_env_set(monkeypatch):
+    """V0.30.3: EVAL_REAL=1 + EVAL_LIVE_NET=1 → 'once' (真录)."""
+    from eval.runner import _resolve_record_mode
+
+    monkeypatch.setenv("WEB_AGENT_EVAL_REAL", "1")
+    monkeypatch.setenv("WEB_AGENT_EVAL_LIVE_NET", "1")
+    assert _resolve_record_mode() == "once"
+
+
+def test_resolve_record_mode_strict_when_only_one_env_set(monkeypatch):
+    """V0.30.3: 只 EVAL_REAL 或只 LIVE_NET 设 → 'none' (双 env 必须一起设才录)."""
+    from eval.runner import _resolve_record_mode
+
+    monkeypatch.setenv("WEB_AGENT_EVAL_REAL", "1")
+    monkeypatch.delenv("WEB_AGENT_EVAL_LIVE_NET", raising=False)
+    assert _resolve_record_mode() == "none"
+
+    monkeypatch.delenv("WEB_AGENT_EVAL_REAL", raising=False)
+    monkeypatch.setenv("WEB_AGENT_EVAL_LIVE_NET", "1")
+    assert _resolve_record_mode() == "none"

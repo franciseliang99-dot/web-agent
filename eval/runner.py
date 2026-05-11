@@ -129,6 +129,23 @@ async def run_one(
     # V0.29.4 W6-C 收尾: chain task 走 run_chain 分支 (eval/runner 检测 task.chain_spec).
     # subagent 决: 内部 if 分支复用 run_one (TaskMetric 字段够覆盖, chain_node_pass_rate 默 None).
     chain_node_pass_rate: float | None = None
+    # V0.30.3 D real-world: requires_real_net=True task 真接 vcr.use_cassette 包 LLM HTTP call.
+    # 修 V0.26.x silent bug #11 (eval/runner 没真接 vcr, V0.26.4 baseline 全真烧 token vcr_replay
+    # 总 False). chromium WebSocket CDP 不被 vcr 拦 (走 ws://, vcrpy 仅 hook httpx). 老 data:html
+    # task 不接 vcr (无 overhead).
+    import vcr  # lazy import 防 vcrpy lib not in prod 时 import error
+    cassette_ctx: Any
+    if task.requires_real_net:
+        cassette_path = _resolve_cassette_path(task, client.name)
+        cassette_path.parent.mkdir(parents=True, exist_ok=True)
+        cassette_ctx = vcr.use_cassette(
+            str(cassette_path), **_get_eval_vcr_config(record_mode=_resolve_record_mode()),
+        )
+    else:
+        # 非 requires_real_net: 用 nullcontext 不接 vcr (老 data:html task 0 overhead)
+        from contextlib import nullcontext
+        cassette_ctx = nullcontext()
+
     try:
         browser = await chromium_launcher.launch(headless=True, args=["--no-sandbox"])
         try:
@@ -136,23 +153,27 @@ async def run_one(
             page = await ctx.new_page()
             await page.goto(task.fixture_url)
             await page.wait_for_load_state("domcontentloaded", timeout=5000)
-            if task.chain_spec is not None:
-                # V0.29.4: chain task — 复用 ctx 跨 node 接力 (Chrome 当前 tab 不重 goto)
-                final_result, chain_node_pass_rate = await _run_chain_branch(
-                    task, client, ctx,
-                    db_path=db_path, screenshots_dir=screenshots_dir,
-                    memories=memories_str, domain=eval_domain, memory_db_path=memory_db_path,
-                )
-            else:
-                final_result = await run_react_loop(
-                    ctx=ctx, client=client, goal=task.goal,
-                    max_steps=task.max_steps,
-                    max_wallclock_s=task.max_wallclock_s,
-                    db_path=db_path, screenshots_dir=screenshots_dir,
-                    memories=memories_str,
-                    domain=eval_domain,
-                    memory_db_path=memory_db_path,  # W6-A reflect 写入路径
-                )
+            # V0.30.3: vcr ctx wrap LLM call (run_react_loop 内 client.plan() 走 httpx → vcr 拦).
+            # nullcontext for non-real-net task (0 overhead 老 data:html). chromium WebSocket CDP
+            # 不被 vcr 拦 (走 ws://, vcrpy 仅 hook httpx) — vcr 仅录 LLM 不录 chromium.
+            with cassette_ctx:
+                if task.chain_spec is not None:
+                    # V0.29.4: chain task — 复用 ctx 跨 node 接力 (Chrome 当前 tab 不重 goto)
+                    final_result, chain_node_pass_rate = await _run_chain_branch(
+                        task, client, ctx,
+                        db_path=db_path, screenshots_dir=screenshots_dir,
+                        memories=memories_str, domain=eval_domain, memory_db_path=memory_db_path,
+                    )
+                else:
+                    final_result = await run_react_loop(
+                        ctx=ctx, client=client, goal=task.goal,
+                        max_steps=task.max_steps,
+                        max_wallclock_s=task.max_wallclock_s,
+                        db_path=db_path, screenshots_dir=screenshots_dir,
+                        memories=memories_str,
+                        domain=eval_domain,
+                        memory_db_path=memory_db_path,  # W6-A reflect 写入路径
+                    )
             # 从 trace.db 拿 web_agent_task_id (run_react_loop 内 uuid 生成的, 不返出来)
             web_agent_task_id = _last_task_id(db_path)
         finally:
@@ -275,21 +296,48 @@ _VCR_FILTER_QUERY_PARAMETERS: tuple[tuple[str, str], ...] = (
 )
 
 
-def _get_eval_vcr_config() -> dict[str, Any]:
-    """V0.30.1 D real-world: vcr config — filter LLM key 防泄漏 + record_mode once.
+def _get_eval_vcr_config(record_mode: str = "once") -> dict[str, Any]:
+    """V0.30.1 D real-world: vcr config — filter LLM key 防泄漏 + record_mode 可调.
 
     11 项 redact 共享 _VCR_FILTER_HEADERS (tests/conftest.py vcr_config 也 import 此元组单源).
     cassette dir 由 caller 传, runner 用 vcr.use_cassette(path, **config) 包 LLM call 段
     防 chromium WebSocket.
 
-    record_mode "once": 已有 cassette 重放, 否则录制后写盘 (跟 conftest 一致). EVAL_REAL=1
-    + EVAL_LIVE_NET=1 真录, 默回放 (cassette 不在则 raise — caller 决定 fallback).
+    Args:
+        record_mode: V0.30.3 加可调 — "once" 默 (有 cassette 重放, 无则录), "none" 严格回放
+            (cassette 缺则 raise CannotOverwriteExistingCassetteException).
+
+    V0.30.3 R4 修: `allow_playback_repeats=True` 让 flaky_repeat=N 复用同 cassette N 次回放
+    (默 vcr 单次回放, second repeat 抛 CannotOverwriteExistingCassette).
     """
     return {
         "filter_headers": list(_VCR_FILTER_HEADERS),
         "filter_query_parameters": list(_VCR_FILTER_QUERY_PARAMETERS),
-        "record_mode": "once",
+        "record_mode": record_mode,
+        "allow_playback_repeats": True,
     }
+
+
+def _resolve_cassette_path(task: EvalTask, provider: str) -> Path:
+    """V0.30.3 D real-world: cassette 路径 — eval/cassettes/real_world/{task_id}_{provider}.yaml.
+
+    per-provider 因 anthropic/openai 请求差异. V0.30.4 加 model fingerprint 防同 provider 不同
+    model cassette 碰撞 (subagent R2).
+    """
+    return Path(__file__).parent / "cassettes" / "real_world" / f"{task.task_id}_{provider}.yaml"
+
+
+def _resolve_record_mode() -> str:
+    """V0.30.3 D real-world: 由 env 决 vcr record_mode (subagent D 决).
+
+    EVAL_REAL=1 + EVAL_LIVE_NET=1 → "once" (真录, cassette 不存在则录新)
+    其余 → "none" (严回放, cassette 缺则 raise → run_one except → EVAL_INFRA_ERROR)
+    """
+    import os
+    if (os.environ.get("WEB_AGENT_EVAL_REAL", "") == "1"
+            and os.environ.get("WEB_AGENT_EVAL_LIVE_NET", "") == "1"):
+        return "once"
+    return "none"
 
 
 async def run_corpus(

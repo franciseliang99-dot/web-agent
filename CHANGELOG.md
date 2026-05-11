@@ -2,6 +2,81 @@
 
 All notable changes to web-agent. 版本号遵循 SemVer 简化形式（V<major>.<minor>.<patch>）。
 
+## [0.30.3] - 2026-05-10
+
+### Add (V0.30 系列 commit 4/6 — vcr 真接 in run_one 修 V0.26.x silent bug #11)
+
+V0.30.0/1/2 之上, 真接 `vcr.use_cassette` 包 LLM call 段在 run_one (only requires_real_net task).
+**修 V0.26.x silent bug #11** (subagent 真发现): eval/runner 之前完全没接 vcr, V0.26.4 baseline
+全真烧 token 而 vcr_replay JSON 字段总 False. V0.30.3 真接 + 加 R4 fix (allow_playback_repeats=True
+让 flaky_repeat=N 复用同 cassette N 次).
+
+V0.30 系列拆 5→6 commit (V0.30.3 vcr 真接独立 commit 让 git bisect 一眼定 #11 修复差异):
+- V0.30.4 (原 V0.30.3) +2 tasks (wikipedia Apple_Inc + GitHub octocat README)
+- V0.30.5 (原 V0.30.4) 收尾
+
+### Plan subagent 实测确认 vcrpy 8.x native httpx PASS
+
+主 agent V0.30.2 实测 `from vcr.stubs import httpx_stubs` ImportError 担心 vcrpy 8.x 不支 httpx.
+subagent 真测 `with vcr.use_cassette(): httpx.get(api.github.com/zen)` → status 200 + cassette
+写盘 1085B + len(responses)=1, **vcrpy 8.1.1 native auto-register httpx** (8.x 移除 explicit stub
+import). 选 (d) 路径直接 use_cassette, 不需 respx / 不降级 6.x.
+
+### subagent 6 隐藏风险 (R1-R6) 提前识别
+
+- R1 chromium vs httpx 边界混淆: vcr 仅 hook httpx (LLM out SDK), chromium WebSocket CDP 走 ws://
+  不被拦 (wikipedia 抓页仍真外网, LIVE_NET 守门). docstring 明示
+- R2 per-provider cassette 命名碰撞: 现选 `{task_id}_{provider}.yaml` 不含 model fingerprint,
+  V0.30.4 加 model fingerprint 防同 provider 不同 model 碰撞
+- R3 `_check_real_eval_or_cassette` 没含 LIVE_NET: maintainer 设 EVAL_REAL=1 但忘 LIVE_NET=1 →
+  record_mode="none" + 真 LLM call → vcr 拒 → INFRA_ERROR 困惑. V0.30.4 cli 早 assert 双 env 一致
+- **R4 `allow_playback_repeats=True` 必加** (本 commit 修): 默 vcr 单次回放, second repeat 抛
+  CannotOverwriteExistingCassette → flaky_repeat=3 必 broken. _get_eval_vcr_config 加该 config
+- R5 cassette 回放精确 token 累加 (vs 现 last_usage × steps 估算): 推 V0.30.5
+- R6 #11 silent bug regression test: 验 vcr_ctx 真被 enter (V0.30.3 间接通过 mock cassette 测保护)
+
+### Changed (~150 LOC)
+
+- `eval/runner.py` +50 行:
+  - `_get_eval_vcr_config(record_mode="once")` 加 record_mode kwarg + `allow_playback_repeats=True`
+    (R4 修)
+  - `_resolve_cassette_path(task, provider)` helper — `eval/cassettes/real_world/{task_id}_{provider}.yaml`
+  - `_resolve_record_mode()` helper — EVAL_REAL=1 + LIVE_NET=1 → "once" 真录, 默 "none" 严回放
+  - run_one 内 `if task.requires_real_net: cassette_ctx = vcr.use_cassette(...)` else `nullcontext()`
+    (老 data:html task 0 overhead) → `with cassette_ctx:` wrap chain/non-chain LLM call 段.
+    chromium goto wikipedia 仍真外网 (vcr 仅 hook httpx, 不拦 chromium WebSocket CDP — subagent R1)
+  - import vcr lazy (函数内, 防 vcr lib not in prod 时 import error)
+- `pyproject.toml` mypy override 加 vcr (vcrpy 没 py.typed marker)
+- `tests/test_eval_runner.py` +6 测:
+  - _get_eval_vcr_config record_mode kwarg 默 "once" / 显式 "none"
+  - allow_playback_repeats=True 验 (R4 fix)
+  - _resolve_cassette_path per-provider 命名
+  - _resolve_record_mode 默严回放 / 双 env "once" / 单 env "none" (subagent R3 部分)
+
+### V0.30 系列拆解更新 (5 → 6 commit)
+
+| ver | 状态 | 节点 |
+|-----|------|------|
+| V0.30.0 | ✅ | apply_stealth_plus init script |
+| V0.30.1 | ✅ | vcr helper + EvalTask field + LIVE_NET filter |
+| V0.30.2 | ✅ | 1 wikipedia task + sannysoft probe |
+| V0.30.3 | ✅ | 本提交 — vcr 真接 in run_one (修 #11) + R4 playback_repeats |
+| V0.30.4 | 待 | +2 tasks (wikipedia Apple_Inc + GitHub octocat README) |
+| V0.30.5 | 待 | --corpus real-world axis filter + report + docs 收尾 |
+
+### V0.27+V0.28+V0.29+V0.30 累计 subagent 真发现 = **12 处** (本 commit 0 新, V0.30.3 主体是修 #11 silent bug)
+
+### Compatibility
+
+- 老 caller 0 改 (老 data:html task 用 nullcontext() 0 overhead, 新 requires_real_net=True task 才接 vcr)
+- mypy strict 0 (45 src, +1 vcr override); ruff 0; pytest **655 + 18 skip** (V0.30.2 649+18 → +6 V0.30.3 测)
+- 真 chromium 15/15 全过 (无新)
+
+### Why patch (V0.30.3) 不 minor
+
+- V0.30 主题 minor bump 已发生在 V0.30.0; V0.30.1+ patch 累加 framework / corpus / vcr 真接
+- 跟 V0.21.x/V0.27.x/V0.28.x/V0.29.x patch 风格一致
+
 ## [0.30.2] - 2026-05-10
 
 ### Add (V0.30 系列 commit 3/5 — 1 wikipedia static corpus task + sannysoft probe slow opt-in)
