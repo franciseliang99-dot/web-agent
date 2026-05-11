@@ -215,17 +215,20 @@ def test_trace_obs_contains_not_matched_hints_v024_helper():
 # --- V0.26.1 corpus 完整性 + token-specific lint ---
 
 
-def test_corpus_has_10_tasks_covering_v021_v025():
-    """V0.26.1: corpus 共 10 task (含 baseline + cross-feature). drop retry/backtrack 推迟 V0.26.3."""
+def test_corpus_has_11_tasks_covering_v021_v029():
+    """V0.26.1+V0.29.4: corpus 共 11 task (V0.26.1 10 + V0.29.4 1 chain). drop retry/backtrack 推迟 V0.26.3."""
     from eval.corpus import ALL_TASKS
-    assert len(ALL_TASKS) == 10
+    assert len(ALL_TASKS) == 11
     axes = {t.capability_axis for t in ALL_TASKS}
     expected = {
         "baseline", "multi-tab", "iframe", "drag", "upload",
         "download", "dialog", "keyboard-nav", "failure-recovery",
     }
     missing = expected - axes
-    assert not missing, f"V0.26.1 corpus 缺 capability_axis: {missing}"
+    assert not missing, f"corpus 缺 capability_axis: {missing}"
+    # V0.29.4 W6-C: 至少 1 chain task (含 chain_spec field)
+    chain_tasks = [t for t in ALL_TASKS if t.chain_spec is not None]
+    assert len(chain_tasks) >= 1, "V0.29.4 加 1 chain task (CHAIN_REVEAL_2NODE)"
 
 
 def test_all_tasks_have_predicate_binding():
@@ -306,3 +309,71 @@ async def test_run_one_infra_error_returns_metric(monkeypatch):
     assert metric.pass_ is False
     assert metric.failure_bucket == "EVAL_INFRA_ERROR"
     assert "chromium binary missing" in metric.final_result
+
+
+# ---------- V0.29.4 W6-C: chain task dispatch + TaskMetric 字段 ----------
+
+
+def test_eval_task_chain_spec_field_default_none():
+    """V0.29.4: EvalTask 默 chain_spec=None (backward-compat, 老 task 不动)."""
+    from eval.types import EvalTask
+
+    t = EvalTask(
+        task_id="t", goal="g", fixture_url="data:text/html,<h1>x</h1>",
+        capability_axis="baseline", expected_step_range=(1, 3),
+    )
+    assert t.chain_spec is None
+
+
+def test_task_metric_chain_node_pass_rate_default_none():
+    """V0.29.4: TaskMetric 默 chain_node_pass_rate=None (非 chain task)."""
+    from eval.predicates import PredicateResult
+    from eval.runner import TaskMetric
+
+    m = TaskMetric(
+        task_id="t", provider="anthropic", run_id="r",
+        pass_=True, failure_bucket="OK",
+        steps=1, wallclock_s=1.0, web_agent_task_id="x",
+        final_result="r",
+        predicate_result=PredicateResult(matched=True, reason="r", name="N"),
+    )
+    assert m.chain_node_pass_rate is None
+
+
+def test_metric_to_dict_includes_chain_node_pass_rate():
+    """V0.29.4: metric_to_dict 加 chain_node_pass_rate 字段 (默 None 序列化为 null)."""
+    from eval.predicates import PredicateResult
+    from eval.runner import TaskMetric, metric_to_dict
+
+    m = TaskMetric(
+        task_id="t", provider="anthropic", run_id="r",
+        pass_=True, failure_bucket="OK",
+        steps=1, wallclock_s=1.0, web_agent_task_id="x",
+        final_result="r",
+        predicate_result=PredicateResult(matched=True, reason="r", name="N"),
+        chain_node_pass_rate=0.5,
+    )
+    d = metric_to_dict(m)
+    assert d["chain_node_pass_rate"] == 0.5
+    # default None task
+    m2 = TaskMetric(
+        task_id="t2", provider="a", run_id="r",
+        pass_=True, failure_bucket="OK", steps=1, wallclock_s=1.0,
+        web_agent_task_id="x", final_result="r",
+        predicate_result=PredicateResult(matched=True, reason="r", name="N"),
+    )
+    assert metric_to_dict(m2)["chain_node_pass_rate"] is None
+
+
+def test_chain_corpus_task_loaded_with_chain_spec():
+    """V0.29.4: eval.corpus.v029_chain.CHAIN_REVEAL_2NODE 含 chain_spec 2 node + predicate 绑."""
+    from eval.corpus import ALL_PREDICATES
+    from eval.corpus.v029_chain import CHAIN_REVEAL_2NODE
+
+    assert CHAIN_REVEAL_2NODE.chain_spec is not None
+    assert len(CHAIN_REVEAL_2NODE.chain_spec.nodes) == 2
+    assert CHAIN_REVEAL_2NODE.chain_spec.nodes[0].id == "a"
+    assert CHAIN_REVEAL_2NODE.chain_spec.nodes[1].id == "b"
+    assert CHAIN_REVEAL_2NODE.chain_spec.nodes[1].depends_on == ("a",)
+    # predicate 绑入 ALL_PREDICATES
+    assert CHAIN_REVEAL_2NODE.task_id in ALL_PREDICATES

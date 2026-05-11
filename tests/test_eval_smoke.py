@@ -49,9 +49,9 @@ def test_parse_providers_skip_empty():
 
 
 def test_select_tasks_all_returns_full_corpus():
-    """V0.26.3: --corpus all → 全 10 task (V0.26.1 corpus 充实结果)."""
+    """V0.26.3+V0.29.4: --corpus all → 全 11 task (V0.26.1 10 + V0.29.4 1 chain)."""
     tasks = _select_tasks("all")
-    assert len(tasks) == 10
+    assert len(tasks) == 11
 
 
 def test_select_tasks_axis_filter():

@@ -48,6 +48,8 @@ class TaskMetric:
     output_cost_usd: float = 0.0
     # V0.28.3 W6 收尾: reflect 2-pass 时区分 run1 (False) vs run2 (True)
     inject_reflections: bool = False
+    # V0.29.4 W6-C 收尾: chain task 时 = completed_nodes/total_nodes (默 None = 非 chain task)
+    chain_node_pass_rate: float | None = None
 
 
 # V0.26.0: failure_bucket 复用 memory.py FAILURE_MARKERS + 加 4 类 eval 专属
@@ -121,6 +123,9 @@ async def run_one(
             include_reflections=True,
         )
 
+    # V0.29.4 W6-C 收尾: chain task 走 run_chain 分支 (eval/runner 检测 task.chain_spec).
+    # subagent 决: 内部 if 分支复用 run_one (TaskMetric 字段够覆盖, chain_node_pass_rate 默 None).
+    chain_node_pass_rate: float | None = None
     try:
         browser = await chromium_launcher.launch(headless=True, args=["--no-sandbox"])
         try:
@@ -128,15 +133,23 @@ async def run_one(
             page = await ctx.new_page()
             await page.goto(task.fixture_url)
             await page.wait_for_load_state("domcontentloaded", timeout=5000)
-            final_result = await run_react_loop(
-                ctx=ctx, client=client, goal=task.goal,
-                max_steps=task.max_steps,
-                max_wallclock_s=task.max_wallclock_s,
-                db_path=db_path, screenshots_dir=screenshots_dir,
-                memories=memories_str,
-                domain=eval_domain,
-                memory_db_path=memory_db_path,  # W6-A reflect 写入路径
-            )
+            if task.chain_spec is not None:
+                # V0.29.4: chain task — 复用 ctx 跨 node 接力 (Chrome 当前 tab 不重 goto)
+                final_result, chain_node_pass_rate = await _run_chain_branch(
+                    task, client, ctx,
+                    db_path=db_path, screenshots_dir=screenshots_dir,
+                    memories=memories_str, domain=eval_domain, memory_db_path=memory_db_path,
+                )
+            else:
+                final_result = await run_react_loop(
+                    ctx=ctx, client=client, goal=task.goal,
+                    max_steps=task.max_steps,
+                    max_wallclock_s=task.max_wallclock_s,
+                    db_path=db_path, screenshots_dir=screenshots_dir,
+                    memories=memories_str,
+                    domain=eval_domain,
+                    memory_db_path=memory_db_path,  # W6-A reflect 写入路径
+                )
             # 从 trace.db 拿 web_agent_task_id (run_react_loop 内 uuid 生成的, 不返出来)
             web_agent_task_id = _last_task_id(db_path)
         finally:
@@ -179,7 +192,52 @@ async def run_one(
         input_cost_usd=in_cost,
         output_cost_usd=out_cost,
         inject_reflections=inject_reflections,
+        chain_node_pass_rate=chain_node_pass_rate,
     )
+
+
+async def _run_chain_branch(
+    task: EvalTask,
+    client: LLMClient,
+    ctx: Any,
+    *,
+    db_path: Path,
+    screenshots_dir: Path,
+    memories: str | None = None,
+    domain: str = "",
+    memory_db_path: Path | None = None,
+) -> tuple[str, float]:
+    """V0.29.4 W6-C: eval chain task 跑 run_chain 分支 helper (run_one 内 dispatch).
+
+    DI run_task_fn 闭包包 run_react_loop, 跨 node 复用 ctx (Chrome 当前 tab 接力, 不重 goto).
+    返 (final_result_summary, node_pass_rate). final_result 拼 chain_id + completed + 末 node result
+    raw 让 SubstringPredicate 直接命中 (subagent G 决, 不包装层).
+    """
+    from web_agent.chain import run_chain
+
+    assert task.chain_spec is not None  # caller 已 check
+
+    async def _eval_run_task_fn(*, goal: str, max_wallclock_s: float | None = None, **_: object) -> str:
+        # V0.29.4: 跨 node 复用 ctx (无 fresh page.goto), max_wallclock_s 由 chain runner remaining cap
+        return await run_react_loop(
+            ctx=ctx, client=client, goal=goal,
+            max_steps=task.max_steps, max_wallclock_s=max_wallclock_s or task.max_wallclock_s,
+            db_path=db_path, screenshots_dir=screenshots_dir,
+            memories=memories, domain=domain, memory_db_path=memory_db_path,
+        )
+
+    chain_result = await run_chain(
+        task.chain_spec, _eval_run_task_fn,
+        max_total_wallclock_s=task.max_wallclock_s,  # 整 chain cap = task max_wallclock
+    )
+
+    # subagent G: chain summary 拼末 node result raw 让 predicate substring 命中
+    n_total = len(chain_result.node_results)
+    n_ok = sum(1 for nr in chain_result.node_results if nr.success)
+    last_result = chain_result.node_results[-1].result if chain_result.node_results else "(empty chain)"
+    summary = f"chain {chain_result.chain_id}: {n_ok}/{n_total} OK; final={last_result}"
+    pass_rate = n_ok / n_total if n_total > 0 else 0.0
+    return summary, pass_rate
 
 
 @dataclass(frozen=True, slots=True)
@@ -322,4 +380,6 @@ def metric_to_dict(m: TaskMetric) -> dict[str, Any]:
         "output_cost_usd": round(m.output_cost_usd, 6),
         # V0.28.3 W6 收尾: reflect 2-pass 区分 run1 vs run2
         "inject_reflections": m.inject_reflections,
+        # V0.29.4 W6-C 收尾: chain task 时 = completed_nodes/total_nodes, 非 chain → null
+        "chain_node_pass_rate": m.chain_node_pass_rate,
     }

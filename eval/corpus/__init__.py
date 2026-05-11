@@ -34,6 +34,7 @@ from eval.corpus.v025_recovery import (
     FAILURE_RECOVERY_FIND_VALID_BUTTON,
     RECOVERY_PREDICATES,
 )
+from eval.corpus.v029_chain import CHAIN_PREDICATES, CHAIN_REVEAL_2NODE
 from eval.predicates import Predicate, SubstringPredicate
 from eval.types import EvalTask
 
@@ -71,6 +72,7 @@ ALL_TASKS: list[EvalTask] = [
     KEYBOARD_NAV_PAGEDOWN,
     FAILURE_RECOVERY_FIND_VALID_BUTTON,
     POPUP_WITH_IFRAME_CLICK,
+    CHAIN_REVEAL_2NODE,  # V0.29.4 W6-C 收尾: chain task (eval --chain pipeline 验)
 ]
 
 # 合并所有 predicate 到单 dict (runner 反查用). 各子 dict value 类型 mypy 默认推断为
@@ -84,6 +86,7 @@ for _sub_dict in (
     DIALOG_KEYBOARD_PREDICATES,
     RECOVERY_PREDICATES,
     CROSS_FEATURE_PREDICATES,
+    CHAIN_PREDICATES,  # V0.29.4 W6-C
 ):
     ALL_PREDICATES.update(_sub_dict)
 

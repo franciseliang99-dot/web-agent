@@ -3,7 +3,10 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Literal
+from typing import TYPE_CHECKING, Literal
+
+if TYPE_CHECKING:
+    from web_agent.chain import ChainSpec
 
 # V0.26.0: capability axis 用 Literal 跟 V0.17.0 Action union discriminated 同档,
 # mypy strict 自动 narrow, 加新轴改 1 处不引依赖. enum 在 dataclass JSON 序列化
@@ -43,3 +46,6 @@ class EvalTask:
     max_wallclock_s: float = 60.0
     description: str = ""  # 给 eval 报告 + replay 面板用的 1 句话说明
     tags: tuple[str, ...] = field(default_factory=tuple)  # 自由 tag (e.g. "stripe", "github")
+    # V0.29.4 W6-C 收尾验证: chain task 字段. None = 单 task 老路径; ChainSpec → eval/runner.run_one
+    # 走 run_chain 分支. fixture_url 是 chain 起点 (page.goto 一次), 跨 node 接力 cdp 当前 tab.
+    chain_spec: "ChainSpec | None" = None

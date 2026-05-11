@@ -2,6 +2,69 @@
 
 All notable changes to web-agent. 版本号遵循 SemVer 简化形式（V<major>.<minor>.<patch>）。
 
+## [0.29.4] - 2026-05-10
+
+### Add (V0.29 W6-C 收尾 commit 5/5 — eval --chain dispatch + 1 chain corpus + chain_node_pass_rate)
+
+V0.29.3 simplify refactor 占用 V0.29.3 槽 (cff42da `_make_safety_cb` helper), 原 V0.29.3 eval
+集成顺延 V0.29.4. W6-C 系列闭环 — eval/runner.run_one 接 chain dispatch + 1 chain corpus task
++ TaskMetric 加 chain_node_pass_rate.
+
+### Plan subagent 7 决策点全采纳
+
+- **A** EvalTask 加 `chain_spec: ChainSpec | None = None` 字段 (拒 sum type)
+- **B** 共享 fixture_url (chain 起点 page.goto, 跨 node 接力 cdp 当前 tab)
+- **C** run_one 内 if 分支 + 抽 `_run_chain_branch` helper
+- **D** 复用 ProviderSummary.pass_rate + TaskMetric 加 `chain_node_pass_rate: float | None = None`
+- **E** Synthetic 1 chain task `v029-chain-reveal-2node` (V0.29.5 加 max_steps trigger 验污染)
+- **F** V0.29.4 不主动验 reflection 跨 node 污染, 但 chain 路径接 inject_reflections kwarg 留通道
+- **G** chain summary str 拼末 node result raw 让 SubstringPredicate 直接命中
+
+### Changed (~250 LOC)
+
+- `eval/types.py` +5 行: EvalTask 加 `chain_spec` 字段 (TYPE_CHECKING 防循环)
+- `eval/runner.py` +60 行: TaskMetric 加 `chain_node_pass_rate` + run_one if 分支 + `_run_chain_branch`
+  helper (闭包包 run_react_loop 跨 node 复用 ctx, 不重 page.goto) + metric_to_dict 加字段 +
+  EVAL_INFRA_ERROR 路径透传 inject_reflections (修 V0.28.3 漏)
+- `eval/corpus/_fixtures.py` +12 行: TOKEN_CHAIN_FINAL_REVEAL + URL_CHAIN_REVEAL fixture
+- `eval/corpus/v029_chain.py` **新建** ~50 行: CHAIN_REVEAL_2NODE EvalTask + chain_spec 2 node +
+  CHAIN_PREDICATES SubstringPredicate
+- `eval/corpus/__init__.py` +4 行: import + ALL_TASKS append + ALL_PREDICATES update
+- `tests/test_eval_runner.py` 改 1 + 加 4: 10→11 task 验 + 4 V0.29.4 测 (chain_spec field 默 None /
+  chain_node_pass_rate 默 None / metric_to_dict 含字段 / CHAIN_REVEAL_2NODE 加载验)
+- `tests/test_eval_smoke.py` 改 1: --corpus all → 11 task
+
+### V0.29 W6-C 系列收尾 (5 commit)
+
+| ver | 状态 | 节点 |
+|-----|------|------|
+| V0.29.0 | ✅ | chain.py 纯函数 + 22 测 |
+| V0.29.1 | ✅ | async run_chain + cli wire web-agent-chain (8 测) |
+| V0.29.2 | ✅ | mcp tool web_agent_run_chain (6 测) |
+| V0.29.3 | ✅ | simplify _make_safety_cb refactor (subagent 自主 cff42da) |
+| V0.29.4 | ✅ | 本提交 — eval --chain + 1 chain corpus + chain dispatch (4 测) |
+
+### V0.29 系列预留 V0.29.5 (可选)
+
+V0.29.4 不主动验 reflection 跨 node 污染 (V0.29 系列最大未知). V0.29.5 可加 1 chain task 故意
+触发 max_steps fail → reflect → 后续 node inject 验 hint 帮 vs 误导. V0.29.4 已留 inject_reflections
+通道接通 chain 路径, V0.29.5 仅加 corpus task + 跑 --reflect 验 reflective_uplift on chain.
+
+### Compatibility
+
+- 老 caller / fixture 0 改动 — EvalTask.chain_spec 默 None 兼容; TaskMetric.chain_node_pass_rate
+  默 None 兼容
+- mypy strict 0 (44 src, +1 v029_chain.py); ruff 0; pytest **631 + 17 skip** (V0.29.3 627+17 → +4)
+- 真 chromium 15/15 全过 (无新)
+- corpus 测 10→11 task 改 2 处 (test_eval_runner.py + test_eval_smoke.py)
+
+### V0.27+V0.28+V0.29 累计 subagent 真发现 = 8 处 (本 commit 0 新, 沿用 #8 V0.29.3 simplify)
+
+### Why patch (V0.29.4) 不 minor
+
+- V0.29 主题 minor bump 已发生在 V0.29.0; V0.29.1+ patch 累加
+- 跟 V0.21.x/V0.27.x/V0.28.x 系列 patch 风格一致
+
 ## [0.29.3] - 2026-05-10
 
 ### Refactor (V0.29.2 simplify pass — 抽 _make_safety_cb helper)

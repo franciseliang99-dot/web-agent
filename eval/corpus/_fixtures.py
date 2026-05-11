@@ -30,6 +30,9 @@ TOKEN_DIALOG_CONFIRM_MSG = "dialog-message-token-e5d7"
 TOKEN_KEYBOARD_NAV_BOTTOM = "bottom-of-modal-found-d2c8"
 TOKEN_FAILURE_RECOVERY_VALID = "valid-mark-clicked-b7f4"
 TOKEN_CROSS_FEATURE_DONE = "cross-feature-iframe-popup-1ec5"
+# V0.29.4 W6-C 收尾: chain 测验真 token (单 page 但跨 node 跑 2 步 — node a click reveal,
+# node b extract token). DOM 接力, 不重 page.goto.
+TOKEN_CHAIN_FINAL_REVEAL = "chain-finalreveal-token-c9e8"
 
 
 # --- HTML fragment ---
@@ -142,3 +145,14 @@ _CROSS_FEATURE_HTML = (
     "</body></html>"
 )
 URL_CROSS_FEATURE = html_to_data_url(_CROSS_FEATURE_HTML)
+
+# 10. V0.29.4 W6-C chain: 单 page 跨 2 node DOM 接力. node a click reveal button → page 显示
+# hint container; node b extract H1 (此时 H1 是 reveal 后真值). 验 chain 跨 node ctx 复用 + var 传递.
+_CHAIN_HTML = (
+    "<html><body>"
+    "<h1>placeholder-before-reveal</h1>"
+    f"<button onclick=\"document.body.innerHTML='<h1>{TOKEN_CHAIN_FINAL_REVEAL}</h1>'\">"
+    "reveal answer button</button>"
+    "</body></html>"
+)
+URL_CHAIN_REVEAL = html_to_data_url(_CHAIN_HTML)
