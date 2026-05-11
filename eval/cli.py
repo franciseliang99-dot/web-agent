@@ -213,7 +213,10 @@ def main() -> None:
     )
     parser.add_argument(
         "--corpus", default="all",
-        help="task 选择: 'all' 跑全 10 task; 或 capability_axis 单选 (e.g. 'iframe' / 'multi-tab')",
+        help=(
+            "task 选择: 'all' 跑全 corpus; 或 capability_axis 单选 (e.g. 'iframe' / 'multi-tab' / "
+            "'real-world' V0.30 真外网 task 默 LIVE_NET=1 才放行)"
+        ),
     )
     parser.add_argument(
         "--providers", default="anthropic",

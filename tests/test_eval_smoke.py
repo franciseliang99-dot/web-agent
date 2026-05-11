@@ -178,3 +178,37 @@ def test_eval_nightly_workflow_default_disabled():
     assert "if: false" in content, "默认必须 if:false 防意外烧 token"
     assert "WEB_AGENT_RUN_EVAL" in content
     assert "ANTHROPIC_API_KEY" in content  # secret 配置 example
+
+
+# ---------- V0.30.5 收尾: --corpus real-world axis filter 验 ----------
+
+
+def test_select_tasks_real_world_axis_returns_3_real_net_tasks():
+    """V0.30.5: --corpus real-world → 3 V0.30.2-4 task (Quantum + Apple_Inc + GitHub octocat).
+
+    requires_real_net=True 全部 — _select_tasks 是纯函数 (不调 LIVE_NET filter), 测 axis 选对.
+    """
+    tasks = _select_tasks("real-world")
+    assert len(tasks) == 3
+    assert all(t.capability_axis == "real-world" for t in tasks)
+    assert all(t.requires_real_net for t in tasks)
+    task_ids = {t.task_id for t in tasks}
+    assert "v030-wikipedia-quantum-entanglement" in task_ids
+    assert "v030-wikipedia-apple-inc" in task_ids
+    assert "v030-github-octocat-hello-world" in task_ids
+
+
+def test_argparse_help_mentions_real_world_axis(capsys):
+    """V0.30.5: --corpus help 文案含 'real-world' axis 例 (V0.30.5 cli help update 验)."""
+    import contextlib
+    import sys
+    from eval.cli import main
+
+    sys.argv = ["web-agent-eval", "--help"]
+    with contextlib.suppress(SystemExit):
+        main()
+    captured = capsys.readouterr()
+    # argparse --help → stdout
+    assert "real-world" in captured.out, (
+        f"V0.30.5 cli help 应含 'real-world' axis 例, captured: {captured.out[:500]}"
+    )

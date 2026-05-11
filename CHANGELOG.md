@@ -2,6 +2,99 @@
 
 All notable changes to web-agent. 版本号遵循 SemVer 简化形式（V<major>.<minor>.<patch>）。
 
+## [0.30.5] - 2026-05-10
+
+### Add (V0.30 系列收尾 commit 6/6 — cli --corpus real-world help update + axis filter 验)
+
+V0.30 D real-world + G stealth 联动系列收尾 commit. cli `--corpus real-world` axis filter 已通过
+`_select_tasks` axis 单选自然 work (V0.26.3 已支); V0.30.5 仅 help 文案 update + 加 axis filter 验测.
+
+docs/V0.30-real-world.md 推迟 (CLAUDE.md 元规则: docs *.md 文件不主动建除非用户显式请求). V0.30
+系列文档化全在 CHANGELOG (本 entry 含系列总结).
+
+### Plan subagent 4 决策点
+
+- A axis filter 已 work, 仅 cli help 文案改 + 1 测验 ✅
+- B report real-world section 复用 `render_capability_axis_markdown` (real-world 行 axis matrix 天然出现) ✅
+- C docs/V0.30-real-world.md SKIP (CLAUDE.md 元规则 + CHANGELOG 总结替) — 偏离 subagent 推荐
+- D R5 cassette 精确 token 累加 推 V0.31 (主题独立, V0.30.5 scope 收尾不掺) ✅
+
+### Changed (~30 LOC)
+
+- `eval/cli.py` 1 行: `--corpus` help 文案加 `'real-world' V0.30 真外网 task 默 LIVE_NET=1 才放行`
+- `tests/test_eval_smoke.py` +2 测:
+  - `test_select_tasks_real_world_axis_returns_3_real_net_tasks` 验 axis filter 选 V0.30.2-4 加的 3 task
+  - `test_argparse_help_mentions_real_world_axis` 验 cli --help stdout 含 'real-world'
+
+### V0.30 D real-world + G stealth 联动系列总闭环 (6 commit)
+
+| ver | commit | 节点 |
+|-----|--------|------|
+| V0.30.0 | 8b38ddb | apply_stealth_plus init script (G framework — webdriver/WebGL/permissions JS, 不依赖 lib) |
+| V0.30.1 | c94a5d1 + 22b5cfc | vcr config helper + EvalTask requires_real_net/flaky_repeat + LIVE_NET filter (含 simplify chore #12 _VCR_FILTER_HEADERS module 单源) |
+| V0.30.2 | 21dfc6b + a2f9e39 | 1 wikipedia (Quantum_entanglement) + sannysoft probe slow opt-in (含 chore tmp_path arg cleanup) |
+| V0.30.3 | f0bfcb6 | **vcr 真接 in run_one 修 V0.26.x silent bug #11** (subagent 实测 vcrpy 8.x native httpx PASS) + R4 allow_playback_repeats |
+| V0.30.4 | 0179a9c | +2 tasks (wikipedia Apple_Inc + GitHub octocat README) + cli 双 env assert (R3 收) + lazy import 注释 |
+| V0.30.5 | 本提交 | cli --corpus help update + axis filter 验测 (D real-world 系列收尾) |
+
+### V0.30 系列设计目标 (D+G 联动) 验证
+
+- **G stealth**: V0.30.0 apply_stealth_plus 加固 webdriver/WebGL/permissions, V0.30.2 sannysoft probe
+  slow opt-in 给 maintainer 肉眼验真生效
+- **D real-world corpus**: V0.30.2 1 wiki (academic) + V0.30.4 2 task (corporate wiki + GitHub web UI)
+  跨 source baseline. requires_real_net=True + LIVE_NET filter 默跳 + cassette 默回放 (CI 安全) +
+  EVAL_REAL+LIVE_NET=1 maintainer 真录
+- **vcr 真接 (修 #11)**: V0.30.3 真包 LLM call 段, run_one 内 if requires_real_net cassette_ctx
+  vcr.use_cassette() else nullcontext() (老 data:html 0 overhead)
+
+### V0.30 maintainer how-to (cassette 真录)
+
+```bash
+# 三级 env opt-in 真录 cassette (烧 ~$0.5-1 token, 18 cassette 录次首次):
+WEB_AGENT_RUN_EVAL=1 WEB_AGENT_EVAL_REAL=1 WEB_AGENT_EVAL_LIVE_NET=1 \
+  ANTHROPIC_API_KEY=sk-ant-... \
+  uv run web-agent-eval --corpus real-world --providers anthropic
+
+# cassette 落 eval/cassettes/real_world/{task_id}_{provider}.yaml, commit 进 git
+# (V0.30.1 _VCR_FILTER_HEADERS 已 redact 11 项 LLM key, 安全)
+
+# 后续 PR 默 cassette 回放 (EVAL_REAL=0 + LIVE_NET=0 + 默 record_mode=none 严回放)
+WEB_AGENT_RUN_EVAL=1 uv run web-agent-eval --corpus real-world
+```
+
+### V0.30 隐藏风险全识别 (subagent 12 处累计)
+
+| Risk | 状态 |
+|------|------|
+| #1 vcrpy 8.x httpx 兼容 | ✅ V0.30.3 实测 native PASS |
+| #2 wikipedia 内容漂移 | ⚠ flaky_repeat=3 兜底 + V0.31 lint cassette |
+| #3 cli 双 env 一致 (R3) | ✅ V0.30.4 _assert_live_net_consistency |
+| **R4 allow_playback_repeats=True** | ✅ V0.30.3 已加 (默 vcr 单回放, second repeat 必 broken) |
+| R5 cassette 精确 token 累加 | ⏸ V0.31 (主题独立) |
+| R6 GitHub web UI banner/JS | ⚠ max_steps=10 留 buffer, V0.31 cassette baseline 跑后看 |
+
+### V0.27 + V0.28 + V0.29 + V0.30 累计 subagent 真发现 = **12 处**
+
+| # | 提出 | 内容 |
+|---|------|------|
+| 1-7 | V0.27/V0.28 | (前轮已列) |
+| 8 | V0.29.3 simplify | _make_safety_cb helper 抽 |
+| 9 | V0.29.5 Plan | V0.28.3 reflections_written silent bug ((max_steps 含左括号) |
+| 10 | V0.29.5 simplify | dead "max_steps" prefix + V0.28.3 fixture mirror dead 输出 (silent bug 真根因) |
+| 11 | V0.30.1 Plan | **V0.26.x silent bug eval/runner 没真接 vcr.use_cassette** (V0.30.3 真修) |
+| 12 | V0.30.1 simplify | _VCR_FILTER_HEADERS 双源 → module 单源 |
+
+### Compatibility
+
+- 老 caller 0 改 (cli help 文案 update only)
+- mypy strict 0 (45 src); ruff 0; pytest **664 + 18 skip** (V0.30.4 662+18 → +2)
+- 真 chromium 15/15 全过 (无新)
+
+### Why patch (V0.30.5) 不 minor
+
+- V0.30 主题 minor bump 已发生在 V0.30.0; V0.30.1+ patch 累加 framework / corpus / vcr / 收尾
+- 跟 V0.21.x/V0.27.x/V0.28.x/V0.29.x patch 风格一致
+
 ## [0.30.4] - 2026-05-10
 
 ### Add (V0.30 系列 commit 5/6 — +2 real-world tasks (Apple_Inc + GitHub octocat) + cli 双 env assert R3)
