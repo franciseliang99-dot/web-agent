@@ -2,6 +2,120 @@
 
 All notable changes to web-agent. 版本号遵循 SemVer 简化形式（V<major>.<minor>.<patch>）。
 
+## [0.36.3] - 2026-05-11
+
+### Doc (V0.36 I 内存优化系列收尾 3/3 — VACUUM 真测 0% + index audit OK + 真发现 #18 沉淀)
+
+V0.36.0 落 disk baseline framework + V0.36.1 改 per-task subdir + BC fallback. 本提交收尾:
+sqlite VACUUM 真测 + index audit + 系列总结. 跳 V0.36.2 (data-clean 红线) 直接到 V0.36.3.
+跟 V0.33.4 / V0.34.5 / V0.35.3 系列收尾同骨架.
+
+### 真发现 #18 web-agent sqlite VACUUM 在 INSERT-only db 节省 ≈ 0
+
+V0.36.3 之前真测:
+```bash
+# Before VACUUM
+ls -la data/{trace,memory,upwork}.db
+# trace.db   548864 B
+# memory.db   86016 B
+# upwork.db   32768 B
+
+# Backup + VACUUM + integrity_check
+mkdir -p data/.backup
+cp data/{trace,memory,upwork}.db data/.backup/
+for db in trace.db memory.db upwork.db; do
+    sqlite3 data/$db "VACUUM; PRAGMA integrity_check;" # → ok / ok / ok
+done
+
+# After VACUUM
+ls -la data/{trace,memory,upwork}.db
+# trace.db   548864 B  (0 byte 省, 0%)
+# memory.db   86016 B  (0 byte 省, 0%)
+# upwork.db   32768 B  (0 byte 省, 0%)
+```
+
+**Hypothesis (Plan agent 估算)**: VACUUM 整合 fragmentation 节省 10-20%.
+
+**真测推翻**: 3 db × 0% 节省. **根因**: web-agent trace.db / memory.db / upwork.db 都是
+**INSERT-only** db, 无 DELETE / UPDATE 产生 unused page → VACUUM 整合 0 字节. 跟 V0.34.4
+真发现 #17 (chromium renderer serialize 限 F1 ROI) 同模式 — Plan agent 假设不考虑 web-agent
+真实使用模式 (INSERT-only 写盘) 时是 silent 性能猜测.
+
+**教训**: SQLite VACUUM 节省假设需先验"db 是否有 DELETE 历史" — 纯 INSERT db (web-agent 这种
+trace/memory append-only schema) VACUUM 无意义. V0.36.2 (data-clean 真删 task) 后才会有
+fragmentation, VACUUM 才显著.
+
+(累计真发现至 V0.36: 18 个; V0.36 系列 +1: #18.)
+
+### Index audit 结果: OK (V0.13.0 / V0.28 已正确设)
+
+```sql
+-- trace.db
+tasks: PRIMARY KEY (task_id)                       → sqlite_autoindex_tasks_1 ✓
+steps: PRIMARY KEY (task_id, step)                 → sqlite_autoindex_steps_1 ✓
+-- replay.py queries: WHERE task_id = ? + ORDER BY started_at DESC LIMIT 1
+-- → PK index 命中, 87 task 全表 scan 也 < 1ms 无虞
+
+-- memory.db
+memories: idx_memories_domain_ts (domain, ts DESC) → V0.13.0 显式索引 ✓
+-- memory.py: WHERE domain = ? ORDER BY ts DESC LIMIT ? → 索引完美命中
+```
+
+**结论**: V0.13.0 + V0.28 schema design 已正确加 index, V0.36.3 无需补.
+
+### V0.36 系列回顾 (3 commit + 2 deferred)
+
+| ver | 主题 | 状态 | 净收益 |
+|-----|------|------|--------|
+| V0.36.0 | disk baseline framework + 真跑 74 MB 数据底座 | ✅ | 0 (基础设施给 V0.36.x 决策) |
+| V0.36.1 | loop.py per-task subdir + replay.py BC fallback | ✅ | 0 直接 (准备 V0.36.2 cleanup 粒度) |
+| **V0.36.2** | data-clean CLI TTL + --dry-run | 🛑 **skip deferred** | retention 产品决策需 user |
+| V0.36.3 | VACUUM 真测 + index audit + 系列收尾 | ✅ 本提交 | 0 (沉淀 #18 + audit pass) |
+| **V0.36.4** | downloads listener 过激发 root cause | 🛑 **skip deferred** | destructive 红线 + 待诊根因 |
+
+**V0.36 I 内存优化系列闭环 (3 commit autonomous + 2 deferred maintainer)**.
+
+**实质性能净收益**: 0 (跟 V0.34 F sub-route 系列同模式 — framework + 真发现没产品价值). 沉淀
+价值 = #18 真发现 + V0.36.1 per-task subdir 改造给 V0.36.2 maintainer 真删时 cleanup 粒度
+对齐 task (减 glob + regex match 复杂度).
+
+### V0.34 教训应用第 N 次: 真测 baseline 推翻 Plan agent 假设
+
+V0.34.5 系列收尾沉淀的"实施前真测 baseline"在 V0.36 应用 2 次:
+
+- **V0.36.0**: du 真测 87 MB 推翻"内存爆炸"叙事 → V0.36 reframe 预防性优化 (跟 V0.33.3 WebP
+  诚实降级同模式)
+- **V0.36.3**: VACUUM 真测 0% 推翻 Plan agent 10-20% 估算 → 沉淀 #18 INSERT-only db 教训
+
+V0.34 教训制度化已贯彻 V0.34-V0.36 共 6 个系列, 不是偶发应用.
+
+### Changed (~0 src LOC, ~120 doc LOC)
+
+- `CHANGELOG.md` V0.36.3 entry (本): ~120 行 (系列总结 + #18 真发现 + index audit + V0.37 主题)
+- `pyproject.toml` / `__init__.py` 0.36.1 → 0.36.3 (跳 0.36.2 deferred, 跟 V0.32.1/V0.33.4/V0.35.1 同 SemVer pattern)
+- `uv.lock` 同步
+- `data/.backup/{trace,memory,upwork}.db.bak` 真测 VACUUM 时 backup (V0.36.3 commit **不** include 进 git, .gitignore 自动跳)
+
+### Verify
+
+- `uv run pytest` → **795 passed, 25 skipped** (V0.36.1 状态, 0 src 改 → 0 测变)
+- VACUUM 真测 + `PRAGMA integrity_check` 3 db × ok ✓
+- index audit grep verify replay.py / memory.py query 都命中现有 index
+
+### V0.37 主题路径 inventory (留 user 选)
+
+跟 V0.33.4 / V0.34.5 / V0.35.3 同句式. autonomous 红线 = 项目方向决策需 user 输入.
+
+候选路径 (V0.34.5 + V0.35.3 候选累计):
+- **B' lean / WebP 改默后 baseline 双跑** (V0.33.4 deferred 量化, 跟 V0.35.1/V0.36.2 同 maintainer 真录)
+- **F2 SoM JS 三 walker 合并** (V0.34.5 deferred, 代码 simplification 不是 perf gain)
+- **G stealth 加固** (sannysoft.com 72% → 85%+)
+- **A' V0.35 真站点 corpus 扩 5+ task** (V0.35 矩阵 3 task 偏少, 加 dialog/upload 真站点轴)
+- **新真发现 sub-route** (基于 V0.30/V0.32/V0.35 真站点 corpus 找新 bottleneck)
+- 其他用户提的方向
+
+(不带 ROI 估算 — V0.34 教训第 N 次应用: 项目方向 ROI 假设需 user 输入而非 Claude 自决.)
+
 ## [0.36.1] - 2026-05-11
 
 ### Feat (V0.36 I 内存优化系列 2/N — loop.py per-task subdir screenshot + replay.py BC fallback)
