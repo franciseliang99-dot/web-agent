@@ -37,13 +37,13 @@
 
 📊 **可观测**：每步截图 + 思考 + 行动 → SQLite 持久化 → 单文件 HTML replay 面板；跨 session 长期记忆 (domain ↔ past goals/results, V0.13.0+)。
 
-🛡 **三层 release gate**：ruff 0 + mypy strict 0 + pytest 255 全绿 + GitHub Actions CI (V0.16.13)。
+🛡 **三层 release gate**：ruff 0 + mypy strict 0 + pytest 769 passed + 18 skipped 全绿 + GitHub Actions CI (V0.16.13)。
 
-🤝 **MCP server (V0.16.0-9)**：3 tools + 2 resources + progress 心跳 + asyncio.Lock 串行 + 9222 健康检查。Claude Desktop 加 2 行 config 即用。
+🤝 **MCP server (V0.16.0-9 + V0.18 elicit + V0.29.2 chain)**：4 tools (`web_agent_run` / `_get_replay` / `_query_memory` / `_run_chain`) + 2 resources + progress 心跳 + asyncio.Lock 串行 + 9222 健康检查 + V0.18.0 `ctx.elicit()` 人在回路 safety 批准。Claude Desktop 加 2 行 config 即用。
 
 ## 当前状态
 
-**V0.16.23** (2026-05-05) — 80+ commits, **255 tests passed + 2 smoke skips**, 3 层 release gate 全绿, GitHub Actions CI 自动跑.
+**V0.34.0** (2026-05-11) — 189 commits, **769 tests passed + 18 skips** (含 chromium slow smoke 15/15 全过), 3 层 release gate 全绿, GitHub Actions CI 自动跑.
 
 **W milestone 进度**:
 - W1 ✅ Wikipedia 搜词条 + 提取首段 (骨架 + 多 LLM 支持)
@@ -51,10 +51,15 @@
 - W3 ✅ Gmail 登录态: read-only 总结 (W3-B) + compose 写操作 (W3-C, V0.16.17 真账号 E2E 实测通过) + `safety.py` 授权白名单 (W3-A)
 - W4 ✅ replay 日志面板 (W4-1) + index 索引页 (W4-1.1) + Cloudflare/reCAPTCHA 暂停接管 UX (W4-2) + 桌面通知 (W4-3)
 - W5 ✅ — 自反思 page-stuck hint (W5-A) + Shadow DOM 穿透 (W5-B) + 跨 session 长期记忆 (W5-D) + memory inject planner (W5-D.2) + 分层规划 augmentation (W5-C) + W5-C.2 真 plan-and-execute spike 闭环维持 DEFER (V0.16.16-22)
+- W6 ✅ — V0.28 `reflect_on_failure` 跨 task LLM 反思 (W6-A/B, 触发 max_steps + LOOP_DETECTED, root_cause+hint 结构化输出) + V0.29 W6-C 长 task chain DAG 编排 (ChainSpec / topo sort / on_failure abort|continue / `${node.result}` substitute_vars + `web-agent-chain` CLI + MCP `web_agent_run_chain` tool)
+- E ✅ (V0.33 性能优化系列, 5 commit 闭环) — token baseline 框架 + SoM 字段 lean mode opt-in + screenshot WebP opt-in
+- F ⏳ (V0.34.0 开篇 1/x) — perceive() bench harness framework (eval/perceive_bench.py + `web-agent-perceive-bench` CLI, 真跑 chromium adapter 留 V0.34.1+)
 
-**MCP server (V0.16.0-9)** ✅: stdio + 3 tools (web_agent_run / web_agent_get_replay / web_agent_query_memory) + 2 resources (`webagent://replay/<id>` / `webagent://memory/<domain>`) + progress wire + asyncio.Lock + 健康检查 + ARCHITECTURE §5 完整文档化.
+**MCP server (V0.16.0-9 + V0.18 + V0.29.2)** ✅: stdio + **4 tools** (`web_agent_run` / `web_agent_get_replay` / `web_agent_query_memory` / `web_agent_run_chain`) + 2 resources (`webagent://replay/<id>` / `webagent://memory/<domain>`) + progress wire + asyncio.Lock + 健康检查 + V0.18.0 `ctx.elicit()` 人在回路 safety 批准 (V0.18.2 真账号 dogfood 验证) + ARCHITECTURE §5 完整文档化.
 
 **Audit gap 收尾 (6/6 全)**: perceiver (V0.12.0) / trace (V0.12.4) / cli (V0.12.6) / loop 主体 (V0.12.8) / browser (V0.15.1) / anthropic (V0.15.1).
+
+**V0.17 ~ V0.34 新增能力概览**: V0.17 Action discriminated union (5 dataclass) → V0.19 +keyboard_shortcut/paste (7) → V0.21 +switch_tab/close_tab (9) → V0.23 +drag/upload + download listener (11 actions); V0.18 MCP elicit 人在回路 batch confirm; V0.20 / V0.20.6 Upwork JD 抽取 (`web-agent-jd` / `web-agent-list-jds`); V0.22 iframe perceive (Mark.frame_path 同源穿透); V0.24 dialog auto-handle (alert/confirm/prompt/beforeunload); V0.25 transient retry budget (RateLimit/Timeout/5xx 同 step 重 perceive); V0.26 eval golden corpus (`web-agent-eval` + 16 task + capability axis); V0.27 vault SecretStore Protocol; V0.28 W6-A/B reflect_on_failure 跨 task LLM 反思; V0.29 W6-C 长 task chain DAG 编排 (ChainSpec / topo / on_failure / substitute_vars / `web-agent-chain` + MCP `web_agent_run_chain` tool); V0.30 stealth_plus (webdriver/WebGL/permissions); V0.31 keyring 真实现 (opt-in `pip install web-agent[keyring]` + `web-agent-vault` CLI); V0.33 E 性能优化 (token baseline 框架 + SoM lean mode + WebP opt-in); V0.34 F perceive bench harness framework (`web-agent-perceive-bench` CLI).
 
 **架构决策**: 见 [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) — 决策树 / 模块边界 / 三轨同道 (reflect/memory/subgoal 共用 trace 通道) / 双层防御 (safety+anti-loop+reflect+captcha 信号正交) / W5-C.2 spike 7 版本闭环 verdict.
 
@@ -65,8 +70,8 @@
 - **V0.16.19 auto-spawn Chrome**: 9222 不可达时 cli/mcp_server 自动 `subprocess.Popen scripts/start_chrome.sh` (start_new_session=True, exit 不杀), 用户不必先启 Chrome — `WEB_AGENT_AUTO_SPAWN_CHROME=false` 关. 首登 Gmail 仍需 headed 模式手登一次
 - Anthropic Claude Sonnet 4.6（vision）+ prompt caching；OpenAI / Kimi / OpenRouter 同 Protocol 接入
 - Set-of-Mark (SoM) 截图 JS 注入 + Shadow DOM 穿透 (V0.12.0) + cookie/GDPR 弹窗自动关 (V0.5.1)
-- 拟人 actuator (3 阶贝塞尔 + smootherstep + 截断正态键入 + typo+backspace + 鼠标连贯落点)
-- ReAct loop + Action Trace (deque maxlen=20) + SQLite 持久化 + 单文件 HTML replay 面板
+- 拟人 actuator (3 阶贝塞尔 + smootherstep + 截断正态键入 + typo+backspace + 鼠标连贯落点) — 11 个 Action: click / type / scroll / **keyboard_shortcut + paste** (V0.19) / **switch_tab + close_tab** (V0.21) / **drag + upload + download listener** (V0.23) / extract / done; 跨 iframe 定位 (V0.22 Mark.frame_path 同源穿透)
+- ReAct loop + Action Trace (deque maxlen=20) + SQLite 持久化 + 单文件 HTML replay 面板 + V0.24 dialog auto-handle (alert/confirm/prompt/beforeunload) + V0.25 transient retry budget (RateLimit/Timeout/5xx 同 step 重 perceive)
 - 安全/反思双层防御: `safety.py` 白名单拦 send/pay/delete + V0.5.0 anti-loop 同 action 3 次硬 abort + V0.11.0 自反思页面 3 步无变化软提示
 
 ## 安装 + 上手 (3 步, V0.16.19+ auto-spawn)
@@ -129,6 +134,10 @@ uv run web-agent-memory wikipedia.org --db data/memory.db
 - W5-D 长期记忆 cross-session episodic ✅ (V0.13.0 持久化 + CLI dump)
 - W5-D.2 memory inject 到 planner 上下文 ✅ (V0.14.0)
 - W5-C 分层规划 ✅ (V0.15.0, prompt augmentation 路线; 真 plan-and-execute = W5-C.2 **永久 DEFER**, V0.16.16 落档 — SDK 阻碍未解 (OpenAI/Kimi vision 不能零截图调用) + ROI 未量化, 触发条件 3 选 1: ① 用户反馈 augmentation 失败案例 ② OpenAI/Kimi 支持零 image vision ③ spike 证 plan-and-execute 失败率低 >20%, 详见 ARCHITECTURE §1.5)
+- W6-A/B 跨 task `reflect_on_failure` ✅ (V0.28, root_cause+hint 结构化输出, max_steps + LOOP_DETECTED 触发)
+- W6-C 长 task chain DAG 编排 ✅ (V0.29, ChainSpec yaml/dict + topo sort + on_failure abort|continue + `${node.result}` 数据流 + `web-agent-chain` CLI + MCP `web_agent_run_chain` tool, V0.29.2)
+- E 性能优化系列 ✅ (V0.33, token baseline 框架 + SoM lean mode + WebP opt-in, 5 commit 闭环 V0.33.0-V0.33.4)
+- F 感知 sub-route 优化系列 ⏳ (V0.34.0 perceive bench harness 开篇 1/x — eval/perceive_bench.py + `web-agent-perceive-bench` CLI, fixture/compare/stats subparser, 真跑 chromium adapter 留 V0.34.1+)
 
 **MCP server** ✅ (V0.16.0 ~ V0.16.9 累计 10 commit, 已完整 ship):
 - 暴露 web-agent 为 MCP server (Claude Desktop / 任意 MCP client 通过 tool 调用 `web_agent_run(goal, url)`)
@@ -281,6 +290,22 @@ WEB_AGENT_MEMORY_DB=data/memory.db  # 自定义 memory db 路径 (默认 data/me
 WEB_AGENT_MAX_WALLCLOCK_S=300  # 单 task 硬超时 (避 SDK retry + perceive 累积超过 max_steps × 平均步耗)
 WEB_AGENT_CDP_URL=http://127.0.0.1:9222  # 接管的 Chrome 调试端口
 
+# === Dialog (V0.24.0) ===
+WEB_AGENT_DIALOG_POLICY=safe-defaults  # safe-defaults (alert/beforeunload accept; confirm/prompt dismiss)
+                                       # | auto-accept | auto-dismiss
+
+# === Smart Retry (V0.25.0) ===
+WEB_AGENT_TRANSIENT_RETRY_MAX=3        # RateLimit/Timeout/5xx 同 step 重 perceive 上限; 0 关回退 V0.24.2
+
+# === Vault (V0.27.1 + V0.31.0) ===
+WEB_AGENT_USE_KEYRING=                 # V0.31.2 opt-in 切 [Keyring, Env] 链; 默 EnvSecretStore
+                                       # 需 pip install web-agent[keyring]
+
+# === Perception 性能 (V0.33 E 系列) ===
+WEB_AGENT_SOM_FIELDS=                  # "lean" 砍 href 等字段 (~16k tok/run 估省); 默 full 兼容 V0.32.x
+WEB_AGENT_SCREENSHOT_FORMAT=png        # "webp" 切 WebP (磁盘 -70%; 注: image tile 固定计费 token 不直减)
+WEB_AGENT_SCREENSHOT_QUALITY=75        # WebP lossy [1, 100]
+
 # === Demo 专用 ===
 WEB_AGENT_TEST_RECIPIENT=      # gmail_compose demo 收件人 (W3-C, 强烈建议自己发给自己)
 ```
@@ -314,8 +339,24 @@ src/web_agent/
   notify.py        # W4-3 桌面通知 (osascript / notify-send)
   replay.py        # W4-1/W4-1.1 replay HTML 面板 + 索引页
   memory.py        # W5-D 跨 session 长期记忆 (domain → past goals/results, SQLite)
-  cli.py           # 组合根 + web-agent / web-agent-replay / web-agent-memory entry
-  llm/             # 跨 provider Protocol (anthropic / openai / Kimi 兼容)
+  cli.py                # 组合根 + 11 entry points (web-agent / -chain / -replay / -memory / -mcp / -vault / -jd / -list-jds / -eval / -token-baseline / -perceive-bench)
+  mcp_server.py         # V0.16 MCP server (stdio, 4 tools + 2 resources + V0.18 elicit + V0.29.2 chain tool)
+  chain.py              # V0.29 W6-C 长 task DAG 编排 (ChainSpec / topo / on_failure abort|continue / ${node.result} substitute_vars)
+  reflect.py            # V0.28 W6-A/B reflect_on_failure 跨 task LLM 反思
+  planner_hierarchy.py  # V0.15 W5-C 分层规划 augmentation
+  vault.py              # V0.27/V0.31 SecretStore Protocol + Env/Keyring backend
+  routing.py            # V0.27.2 per-task provider routing (数据驱动)
+  jd_extract.py         # V0.20 Upwork JD 单 URL 抽 9 字段 (web-agent-jd)
+  list_extract.py       # V0.20.6 Upwork list 页抽 JD URL (web-agent-list-jds)
+  chrome_launcher.py    # V0.16.19 9222 auto-spawn 抽出
+  types.py              # V0.16.9 + V0.17 Mark/Action 共享 dataclass (discriminated union)
+  llm/                  # 跨 provider Protocol (anthropic / openai / Kimi 兼容)
+eval/                   # V0.26 golden corpus + 评测框架
+  types.py / predicates.py / runner.py / metrics.py / pricing.py / report.py
+  cli.py                # web-agent-eval CLI (V0.26)
+  token_baseline.py     # V0.33.0 token baseline (web-agent-token-baseline CLI)
+  perceive_bench.py     # V0.34.0 F 系列开篇 perceive bench harness (web-agent-perceive-bench CLI)
+  corpus/               # golden task fixture (16 task + capability axis)
 demos/
   wikipedia_search.py    # W1
   github_search.py       # W2-B
@@ -323,7 +364,7 @@ demos/
   gmail_compose.py       # W3-C (write, safety 拦 Send 默认 abort)
 scripts/
   start_chrome.sh  # 启动 9222 调试端口的独立 Chrome (auto/xvfb/headed/headless)
-tests/             # 255 passed + 2 skipped, 23 文件 (含 audit gap 6/6 + W5-D + W5-C + W5-C.2 spike + Anthropic/Kimi/GPT 三骨架)
+tests/             # 769 passed + 18 skipped, 46 文件 (含 audit gap 6/6 + W5-D + W5-C + W5-C.2 spike + V0.17 Action / V0.19 actuator / V0.21 multi-tab / V0.22 iframe / V0.23 drag-upload / V0.24 dialog / V0.25 smart_retry / V0.26 eval / V0.27 vault / V0.28 reflect / V0.29 chain / V0.30 stealth_plus / V0.31 keyring / V0.33 token_baseline / V0.34 perceive_bench + Anthropic/Kimi/GPT 三骨架)
   conftest.py      # vcr_config 锁 cassette filter (V0.15.3)
   cassettes/       # vcrpy yaml (V0.15.3, .bak gitignored, 主 yaml 进 commit)
 docs/
