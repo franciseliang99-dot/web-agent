@@ -2,6 +2,65 @@
 
 All notable changes to web-agent. 版本号遵循 SemVer 简化形式（V<major>.<minor>.<patch>）。
 
+## [0.34.0] - 2026-05-11
+
+### Add (V0.34 F sub-route 优化系列开篇 1/x — perceive() 子流程 bench harness framework)
+
+V0.33 E 性能优化系列 (token / image) 闭环后, 用户选 V0.34 主题 = **F sub-route 优化** (perceiver
+子流程 bench, 不烧 token). plan subagent 推 8 候选 sub-direction (F1 iframe 并发 / F2 SoM JS 三 walker
+合并 / F3 mark dedup / F4-F8...), 用户选 **F8 bench harness 先** — 跟 V0.33.0 token_baseline.py
+同节奏 (V0.33 教训: 没 baseline 任何"性能优化"都是猜).
+
+### V0.34.0 scope = framework only (跟 V0.33.0 同模式)
+
+不接真 chromium / Playwright. 真跑 fixture (跑 perceive() 测 ms/mark/mem) 留给 V0.34.x 后续 commit
+(gate WEB_AGENT_RUN_SLOW=1, deferred maintainer 同 V0.33.4 baseline how-to 模式).
+
+### Changed (~520 LOC)
+
+- `eval/perceive_bench.py` **新建** ~270 行:
+  - `BenchFixture` frozen+slots dataclass (fixture_id / iframe_count / shadow_count / leaf_per_branch / html)
+  - `BenchResult` frozen+slots (fixture_id / perceive_ms / mark_count / memory_kb / shadow_walks / iframe_walks / sample_count)
+  - `BenchCompareReport` (per_fixture delta dict + overall avg)
+  - `build_synthetic_fixture(iframe, shadow, leaf)` → 生 self-contained HTML (DOCTYPE + nested srcdoc + attachShadow)
+    - iframe N 层: `<iframe srcdoc="...nested..."></iframe>` 嵌套
+    - shadow N 层: `<span><script>attachShadow({mode:"open"}); sr.innerHTML=...</script></span>` 嵌套
+    - leaf M 个: `<button id="bN" type="button">btn-N</button>`
+    - fixture_id = `if{N}-sh{M}-leaf{K}` (跟 V0.33.0 stats key 同 pattern)
+  - `load_bench_json(path)` 从 JSON dump 加载 (`bench_results: [{...}]`)
+  - `compare_benches(a, b)` per-fixture ms/mark/mem delta + overall avg + percent_ms (zero-ms 防 div0)
+  - `render_bench_compare_markdown(report)` markdown 表 (跟 V0.33.0 render_baseline_compare_markdown 同模式)
+  - `main(argv)` argparse subparsers: **fixture** (生 HTML, --out 写文件) / **compare** A B / **stats** path
+- `tests/test_perceive_bench.py` **新建** ~250 行 24 测:
+  - 6 测 build_synthetic_fixture: 默 baseline / iframe 3 层 / shadow 2 层 / 组合 / 非法参数 raise / HTML self-contained
+  - 3 测 load_bench_json: minimal / 缺字段 default / 不存在 raise
+  - 4 测 compare_benches: 基本 delta / 跳过 unpaired / empty 不 div0 / zero-ms 不 div0
+  - 2 测 render: 表格式 / empty 提示
+  - 6 测 main cli: fixture stdout / fixture --out / fixture invalid → exit 2 / compare / stats / compare missing → exit 1
+  - 3 测 dataclass frozen+slots smoke
+- `pyproject.toml`: `web-agent-perceive-bench = "eval.perceive_bench:main"` console_script 注册
+- `pyproject.toml` / `__init__.py` 0.33.4 → 0.34.0
+- `uv.lock` 同步
+
+### Verify
+
+- `uv run pytest` → **751 passed, 18 skipped** (+24, 0 现有测破)
+- `uv run ruff check eval/perceive_bench.py tests/test_perceive_bench.py` → all clean
+- `uv run mypy eval/perceive_bench.py` → no issues
+
+### V0.34 系列规划 (subagent 推, user 选 F8 开篇)
+
+| ver | 状态 | scope |
+|-----|------|-------|
+| **V0.34.0** | ✅ 本提交 | bench harness framework (BenchFixture/Result/Compare + cli compare/stats/fixture) |
+| V0.34.1 | 待 | 真跑 chromium adapter + memory profiler (gate WEB_AGENT_RUN_SLOW=1) |
+| V0.34.2 | 待 | F1 iframe DFS asyncio.gather 并发 (估 wallclock -30~50% 多 iframe 站) |
+| V0.34.3 | 待 | F2 SoM JS 三 walker 合并 (主 frame 单次 evaluate -2 round-trip ~15-30ms) |
+| V0.34.4 | 待 | 系列收尾 + 真跑 baseline how-to + V0.34 retrospective |
+
+(V0.34.x 具体顺序按 V0.34.1 真跑 baseline 出数后调整. 如果 F1 iframe 并发实测节省 < 10%, 改优先 F2.
+跟 V0.33.0-V0.33.4 节奏一致 — framework → 实施 → 收尾.)
+
 ## [0.33.4] - 2026-05-11
 
 ### Doc (V0.33 E 性能优化系列收尾 5/5 — 系列总结 + maintainer baseline how-to + env reference)
