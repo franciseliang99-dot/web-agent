@@ -91,7 +91,13 @@ class KeyringSecretStore:
         return value if value is not None else default
 
     def has(self, key: str) -> bool:
-        return self.get(key) is not None
+        # V0.31.2: try/except RuntimeError 防 keyring extra 未装时 ChainedSecretStore.has 链断
+        # (subagent 决: get 已 except Exception 返 default, has 同模式吞 RuntimeError 让 chain
+        # 自然 fallback 下个 store).
+        try:
+            return self.get(key) is not None
+        except RuntimeError:
+            return False
 
     def set(self, key: str, value: str) -> None:
         """V0.31.0: 写 key 到 keyring (cli web-agent-vault set 用). 不在 SecretStore Protocol 内
@@ -138,11 +144,17 @@ class ChainedSecretStore:
 
 
 def default_store() -> SecretStore:
-    """V0.27.1: 默 SecretStore — EnvSecretStore. make_client 默调用避免 None check 散乱.
+    """V0.27.1+V0.31.2: 默 SecretStore. opt-in env `WEB_AGENT_USE_KEYRING=1` 切
+    `ChainedSecretStore([KeyringSecretStore(), EnvSecretStore()])` (Keyring 优先 / Env fallback).
+    默仍 `EnvSecretStore()` 100% 兼容老 caller (V0.32 评估改默).
 
-    V0.28 加 keyring backend 时只改本函数 (e.g. KeyringSecretStore() if env enabled else
-    EnvSecretStore()), make_client / anthropic.py / openai.py 0 改.
+    keyring extra 未装时 (env=1 但 pip install web-agent[keyring] 没跑): ChainedSecretStore.has
+    短路 — KeyringSecretStore.has 内 try/except RuntimeError 返 False (V0.31.2 修), 自然
+    fallback EnvSecretStore. caller 0 改, lazy import 哲学保留.
     """
+    use_keyring = os.environ.get("WEB_AGENT_USE_KEYRING", "").lower() in ("true", "1", "yes")
+    if use_keyring:
+        return ChainedSecretStore([KeyringSecretStore(), EnvSecretStore()])
     return EnvSecretStore()
 
 

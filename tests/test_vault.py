@@ -544,3 +544,59 @@ def test_vault_cli_entry_point_registered():
     matching = [ep for ep in entry_points if ep.name == "web-agent-vault"]
     assert len(matching) == 1, f"web-agent-vault 未注册, found: {[e.name for e in entry_points]}"
     assert matching[0].value == "web_agent.vault:main"
+
+
+# ---------- V0.31.2 default_store opt-in env WEB_AGENT_USE_KEYRING ----------
+
+
+def test_default_store_returns_env_when_no_use_keyring(monkeypatch):
+    """V0.31.2: WEB_AGENT_USE_KEYRING 未设 → 默 EnvSecretStore (V0.31 不改默 100% 兼容)."""
+    monkeypatch.delenv("WEB_AGENT_USE_KEYRING", raising=False)
+    assert isinstance(default_store(), EnvSecretStore)
+
+
+def test_default_store_returns_chained_when_use_keyring_env_set(monkeypatch):
+    """V0.31.2: WEB_AGENT_USE_KEYRING=1 → ChainedSecretStore([Keyring, Env])."""
+    from web_agent.vault import ChainedSecretStore
+
+    monkeypatch.setenv("WEB_AGENT_USE_KEYRING", "1")
+    s = default_store()
+    assert isinstance(s, ChainedSecretStore)
+    # 内 stores 顺序: Keyring 优先, Env fallback
+    assert isinstance(s._stores[0], KeyringSecretStore)
+    assert isinstance(s._stores[1], EnvSecretStore)
+
+
+@pytest.mark.parametrize("env_val", ["true", "1", "yes", "TRUE", "Yes"])
+def test_default_store_use_keyring_accepts_truthy_values(monkeypatch, env_val):
+    """V0.31.2: WEB_AGENT_USE_KEYRING 接 ('true','1','yes' case-insensitive) — 跟 codebase 风格统一."""
+    from web_agent.vault import ChainedSecretStore
+
+    monkeypatch.setenv("WEB_AGENT_USE_KEYRING", env_val)
+    assert isinstance(default_store(), ChainedSecretStore)
+
+
+def test_keyring_has_returns_false_when_keyring_extra_missing(monkeypatch):
+    """V0.31.2: keyring extra 未装 → KeyringSecretStore.has 不 raise (try/except RuntimeError → False).
+
+    让 ChainedSecretStore.has 链不断, fallback 下个 store 而非 raise 阻塞 LLM client init.
+    """
+    import sys
+
+    monkeypatch.setitem(sys.modules, "keyring", None)
+    s = KeyringSecretStore()
+    assert s.has("ANY_KEY") is False  # 不 raise
+
+
+def test_chained_default_store_falls_back_to_env_when_keyring_extra_missing(monkeypatch):
+    """V0.31.2 集成: env=1 + keyring 未装 → ChainedSecretStore 自然 fallback Env, get 通过."""
+    import sys
+
+    monkeypatch.setenv("WEB_AGENT_USE_KEYRING", "1")
+    monkeypatch.setitem(sys.modules, "keyring", None)
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-from-env-fallback")
+
+    s = default_store()
+    # KeyringSecretStore.has 返 False (extra 未装) → ChainedSecretStore fallback Env
+    assert s.get("ANTHROPIC_API_KEY") == "sk-from-env-fallback"
+    assert s.has("ANTHROPIC_API_KEY") is True

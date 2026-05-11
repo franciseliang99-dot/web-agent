@@ -2,6 +2,78 @@
 
 All notable changes to web-agent. 版本号遵循 SemVer 简化形式（V<major>.<minor>.<patch>）。
 
+## [0.31.2] - 2026-05-10
+
+### Add (V0.31 系列 commit 3/4 — default_store opt-in env WEB_AGENT_USE_KEYRING + has() RuntimeError fix)
+
+V0.31.0 KeyringSecretStore + V0.31.1 cli vault 之上, default_store() 加 opt-in env
+`WEB_AGENT_USE_KEYRING=1` 切 ChainedSecretStore([Keyring, Env]) 让 keyring 自动 fallback Env.
+default 仍 EnvSecretStore (V0.32 评估改默, V0.31 不破老 caller).
+
+cli/mcp 0 改 — V0.27.1 lazy fallback 链 (AnthropicClient/OpenAIClient init secret_store=None
+→ default_store()) 自动生效 V0.31.2 改动.
+
+### Plan subagent 3 决策 + 关键修
+
+- **A** default_store() 加 env check `WEB_AGENT_USE_KEYRING=1` (`.lower() in ("true","1","yes")`
+  跟 codebase 风格统一) → ChainedSecretStore else EnvSecretStore (默 0 改)
+- **B 关键修**: `KeyringSecretStore.has` 加 try/except `RuntimeError` → False — keyring extra
+  未装时 ChainedSecretStore.has 链不断 (subagent 揭: 否则 LLM client init `default_store().get(K)`
+  → ChainedSecretStore.has → KeyringSecretStore.has → self.get → `_import_keyring()` raise →
+  整链断 → make_client 失败)
+- **C** cli/mcp 0 改 — V0.27.1 lazy default fallback 链已建, default_store() 改实现自动生效
+
+### Changed (~30 LOC src + ~80 LOC test)
+
+- `src/web_agent/vault.py`:
+  - `default_store()` env check 切 ChainedSecretStore (5 行)
+  - `KeyringSecretStore.has` try/except RuntimeError → False (关键修, 防 chain 断)
+- `tests/test_vault.py` +5 测:
+  - default 默 EnvSecretStore / env=1 → Chained / parametrize 5 truthy 值
+  - keyring extra 未装 has 返 False (不 raise)
+  - 集成: env=1 + keyring 未装 → ChainedSecretStore 自然 fallback Env get 通过
+
+### V0.31 系列进度 (3/4)
+
+| ver | 状态 | 节点 |
+|-----|------|------|
+| V0.31.0 | ✅ | KeyringSecretStore 真实现 + ChainedSecretStore + opt-in extra |
+| V0.31.1 | ✅ | console_script web-agent-vault (set/get/delete/list) |
+| V0.31.2 | ✅ | 本提交 — default_store opt-in env + has() RuntimeError fix + cli/mcp 自动生效 |
+| V0.31.3 | 待 | CHANGELOG 系列总结 + maintainer how-to 收尾 |
+
+### maintainer how-to (V0.31.2 keyring opt-in)
+
+```bash
+# 1. 装 keyring extra (Linux 还需 dbus + libsecret)
+pip install 'web-agent[keyring]'
+
+# 2. 写 keyring vault (一次性)
+web-agent-vault set ANTHROPIC_API_KEY  # getpass 隐式输入
+
+# 3. opt-in 切默 backend (永久 export 进 shell rc)
+export WEB_AGENT_USE_KEYRING=1
+
+# 4. 后续跑 web-agent / web-agent-eval / mcp 自动用 keyring (env fallback 兼容)
+web-agent "搜苹果价格" --url https://google.com
+# AnthropicClient init → default_store() → ChainedSecretStore([Keyring, Env]) →
+# keyring hit ANTHROPIC_API_KEY → 真值
+```
+
+### Compatibility
+
+- 老 caller 0 改 (默 EnvSecretStore 100% 兼容; cli/mcp lazy fallback 链 V0.27.1 已建自动生效)
+- mypy strict 0 (45 src); ruff 0; pytest **690 + 18 skip** (V0.31.1 681+18 → +9)
+- 真 chromium 15/15 全过 (无新)
+- WEB_AGENT_USE_KEYRING=1 + keyring extra 未装 → ChainedSecretStore.has fallback Env 自然通
+
+### V0.27+V0.28+V0.29+V0.30+V0.31 累计 subagent 真发现 = **12 处** (V0.31.2 0 新)
+
+### Why patch (V0.31.2) 不 minor
+
+- V0.31 主题 minor bump 已发生在 V0.31.0; V0.31.1+ patch 累加 cli / opt-in / 收尾
+- 跟 V0.21.x/V0.27.x/V0.28.x/V0.29.x/V0.30.x patch 风格一致
+
 ## [0.31.1] - 2026-05-10
 
 ### Add (V0.31 系列 commit 2/4 — console_script web-agent-vault set/get/delete/list)
