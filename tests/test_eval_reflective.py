@@ -90,10 +90,14 @@ def test_compute_reflective_uplift_per_task_per_axis_overall():
 
 
 def test_compute_reflective_uplift_counts_reflections_written_correctly():
-    """V0.28.3: reflections_written = run1 失败且 failure_bucket in (max_steps/LOOP_DETECTED) 数."""
+    """V0.28.3: reflections_written = run1 失败且 failure_bucket in (max_steps/LOOP_DETECTED) 数.
+
+    V0.29.5: bucket "(max_steps" 含左括号 (runner.py:67 split 输出格式), 跟 reflect.should_reflect
+    触发集对齐. V0.28.3 起 fixture 用 bare "max_steps" 是 stale, 实 runner 永不产此 bucket.
+    """
     metrics = [
-        # t1: max_steps 触发 reflection
-        _mk_metric("t1", "anthropic", pass_=False, inject_reflections=False, failure_bucket="max_steps"),
+        # t1: (max_steps 触发 reflection (V0.29.5: 实 runner 输出格式)
+        _mk_metric("t1", "anthropic", pass_=False, inject_reflections=False, failure_bucket="(max_steps"),
         _mk_metric("t1", "anthropic", pass_=True, inject_reflections=True),
         # t2: LOOP_DETECTED 触发 reflection
         _mk_metric("t2", "anthropic", pass_=False, inject_reflections=False, failure_bucket="LOOP_DETECTED"),
@@ -140,7 +144,7 @@ def test_compute_reflective_uplift_empty_metrics():
 def test_render_reflective_uplift_markdown_full():
     """V0.28.3: 渲染 markdown 含 overall + axis + per_task + reflections_written."""
     metrics = [
-        _mk_metric("t1", "anthropic", pass_=False, inject_reflections=False, failure_bucket="max_steps"),
+        _mk_metric("t1", "anthropic", pass_=False, inject_reflections=False, failure_bucket="(max_steps"),
         _mk_metric("t1", "anthropic", pass_=True, inject_reflections=True),
         _mk_metric("t2", "anthropic", pass_=True, inject_reflections=False),
         _mk_metric("t2", "anthropic", pass_=True, inject_reflections=True),
