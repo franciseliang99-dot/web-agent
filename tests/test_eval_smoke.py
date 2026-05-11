@@ -183,6 +183,23 @@ def test_eval_nightly_workflow_default_disabled():
 # ---------- V0.30.5 收尾: --corpus real-world axis filter 验 ----------
 
 
+def test_select_tasks_capability_real_world_virtual_axis_returns_3_v035_tasks():
+    """V0.35.3: --corpus capability-real-world → 3 V0.35 actuator 真站点轴 task.
+
+    real-world ∩ V0.35 actuator task (tag 'v035'). 跟 V0.32.3 chain-real-world 同 virtual axis pattern.
+    """
+    tasks = _select_tasks("capability-real-world")
+    assert len(tasks) == 3
+    assert all(t.capability_axis == "real-world" for t in tasks)
+    assert all("v035" in t.tags for t in tasks)
+    task_ids = {t.task_id for t in tasks}
+    assert task_ids == {
+        "v035-wikipedia-search-quantum-field-theory",
+        "v035-github-octocat-commits-first",
+        "v035-wikipedia-qft-scroll-history-section",
+    }
+
+
 def test_select_tasks_real_world_axis_returns_8_real_net_tasks():
     """V0.35.2: --corpus real-world → 8 task (V0.30 3 + V0.32 2 chain + V0.35 3 actuator).
 

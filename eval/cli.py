@@ -48,11 +48,24 @@ def _select_tasks_chain_real_world() -> list:  # type: ignore[type-arg]
     return [t for t in ALL_TASKS if t.capability_axis == "real-world" and t.chain_spec is not None]
 
 
+def _select_tasks_capability_real_world() -> list:  # type: ignore[type-arg]
+    """V0.35.3: 虚拟 axis 'capability-real-world' — V0.35 A 双轴交叉 (real-world axis ∩ V0.35 actuator task).
+
+    V0.35.0+V0.35.2 加的 3 actuator 真站点轴 task (search / click-nav / scroll), 通过 tag 'v035'
+    区分. 跟 V0.32.3 'chain-real-world' 同 pattern (real-world ∩ feature axis 双标).
+
+    `--corpus capability-real-world` 让 maintainer 单跑 V0.35 actuator task 不 wading 全 corpus.
+    """
+    from eval.corpus import ALL_TASKS
+    return [t for t in ALL_TASKS if t.capability_axis == "real-world" and "v035" in t.tags]
+
+
 def _select_tasks(corpus_filter: str) -> list:  # type: ignore[type-arg]
-    """V0.26.3+V0.32.3: --corpus all / <axis> / 'chain-real-world' 选 task 子集.
+    """V0.26.3+V0.32.3+V0.35.3: --corpus all / <axis> / 'chain-real-world' / 'capability-real-world'.
 
     - "all": 全 corpus (default)
     - "chain-real-world" (V0.32.3 虚拟 axis): real-world ∩ chain_spec≠None (V0.32 D' 双轴交叉)
+    - "capability-real-world" (V0.35.3 虚拟 axis): real-world ∩ V0.35 actuator task (A 双轴交叉)
     - 其他: capability_axis 单选 (V0.26.0 CapabilityAxis Literal 12 项)
     """
     from eval.corpus import ALL_TASKS
@@ -60,6 +73,8 @@ def _select_tasks(corpus_filter: str) -> list:  # type: ignore[type-arg]
         return list(ALL_TASKS)
     if corpus_filter == "chain-real-world":
         return _select_tasks_chain_real_world()
+    if corpus_filter == "capability-real-world":
+        return _select_tasks_capability_real_world()
     return [t for t in ALL_TASKS if t.capability_axis == corpus_filter]
 
 
@@ -234,7 +249,8 @@ def main() -> None:
         help=(
             "task 选择: 'all' 跑全 corpus; 或 capability_axis 单选 (e.g. 'iframe' / 'multi-tab' / "
             "'real-world' V0.30 真外网 task 默 LIVE_NET=1 才放行); 或虚拟 axis "
-            "'chain-real-world' (V0.32 D' 双轴交叉: real-world ∩ chain_spec)"
+            "'chain-real-world' (V0.32 D' 双轴交叉: real-world ∩ chain_spec) / "
+            "'capability-real-world' (V0.35 A 双轴: real-world ∩ V0.35 actuator task)"
         ),
     )
     parser.add_argument(

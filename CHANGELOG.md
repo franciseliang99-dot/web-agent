@@ -2,6 +2,111 @@
 
 All notable changes to web-agent. 版本号遵循 SemVer 简化形式（V<major>.<minor>.<patch>）。
 
+## [0.35.3] - 2026-05-11
+
+### Feat + Doc (V0.35 A 真站点 eval 双轴扩系列收尾 3/3 — virtual axis filter + retrospective)
+
+V0.35.0 (1 actuator-search task) + V0.35.2 (+2 actuator-click-nav / actuator-scroll task) 已落地
+3 actuator 子轴真站点 corpus 矩阵. 本提交收尾 = cli `capability-real-world` virtual axis filter
++ CHANGELOG 系列总结. 跟 V0.33.4 / V0.34.5 系列收尾同节奏.
+
+### V0.35 系列回顾 (3 commit + 1 deferred)
+
+| ver | 主题 | scope | autonomous |
+|-----|------|-------|------------|
+| V0.35.0 | actuator-search 真站点起点 | wikipedia 搜索 actuator type+click + 5 fast 测 | ✅ |
+| V0.35.1 | maintainer 真录 cassette | **deferred** (跟 V0.32.1 / V0.33.4 cassette 录同 SemVer 跳号) | 🛑 红线 |
+| V0.35.2 | +2 actuator 子轴 task | github commits click-nav + wikipedia QFT scroll | ✅ |
+| **V0.35.3** | 系列收尾 + virtual axis | cli `--corpus capability-real-world` filter (跟 V0.32.3 chain-real-world 同 pattern) + retrospective | ✅ |
+
+V0.35 A 真站点 eval 双轴扩系列闭环 (3 commit 全 autonomous + 1 deferred maintainer).
+
+### V0.35 corpus 矩阵 (3 task × 3 actuator 子轴)
+
+| actuator 子轴 | task | predicate | tags |
+|--------------|------|-----------|------|
+| type+submit | v035-wikipedia-search-quantum-field-theory | "Quantum field theory" | v035, actuator-search, wikipedia |
+| click + multi-page nav | v035-github-octocat-commits-first | "Spaceghost" | v035, actuator-click-nav, github |
+| scroll-to-section | v035-wikipedia-qft-scroll-history-section | "theoretical physicists" | v035, actuator-scroll, wikipedia |
+
+跟 V0.30 D real-world (3 task 全 perceiver 静态 extract) + V0.32 D' chain × real-world (2 task)
+形成完整真站点矩阵.
+
+### V0.34 教训应用: micro experiment 制度化第 2 次
+
+V0.34.5 retrospective 沉淀 "synthetic ≠ 真, 实施前 micro experiment 验". V0.35 系列应用 2 次:
+
+- **V0.35.0**: Plan agent 第一提议 W3C iframe fixture (`/Style/Examples/007/figures.en.html`)
+  curl probe iframe count=0 推翻 → reframe 为 wikipedia 搜索 fixture. 省 80+ LOC 实施后才发现
+  fixture 错的成本.
+- **V0.35.2**: subagent 商议 4 候选 (B/A/C/D), curl + GitHub API probe 验数据:
+  - B octocat commits 真测 freezed since 2014 → 选
+  - A wikipedia QFT History anchor 真测稳 → 选
+  - C contributors "1 contributor" predicate 语义不符 (3 人) → 否决
+  - D wiki sidebar toc Vector 2022 skin 渲染不稳 → 否决
+
+V0.34 教训制度化生效: **fixture / plan / ROI 假设的 micro experiment 验是 V0.34+ 标准前置步**,
+而非 V0.34 之前的"Plan agent 估算就上手"模式.
+
+### 累计真发现至 V0.35: 17 个 (V0.35 系列贡献 0)
+
+V0.35 是真站点 corpus 扩展系列, 无新代码层真发现 (跟 V0.30 / V0.32 real-world corpus 扩同
+性质 — 加 fixture 不 expose 系统层 bug). V0.34 是真发现密集系列 (3 个), V0.35 是 corpus 矩阵
+扩展系列.
+
+### Changed (~30 src LOC + ~20 test LOC + ~80 CHANGELOG LOC)
+
+- `eval/cli.py`:
+  - `_select_tasks_capability_real_world()` 新 ~10 行 (跟 V0.32.3 `_select_tasks_chain_real_world` 同 pattern)
+  - `_select_tasks` 加 if 分支 + docstring 更新
+  - argparse --corpus help 加 `'capability-real-world'` 提示
+- `tests/test_eval_smoke.py` +1 测 `test_select_tasks_capability_real_world_virtual_axis_returns_3_v035_tasks`
+- `pyproject.toml` / `__init__.py` 0.35.2 → 0.35.3
+- `CHANGELOG.md` V0.35.3 retrospective entry (本)
+- `uv.lock` 同步
+
+### Verify
+
+- `uv run pytest` → **778 passed, 25 skipped** (+1 virtual axis 测)
+- `uv run ruff check` → all clean
+- `uv run mypy` → Success no issues in 50 src files
+- Maintainer 真跑命令 (V0.35.1 deferred 兑现时):
+  ```bash
+  WEB_AGENT_RUN_EVAL=1 WEB_AGENT_EVAL_REAL=1 WEB_AGENT_EVAL_LIVE_NET=1 \
+    ANTHROPIC_API_KEY=sk-ant-... \
+    uv run web-agent-eval --corpus capability-real-world --providers anthropic
+  # 跑 3 V0.35 actuator 真站点 task (search + click-nav + scroll), 各 flaky_repeat=3
+  # 预估 cost: ~$0.05-0.10 token × 3 task × 3 repeat = ~$0.5-1
+  # 预估 wallclock: ~2-5 分钟 (V0.30 wikipedia ~30s + V0.35 actuator 多步骤可能 60-120s)
+  ```
+
+### 限制 / 遗留
+
+- **V0.35.1 真录 cassette deferred**: autonomous 红线触发, 需 maintainer 介入 (ANTHROPIC_API_KEY +
+  真烧 token). 跟 V0.32.1 / V0.33.4 deferred 同模式 (SemVer 跳号), maintainer when ready 跑.
+- **V0.35 task spec 真测 e2e 验证 deferred**: V0.35.0/V0.35.2 仅落 EvalTask spec + fast 测,
+  真跑通否 (LLM 真选 actuator + 真站点交互 + predicate 真过) 留 V0.35.1 cassette 录时验.
+  风险: actuator scroll task 文案约束 "禁 toc click" LLM 是否真遵守, 真录时可能发现需调整 goal.
+- **真站点 fixture 漂风险**: GitHub UI 改版 / wikipedia article 改写虽 5+ 年稳, 但月度 monitor
+  仍必要 (V0.30 corpus 沿用同 risk model).
+- **systemd-style 批量 audit 兑现**: V0.33.4 提的"每 5 commit 一次 audit"在 V0.35 系列 **有兑现**
+  — V0.34 教训 (micro experiment) 在 V0.35 应用 2 次抓出 fixture 错, 跟 V0.34.3→V0.34.4 真测推翻
+  Plan agent 估算同模式. 沉淀此为正面案例第 2 次.
+
+### V0.36 主题路径 inventory (留 user 选)
+
+跟 V0.33.4 / V0.34.5 同句式. user 看了选, autonomous 红线 = 项目方向决策需 user 输入.
+
+候选路径:
+- **B' lean / WebP 改默后 baseline 双跑** (V0.33.4 deferred 量化, 跟 V0.35.1 同 maintainer 真录性质)
+- **F2 SoM JS 三 walker 合并** (V0.34.5 deferred 推走, 代码 simplification 不是 perf gain)
+- **G stealth 加固** (sannysoft.com 72% → 85%+, V0.34.5 候选)
+- **I 内存优化** (trace.db 增长 / screenshots/ 清理, V0.34.5 候选)
+- **新真发现 sub-route 优化** (基于 V0.30/V0.32/V0.35 真站点 corpus 找新 bottleneck)
+- 其他用户提的方向
+
+(不带 ROI 估算 — V0.34 教训应用第 3 次: 项目方向 ROI 假设也需 user 输入而非 Claude 自决.)
+
 ## [0.35.2] - 2026-05-11
 
 ### Feat (V0.35 A 真站点 eval 双轴扩 2/N — actuator click navigation + actuator scroll 真站点轴)
