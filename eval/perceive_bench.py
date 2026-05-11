@@ -18,8 +18,9 @@ from __future__ import annotations
 
 import argparse
 import json
+import re
 import sys
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass
 from pathlib import Path
 
 
@@ -226,16 +227,37 @@ def render_bench_compare_markdown(report: BenchCompareReport) -> str:
     return "\n".join(rows)
 
 
-def main(argv: list[str] | None = None) -> int:
-    """V0.34.0: web-agent-perceive-bench cli — fixture / compare / stats subcommands.
+_FIXTURE_SPEC_RE = re.compile(r"^if(\d+)-sh(\d+)-leaf(\d+)$")
 
-    V0.34.0 framework only — `run` subcommand (真跑 chromium) 留给 V0.34.x 后续 commit (gate
-    WEB_AGENT_RUN_SLOW=1). 当前 cli 仅 fixture (生 HTML 给 maintainer 真跑) + compare / stats.
+
+def _parse_fixture_spec(spec: str) -> BenchFixture:
+    """V0.34.1: 解析 fixture spec 字符串 'if{N}-sh{M}-leaf{K}' → BenchFixture.
+
+    跟 build_synthetic_fixture 同 fixture_id 命名规则 (互逆), 让 CLI / 测试两端用文本 spec
+    驱动同一 fixture. 非法格式 raise ValueError (CLI 走 exit 2 分支).
+    """
+    m = _FIXTURE_SPEC_RE.match(spec.strip())
+    if not m:
+        raise ValueError(
+            f"非法 fixture spec: {spec!r} (期望 'if{{N}}-sh{{M}}-leaf{{K}}', "
+            f"e.g. 'if0-sh0-leaf5')",
+        )
+    return build_synthetic_fixture(int(m.group(1)), int(m.group(2)), int(m.group(3)))
+
+
+def main(argv: list[str] | None = None) -> int:
+    """V0.34.0+: web-agent-perceive-bench cli — fixture / compare / stats / run subcommands.
+
+    V0.34.0 落 framework-only (fixture/compare/stats); V0.34.1 加 run subcommand 真跑 chromium
+    (lazy import adapter, framework 本身仍 0-Playwright deps). gate 推荐 WEB_AGENT_RUN_SLOW=1
+    (跟 test_loop_iframe / test_stealth_probe_sannysoft 同模式).
 
     用法:
         web-agent-perceive-bench fixture --iframe 3 --shadow 2 --leaf 5
         web-agent-perceive-bench compare data/bench/v034-A.json data/bench/v034-B.json
         web-agent-perceive-bench stats data/bench/v034-A.json
+        web-agent-perceive-bench run --fixtures "if0-sh0-leaf5,if2-sh0-leaf3" --samples 5 \\
+            --out data/bench/v0.34.1-baseline.json
     """
     parser = argparse.ArgumentParser(
         prog="web-agent-perceive-bench",
@@ -257,6 +279,24 @@ def main(argv: list[str] | None = None) -> int:
 
     sp_stats = sub.add_parser("stats", help="单 bench per-fixture 时间/mark/内存 stats")
     sp_stats.add_argument("path", help="bench JSON path")
+
+    sp_run = sub.add_parser(
+        "run",
+        help="V0.34.1 真跑 chromium 测 perceive() (gate WEB_AGENT_RUN_SLOW=1 推荐)",
+    )
+    sp_run.add_argument(
+        "--fixtures",
+        required=True,
+        help="逗号分隔 fixture spec (e.g. 'if0-sh0-leaf5,if2-sh0-leaf3')",
+    )
+    sp_run.add_argument("--samples", type=int, default=5, help="每 fixture sample 数 (默 5, median)")
+    sp_run.add_argument("--out", help="输出 bench JSON 路径 (默 stdout)")
+    sp_run.add_argument(
+        "--headless",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="chromium headless (默 True; --no-headless 调试)",
+    )
 
     args = parser.parse_args(argv)
 
@@ -284,6 +324,33 @@ def main(argv: list[str] | None = None) -> int:
                     f"mem={r.memory_kb:.1f}KB shadow_walks={r.shadow_walks} "
                     f"iframe_walks={r.iframe_walks} (n={r.sample_count})\n",
                 )
+            return 0
+        if args.cmd == "run":
+            # V0.34.1 lazy import adapter — framework-only 模块本身 0 Playwright deps
+            import asyncio
+
+            from eval.perceive_bench_adapter import run_bench_against_chromium
+
+            fixtures = [
+                _parse_fixture_spec(s) for s in args.fixtures.split(",") if s.strip()
+            ]
+            if not fixtures:
+                sys.stderr.write("ERROR: --fixtures 空 (期望逗号分隔 spec list)\n")
+                return 2
+            results = asyncio.run(
+                run_bench_against_chromium(
+                    fixtures, samples_per=args.samples, headless=args.headless,
+                ),
+            )
+            payload = {"bench_results": [asdict(r) for r in results]}
+            text = json.dumps(payload, indent=2)
+            if args.out:
+                Path(args.out).write_text(text + "\n", encoding="utf-8")
+                sys.stdout.write(
+                    f"bench run → {args.out} ({len(results)} fixtures × {args.samples} samples)\n",
+                )
+            else:
+                sys.stdout.write(text + "\n")
             return 0
     except FileNotFoundError as e:
         sys.stderr.write(f"ERROR: {e}\n")

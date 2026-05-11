@@ -2,6 +2,91 @@
 
 All notable changes to web-agent. 版本号遵循 SemVer 简化形式（V<major>.<minor>.<patch>）。
 
+## [0.34.1] - 2026-05-11
+
+### Add (V0.34 F sub-route 优化系列 2/N — 真跑 chromium adapter 兑现 V0.34.0 deferred)
+
+V0.34.0 落 framework 时明说 "真跑 fixture 留 V0.34.x 后续 commit (gate WEB_AGENT_RUN_SLOW=1,
+deferred maintainer 同 V0.33.4 baseline how-to 模式)". 本提交兑现该承诺 — 加 chromium adapter
+真跑 perceive(), 测 ms / mark_count / memory_kb (tracemalloc peak), median 多 sample.
+
+### 解耦审查 (CLAUDE.md 依赖方向 domain ← ports ← 业务 ← 组合根)
+
+- domain: `eval/perceive_bench.py` dataclass + JSON I/O (仅 stdlib, **0 Playwright deps**)
+- adapter (业务): `eval/perceive_bench_adapter.py` 唯一允许 import `playwright.async_api` + `web_agent.perceiver.perceive`
+- 组合根: `eval/perceive_bench.py:main()` run subparser **lazy import** adapter (framework 模块 import 时不强拖 Playwright)
+- `src/web_agent/perceiver.py` **0 改动** → V0.34.1 不破 V0.33.x 字节级兼容
+- adapter 单向依赖 perceiver (perceiver 改 → adapter 跟随; adapter 改 ✗ 不影响 perceiver)
+
+### Changed (~290 LOC, +10 测)
+
+- `eval/perceive_bench_adapter.py` **新建** ~95 行:
+  - `run_bench_against_chromium(fixtures, *, samples_per=5, headless=True) -> list[BenchResult]`
+  - data URI (`"data:text/html;charset=utf-8," + quote(html)`) + `page.goto` 加载 (跟 V0.22.1 `_PARENT_URL` 同模式; 不写临时文件; networkidle 容忍 2s timeout)
+  - `tracemalloc.start() → get_traced_memory()[1] (peak) → stop()` 测 Python heap 峰值 (stdlib; 不加 psutil 防 RSS 含 chromium child noise)
+  - 每 fixture sample loop 取 `statistics.median(ms_samples)` / `median(mem_samples_kb)` 防 GC noise
+  - `shadow_walks` / `iframe_walks` V0.34.1 暂 0 (perceiver JS walker 不暴露 counter, 留 V0.34.x SoM 优化时补)
+  - try/finally 守护 `browser.close()` / `context.close()` (异常路径不 leak chromium)
+- `eval/perceive_bench.py` 扩 cli `run` subparser + `_parse_fixture_spec` helper (+~55 行, framework 模块本身仍 0 Playwright):
+  - `run --fixtures CSV --samples N --out path --[no-]headless` 参数
+  - `_parse_fixture_spec("if{N}-sh{M}-leaf{K}")` regex 互逆 `build_synthetic_fixture` (CLI / 测两端用文本 spec 驱动同 fixture)
+  - `run` 分支 **lazy import** `asyncio` + `eval.perceive_bench_adapter` (framework 模块顶部不强拖 Playwright)
+  - 顶部 imports 加 `re` + `asdict` (run 分支 JSON dump 用)
+- `tests/test_perceive_bench_adapter.py` **新建** ~125 行 4 unit 测 (mock chromium + perceive):
+  - `mark_count` 收集 + `sample_count` + walks=0 验证
+  - multi-fixture 输入顺序保留
+  - `samples_per < 1` raise (launch 前)
+  - perceive raise 时 `browser.close()` 仍 await (try/finally cleanup 验证)
+- `tests/test_perceive_bench_real.py` **新建** ~50 行 3 slow smoke (真 chromium):
+  - baseline `if0-sh0-leaf5` → 5 marks
+  - iframe `if2-sh0-leaf3` → 9 marks (3 frame × 3 leaf, 8-9 容忍 srcdoc timing)
+  - samples_per=3 median 验证
+  - `pytest.mark.slow + skipif WEB_AGENT_RUN_SLOW != "1"` 双保险, 默 CI 跳
+- `tests/test_perceive_bench.py` +3 `_parse_fixture_spec` 单测 (baseline / nontrivial+whitespace / invalid raises)
+- `pyproject.toml` / `__init__.py` 0.34.0 → 0.34.1
+- `uv.lock` 同步
+
+### Verify
+
+- `uv run pytest` → **758 passed, 21 skipped** (+7 unit/parse, +3 slow smoke skipped, 0 现测破)
+  - test_perceive_bench.py: 24 → 27 (+3 `_parse_fixture_spec`)
+  - test_perceive_bench_adapter.py: **新** 4 unit (mock)
+  - test_perceive_bench_real.py: **新** 3 slow (skipped 因 `WEB_AGENT_RUN_SLOW != "1"`)
+- `uv run ruff check` → all clean
+- `uv run mypy` → Success: no issues found in 49 source files
+
+### Maintainer how-to: V0.34.1 真跑 perceive bench
+
+跟 V0.33.4 deferred 同节奏 — opt-in via env, 不进 default CI:
+
+```bash
+# 1. slow smoke 3 测 (~10s, 1 fixture × 2-3 samples × ~50ms perceive + browser launch ~2s)
+WEB_AGENT_RUN_SLOW=1 uv run pytest tests/test_perceive_bench_real.py -v
+
+# 2. CLI 真跑 baseline + JSON dump (给 V0.34.2+ A/B compare 用)
+uv run web-agent-perceive-bench run \
+  --fixtures "if0-sh0-leaf5,if2-sh0-leaf3,if0-sh2-leaf5,if3-sh1-leaf5" \
+  --samples 5 \
+  --out data/bench/v0.34.1-baseline.json
+
+# 3. A vs B compare (跟 V0.34.0 framework 闭环, V0.34.2 F1 落地后用)
+uv run web-agent-perceive-bench compare \
+  data/bench/v0.34.1-baseline.json data/bench/v0.34.2-after-F1.json \
+  --a-label "V0.34.1 baseline" --b-label "V0.34.2 F1 iframe 并发"
+```
+
+### V0.34 系列进度更新
+
+| ver | 状态 | scope |
+|-----|------|-------|
+| V0.34.0 | ✅ | bench harness framework (BenchFixture/Result/Compare + cli compare/stats/fixture + 24 测) |
+| **V0.34.1** | ✅ 本提交 | 真跑 chromium adapter (data URI + tracemalloc peak + median) + `run` subcmd + 7 unit / 3 slow smoke |
+| V0.34.2 | 待 | F1 iframe DFS asyncio.gather 并发 (估 wallclock -30~50% 多 iframe 站; 先跑 V0.34.1 baseline 出数排序) |
+| V0.34.3 | 待 | F2 SoM JS 三 walker 合并 (主 frame 单次 evaluate -2 round-trip ~15-30ms) |
+| V0.34.4 | 待 | 系列收尾 + V0.34 retrospective |
+
+(V0.34.x 具体顺序按 V0.34.1 真跑 baseline 出数后调整; 跟 V0.33.0 → V0.33.4 节奏一致.)
+
 ## [0.34.0] - 2026-05-11
 
 ### Add (V0.34 F sub-route 优化系列开篇 1/x — perceive() 子流程 bench harness framework)

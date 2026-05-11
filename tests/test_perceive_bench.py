@@ -10,6 +10,7 @@ from eval.perceive_bench import (
     BenchCompareReport,
     BenchFixture,
     BenchResult,
+    _parse_fixture_spec,
     build_synthetic_fixture,
     compare_benches,
     load_bench_json,
@@ -295,3 +296,34 @@ def test_bench_compare_report_frozen_slots():
     assert isinstance(r, BenchCompareReport)
     with pytest.raises((AttributeError, TypeError)):
         r.a_label = "X"  # type: ignore[misc]
+
+
+# ---------- _parse_fixture_spec (V0.34.1 cli helper) ----------
+
+
+def test_parse_fixture_spec_baseline():
+    """V0.34.1: 'if0-sh0-leaf5' → BenchFixture (与 build_synthetic_fixture fixture_id 互逆)."""
+    f = _parse_fixture_spec("if0-sh0-leaf5")
+    assert f.fixture_id == "if0-sh0-leaf5"
+    assert f.iframe_count == 0
+    assert f.shadow_count == 0
+    assert f.leaf_per_branch == 5
+
+
+def test_parse_fixture_spec_nontrivial_and_whitespace():
+    """V0.34.1: 'if3-sh2-leaf7' 多位数 + 前后空白容忍 (.strip())."""
+    f = _parse_fixture_spec("  if3-sh2-leaf7  ")
+    assert f.fixture_id == "if3-sh2-leaf7"
+    assert f.iframe_count == 3
+    assert f.shadow_count == 2
+    assert f.leaf_per_branch == 7
+
+
+def test_parse_fixture_spec_invalid_raises():
+    """V0.34.1: 非法 spec (空 / 缺连字符 / 含非数字 / leaf=0) 抛 ValueError."""
+    for bad in ["", "if0sh0leaf5", "ifX-sh0-leaf5", "if-1-sh0-leaf5"]:
+        with pytest.raises(ValueError, match=r"非法 fixture spec"):
+            _parse_fixture_spec(bad)
+    # leaf=0 经 build_synthetic_fixture 抛 (规则 leaf>=1)
+    with pytest.raises(ValueError, match=r"leaf"):
+        _parse_fixture_spec("if0-sh0-leaf0")
