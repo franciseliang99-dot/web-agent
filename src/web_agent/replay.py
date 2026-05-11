@@ -131,7 +131,27 @@ def _fmt_ts(ts: float | None) -> str:
     return datetime.fromtimestamp(ts).isoformat(timespec="seconds")
 
 
-def _shot_src(task_id: str, step: int) -> str:
+def _shot_src(task_id: str, step: int, screenshots_root: Path | None = None) -> str:
+    """V0.36.1: per-task subdir BC fallback. 新 task screenshot 落 data/screenshots/<task_id>/
+    <NN>.{png|webp}, 老 task 仍 data/screenshots/<task_id>-<NN>.png. server-side file existence
+    check 决定 HTML img src 路径, 老 task replay 不破.
+
+    V0.33.3 webp 兼容: 优先 .webp (V0.33.3+ WebP opt-in) 再 .png (默 PNG), 各路径同优先级.
+    """
+    if screenshots_root is None:
+        # 跟 DEFAULT_DB / DEFAULT_OUT 默 data/ 一致
+        screenshots_root = Path("data/screenshots")
+    # 优先级: 新 per-task subdir (webp → png) > 老 flat (webp → png)
+    candidates = [
+        (f"{SCREENSHOT_DIR_REL}/{task_id}/{step:02d}.webp", screenshots_root / task_id / f"{step:02d}.webp"),
+        (f"{SCREENSHOT_DIR_REL}/{task_id}/{step:02d}.png", screenshots_root / task_id / f"{step:02d}.png"),
+        (f"{SCREENSHOT_DIR_REL}/{task_id}-{step:02d}.webp", screenshots_root / f"{task_id}-{step:02d}.webp"),
+        (f"{SCREENSHOT_DIR_REL}/{task_id}-{step:02d}.png", screenshots_root / f"{task_id}-{step:02d}.png"),
+    ]
+    for rel, abs_path in candidates:
+        if abs_path.exists():
+            return rel
+    # 全不存在 → 返老 flat .png (legacy 默, HTML 渲 404 提示用户截图丢失)
     return f"{SCREENSHOT_DIR_REL}/{task_id}-{step:02d}.png"
 
 

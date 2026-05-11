@@ -556,8 +556,12 @@ async def run_react_loop(
             _maybe_inject_reflect_hint(trace, recent_pages, fp)
 
             # V0.33.3: 落盘后缀跟 perceiver 截图格式一致 (.webp 模式 ~70% 磁盘省).
+            # V0.36.1: per-task subdir 让 cleanup 粒度对齐 task (data/screenshots/<task_id>/<NN>.{ext}
+            # 取代 V0.36 之前 flat data/screenshots/<task_id>-<NN>.{ext}). 老 task replay.py BC fallback.
             from web_agent.perceiver import current_screenshot_format
-            shot_path = screenshots_dir / f"{task_id}-{step_i:02d}.{current_screenshot_format()}"
+            task_shots_dir = screenshots_dir / task_id
+            task_shots_dir.mkdir(parents=True, exist_ok=True)
+            shot_path = task_shots_dir / f"{step_i:02d}.{current_screenshot_format()}"
             shot_path.write_bytes(base64.b64decode(screenshot_b64))
 
             logger.info("step %d perceive: %d marks, screenshot %s | t+%.1fs", step_i, len(marks), shot_path, elapsed)

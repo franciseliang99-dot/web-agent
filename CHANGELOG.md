@@ -2,6 +2,65 @@
 
 All notable changes to web-agent. 版本号遵循 SemVer 简化形式（V<major>.<minor>.<patch>）。
 
+## [0.36.1] - 2026-05-11
+
+### Feat (V0.36 I 内存优化系列 2/N — loop.py per-task subdir screenshot + replay.py BC fallback)
+
+V0.36.0 落 disk baseline framework, V0.36.1 改 loop.py screenshot 写盘路径模式让 cleanup 粒度
+对齐 task: `data/screenshots/<task_id>/<NN>.{ext}` 取代 V0.36 之前 flat `data/screenshots/<task_id>-<NN>.{ext}`.
+
+让 V0.36.2 真删时一个 task 一删除整个 subdir, 不再 glob `<task_id>-*.png` (老 flat 模式 cleanup
+要遍历全 dir + regex match + 一一删, 慢 + 易误删跨 task).
+
+### V0.34 教训应用: BC fallback 让老 task replay 不破
+
+V0.34.5 沉淀的"实施前真测 baseline"在 V0.36.1 应用第 N 次: 实施前确认 87 task × 393 screenshot
+都是老 flat 模式 — V0.36.1 切新 per-task subdir **必须保**老 task screenshot 仍能 replay 不破.
+
+`replay.py:_shot_src` 加 file-existence-based BC fallback: 优先新 per-task subdir (webp → png)
++ fallback 老 flat (webp → png) + 全 fail 返 legacy flat .png 默 (HTML 404 容错). 新 task 走
+新路径, 老 task 自动走老路径, 0 trace.db schema 改.
+
+### Changed (~10 src LOC + ~40 测 LOC)
+
+- `src/web_agent/loop.py:559-565`:
+  - `task_shots_dir = screenshots_dir / task_id; task_shots_dir.mkdir(parents=True, exist_ok=True)`
+  - `shot_path = task_shots_dir / f"{step_i:02d}.{current_screenshot_format()}"`
+  - V0.33.3 webp opt-in 继续兼容 (`.{current_screenshot_format()}` 动态后缀)
+- `src/web_agent/replay.py:134-159`:
+  - `_shot_src(task_id, step, screenshots_root=None)` 改 file-existence-based BC fallback
+  - 4 候选优先级: 新-webp > 新-png > 老-webp > 老-png > legacy 默 (老 flat .png)
+  - 新 `screenshots_root: Path | None = None` 参数让测注 tmp_path
+- `tests/test_replay.py` +4 fast 测:
+  - `test_shot_src_v036_per_task_subdir_priority` 新 path 优先
+  - `test_shot_src_v036_legacy_flat_fallback` 老 path fallback
+  - `test_shot_src_v036_webp_priority_over_png` webp 同 subdir 内优先
+  - `test_shot_src_v036_all_missing_returns_legacy_default` 全 fail 返 legacy
+  - 现有 `test_render_html_screenshot_relative_path` 调整 docstring (V0.36.1 默 legacy fallback 行为)
+- `pyproject.toml` / `__init__.py` 0.36.0 → 0.36.1
+- `uv.lock` 同步
+
+### Verify
+
+- `uv run pytest` → **795 passed, 25 skipped** (+4 V0.36.1 _shot_src 测, 0 现测破)
+- `uv run ruff check` → all clean
+- `uv run mypy` → Success no issues in 51 src files
+
+### 解耦审查
+
+V0.36.1 改 `loop.py` (主要副作用层) + `replay.py` (渲染层), 0 改 `trace.py` schema (V0.12.4 字段
+`screenshot_path TEXT` 自适应路径字符串). V0.22.x actuator iframe path 不受影响. trace.db 字段
+`screenshot_path` 写新路径字符串 (`data/screenshots/<task_id>/<NN>.png`), replay 读后判存在自动路径 mapping.
+
+### V0.36 系列进度
+
+| ver | 状态 | scope | autonomous |
+|-----|------|-------|------------|
+| V0.36.0 | ✅ | disk baseline framework | ✅ |
+| **V0.36.1** | ✅ 本提交 | loop.py per-task subdir + replay.py BC fallback | ✅ |
+| V0.36.2 | 待 | data-clean CLI TTL + --dry-run | 🛑 红线 retention 产品决策 |
+| V0.36.3 | 待 | sqlite VACUUM + index 体检 + 系列收尾 + compare V0.36.0 vs V0.36.x baseline | ✅ (+ backup 保护) |
+
 ## [0.36.0] - 2026-05-11
 
 ### Feat (V0.36 I 内存优化系列开篇 1/N — disk baseline framework, 跟 V0.33.0 / V0.34.0 同节奏)

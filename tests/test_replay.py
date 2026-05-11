@@ -134,12 +134,52 @@ def test_render_html_safety_block_class_and_rule(tmp_path):
 
 
 def test_render_html_screenshot_relative_path(tmp_path):
+    """V0.36.1: 默 fallback 老 flat path (无 screenshot 文件存在时, _shot_src legacy default)."""
     db = tmp_path / "trace.db"
     _seed_db(db, task_id="t1")
     task = load_task("t1", db_path=db)
     html_out = render_html(task)
+    # V0.36.1 _shot_src 全候选都 file-existence-fail → 返 legacy flat .png 默
     assert "../screenshots/t1-00.png" in html_out
     assert "../screenshots/t1-03.png" in html_out
+
+
+def test_shot_src_v036_per_task_subdir_priority(tmp_path):
+    """V0.36.1: 新 per-task subdir path 存在 → 优先 (data/screenshots/<task>/<NN>.png)."""
+    from web_agent.replay import _shot_src
+    screenshots_root = tmp_path
+    (screenshots_root / "t1").mkdir()
+    (screenshots_root / "t1" / "00.png").write_bytes(b"x")
+    rel = _shot_src("t1", 0, screenshots_root=screenshots_root)
+    assert rel == "../screenshots/t1/00.png"  # 新 per-task subdir 优先
+
+
+def test_shot_src_v036_legacy_flat_fallback(tmp_path):
+    """V0.36.1: 新 per-task subdir 不存在 → fallback 老 flat path."""
+    from web_agent.replay import _shot_src
+    screenshots_root = tmp_path
+    # 只写老 flat path, 不建 per-task subdir
+    (screenshots_root / "t1-00.png").write_bytes(b"x")
+    rel = _shot_src("t1", 0, screenshots_root=screenshots_root)
+    assert rel == "../screenshots/t1-00.png"  # 老 flat fallback
+
+
+def test_shot_src_v036_webp_priority_over_png(tmp_path):
+    """V0.36.1: 同 task 同 step 含 .webp + .png → .webp 优先 (V0.33.3 兼容)."""
+    from web_agent.replay import _shot_src
+    screenshots_root = tmp_path
+    (screenshots_root / "t1").mkdir()
+    (screenshots_root / "t1" / "00.webp").write_bytes(b"webp")
+    (screenshots_root / "t1" / "00.png").write_bytes(b"png")
+    rel = _shot_src("t1", 0, screenshots_root=screenshots_root)
+    assert rel == "../screenshots/t1/00.webp"  # webp 同 subdir 内优先
+
+
+def test_shot_src_v036_all_missing_returns_legacy_default(tmp_path):
+    """V0.36.1: 4 候选全 file-existence-fail → 返 legacy flat .png 默 (HTML 渲 404 容错)."""
+    from web_agent.replay import _shot_src
+    rel = _shot_src("t1", 0, screenshots_root=tmp_path)  # tmp_path 空, 全候选不存在
+    assert rel == "../screenshots/t1-00.png"
 
 
 def test_render_html_escapes_thought_xss(tmp_path):
