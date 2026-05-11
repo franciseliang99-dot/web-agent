@@ -2,6 +2,69 @@
 
 All notable changes to web-agent. 版本号遵循 SemVer 简化形式（V<major>.<minor>.<patch>）。
 
+## [0.33.0] - 2026-05-11
+
+### Add (V0.33 E 性能优化系列开篇 1/5 — token baseline framework + console_script + #13/#14)
+
+V0.32 D' chain × real-world 系列闭环后, 用户选 V0.33 主线 = **E 性能优化** (token / screenshot
+压缩). V0.33.0 开篇做测框架 framework (跟 V0.27.1 vault / V0.29.0 chain.py / V0.30.1 vcr framework
+同节奏), 后续 V0.33.1+ 真改 perceiver / runner.
+
+### Plan subagent 揭关键 #13 + #14 重排 V0.33 ROI 顺序
+
+**#13 WebP token 不直接减** (subagent 真发现): Anthropic 按 image tile 固定计费 ~1568 tok/image,
+WebP 减 70% bytes 不直接减 token. 真主源是 text (marks JSON × N + trace.for_llm 串联). →
+V0.33.3 WebP 降级为 V0.33.4 baseline 验完决定保留.
+
+**#14 V0.26.2 token 累加 silent bug** (subagent 真发现): runner.py:174 算 `last_usage.input_tokens
+× len(trace_steps)` 假设每 step token 恒定, 实际 prompt cache 命中后第 2+ step input_tokens 大降
+(anthropic ephemeral cache 5min). → 末次 × N 高估. → V0.33.1 优先于 SoM 精简 (修这个 ROI 比 WebP 大很多).
+
+按 ROI 重排 V0.33 顺序: framework → per-step accumulator (修 #14) → SoM lean → WebP → baseline 验.
+
+### V0.33 系列 commit 拆解 (5 commit)
+
+| ver | 状态 | scope |
+|-----|------|-------|
+| **V0.33.0** | ✅ 本提交 | token baseline framework (eval/token_baseline.py + 11 测) |
+| V0.33.1 | 待 | per-step token accumulator 修 V0.26.2 silent bug #14 |
+| V0.33.2 | 待 | SoM 字段 lean mode opt-in (WEB_AGENT_SOM_FIELDS=lean) |
+| V0.33.3 | 待 | screenshot WebP opt-in (WEB_AGENT_SCREENSHOT_FORMAT=webp) |
+| V0.33.4 | 待 | real_world baseline 双跑 (lean vs full / webp vs png) + 系列总结 |
+
+### Changed (~270 LOC)
+
+- `eval/token_baseline.py` **新建** ~150 行:
+  - `TaskTokenStats` frozen+slots dataclass (task_id/provider/input_tokens/output_tokens/cost/steps)
+  - `BaselineCompareReport` (per_task delta dict + overall sum + percent change)
+  - `load_baseline_json(path)` 从 eval JSON dump (V0.26.2 schema) 抽 TaskTokenStats list
+  - `compare_baselines(a, b)` per-(task,provider) delta + overall + percent (跟 V0.28.3
+    reflective_uplift 配对算法一致, 缺 pair 跳过)
+  - `render_baseline_compare_markdown(report)` overall + per-task 行
+  - `main()` argparse subparsers `compare A B` / `stats A` 子命令
+- `pyproject.toml` 加 `web-agent-token-baseline = "eval.token_baseline:main"` console_script
+- `tests/test_token_baseline.py` **新建** 11 测 (load minimal/missing path / compare delta+overall+
+  missing pair+zero a / render full+empty / cli compare+stats subcommand+missing path / entry-point)
+
+### V0.27+V0.28+V0.29+V0.30+V0.31+V0.32+V0.33 累计 subagent 真发现 = **14 处** (V0.33.0 +2)
+
+| # | 提出 | 内容 |
+|---|------|------|
+| 1-12 | (前 6 系列已列) | |
+| **13** | **V0.33 Plan subagent** | **WebP token 不直接减** — Anthropic 按 image tile 固定计费 ~1568 tok/image, WebP 减 70% bytes 不减 token. WebP 降级 V0.33.4 验完决定 |
+| **14** | **V0.33 Plan subagent** | **V0.26.2 token 累加 silent bug** — `last_usage × len(steps)` 假设每 step token 恒定, prompt cache 命中后第 2+ step input_tokens 大降, 末次 × N 高估. V0.33.1 优先修 |
+
+### Compatibility
+
+- 老 caller 0 改 (新 module + 新 console_script, 不动 perceiver/loop/runner)
+- mypy strict 0 (47 src, +1 token_baseline.py); ruff 0; pytest **709 + 18 skip** (V0.32.3 698+18 → +11)
+- 真 chromium 15/15 全过 (无新)
+
+### Why minor (V0.33.0) 不 patch
+
+- V0.33 主题切换 (V0.32 D' chain × real-world → V0.33 E 性能优化) = SemVer minor 功能新增
+- 跟 V0.21.0/.../V0.32.0 主题开篇 minor 风格一致
+
 ## [0.32.3] - 2026-05-10
 
 ### Add (V0.32 D' chain × real-world 系列收尾 4/4 — cli 'chain-real-world' 虚拟 axis filter)
