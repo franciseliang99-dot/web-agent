@@ -270,3 +270,59 @@ async def apply_stealth(page: Page) -> None:
         logger.warning("playwright-stealth 未安装，跳过 stealth")
     except Exception as e:
         logger.warning("stealth 注入失败 (%r)，跳过", e)
+
+
+# V0.30.0 G stealth 加固: page.add_init_script 注入 JS 在 page navigate 前 (每 frame 都跑).
+# 不依赖 playwright-stealth lib (apply_stealth 是 lib 调用, 本 JS 是补充加固防 lib 升级断).
+# 3 项加固 (subagent V0.30 plan D 决): webdriver hide + WebGL vendor randomize + permissions consistency.
+# 不加 audio noise / timezone / chrome.runtime spoof (V0.30 scope 太 wide, 留 V0.31+).
+_STEALTH_PLUS_JS = """
+// V0.30.0 G stealth+ 加固 (in addition to playwright-stealth lib defaults)
+
+// 1. navigator.webdriver hide (双保险, lib 默已含但加固)
+Object.defineProperty(navigator, 'webdriver', {
+    get: () => undefined,
+    configurable: true,
+});
+
+// 2. WebGL vendor + renderer randomize (固定 per-context seed 防同一 ctx 多次查不一致)
+(() => {
+    const _origGetParameter = WebGLRenderingContext.prototype.getParameter;
+    // UNMASKED_VENDOR_WEBGL = 37445; UNMASKED_RENDERER_WEBGL = 37446
+    const _vendors = ['Intel Inc.', 'NVIDIA Corporation', 'ATI Technologies Inc.'];
+    const _renderers = ['Intel(R) HD Graphics 620', 'NVIDIA GeForce GTX 1060', 'AMD Radeon Pro 555X'];
+    const _idx = Math.floor(Math.random() * _vendors.length);
+    WebGLRenderingContext.prototype.getParameter = function(param) {
+        if (param === 37445) return _vendors[_idx];
+        if (param === 37446) return _renderers[_idx];
+        return _origGetParameter.call(this, param);
+    };
+})();
+
+// 3. navigator.permissions.query 一致性 (Headless Chrome 默 'denied' for notifications)
+(() => {
+    const _origQuery = navigator.permissions && navigator.permissions.query;
+    if (!_origQuery) return;
+    navigator.permissions.query = (params) => {
+        if (params && params.name === 'notifications') {
+            return Promise.resolve({state: Notification.permission, name: 'notifications', onchange: null});
+        }
+        return _origQuery.call(navigator.permissions, params);
+    };
+})();
+"""
+
+
+async def apply_stealth_plus(page: Page) -> None:
+    """V0.30.0: G stealth 加固 — page.add_init_script 显式注入 webdriver/WebGL/permissions JS.
+
+    跟 apply_stealth (playwright-stealth lib 调用) 复合用: cli.run_task 入口先 apply_stealth (lib
+    覆 80%), 再 apply_stealth_plus 加固 3 项关键 (V0.30 plan D 决). 不依赖 lib 防 lib 升级断.
+
+    `page.add_init_script` 在 page navigate 前注入 + 每 frame 都跑 (popup/iframe 自动覆盖).
+    Exception 不阻塞主流程 (跟 apply_stealth 同 graceful 模式).
+    """
+    try:
+        await page.add_init_script(_STEALTH_PLUS_JS)
+    except Exception as e:
+        logger.warning("apply_stealth_plus init script 注入失败 (%r), 跳过", e)

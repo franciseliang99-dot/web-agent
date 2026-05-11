@@ -13,7 +13,7 @@ from typing import TYPE_CHECKING
 from dotenv import load_dotenv
 from playwright.async_api import async_playwright
 
-from web_agent.browser import apply_stealth, connect
+from web_agent.browser import apply_stealth, apply_stealth_plus, connect
 from web_agent.chrome_launcher import ensure_chrome_running
 from web_agent.llm import make_client
 
@@ -61,6 +61,8 @@ async def run_task(
     async with async_playwright() as p:
         browser, ctx, page = await connect(p, cdp_url=cdp_url)
         await apply_stealth(page)
+        # V0.30.0 G stealth 加固: lib 后再注 init script (webdriver/WebGL/permissions 加固)
+        await apply_stealth_plus(page)
 
         vw = int(os.environ.get("WEB_AGENT_VIEWPORT_WIDTH", "1280"))
         vh = int(os.environ.get("WEB_AGENT_VIEWPORT_HEIGHT", "800"))

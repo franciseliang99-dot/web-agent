@@ -2,6 +2,79 @@
 
 All notable changes to web-agent. 版本号遵循 SemVer 简化形式（V<major>.<minor>.<patch>）。
 
+## [0.30.0] - 2026-05-10
+
+### Add (V0.30 D real-world corpus + G stealth 联动系列开篇 1/5 — apply_stealth_plus 加固)
+
+V0.29 W6-C 长 task chain 系列闭环后, 用户选 V0.30 主题 = **D real-world corpus + G stealth 联动**
+(subagent 之前推: 单做 D 数据噪声大无 baseline; 单做 G 无场景验证, 必须捆绑).
+
+V0.30.0 开篇做 G 框架 (browser stealth 加固), 后续 V0.30.1+ 加 D corpus + cassette + flaky_repeat
++ axis filter. 跟 V0.27.1 / V0.28.0 / V0.29.0 "framework + 后续接入" 节奏一致.
+
+### Plan subagent V0.30 系列 6 决策点全采纳 + 6 隐藏风险
+
+- **A** D+G 联动 (subagent 之前推, V0.30.0 G 先, V0.30.1+ D)
+- **B** stable static source (wikipedia / GitHub README, 拒 LinkedIn/Twitter/Amazon V0.32+)
+- **C** 三级 opt-in (cassette 默 / WEB_AGENT_EVAL_REAL=1 / WEB_AGENT_EVAL_LIVE_NET=1)
+- **D** V0.30.0 加 3 stealth (webdriver hide / WebGL randomize / permissions consistency); 不加
+  audio noise / timezone / chrome.runtime spoof (V0.30 scope 太 wide, 留 V0.31+)
+- **E** task-level retry N=3 + median pass (EvalTask `flaky_repeat` 字段, V0.30.1)
+- **F** V0.30 single-task 起步, V0.31 chain × real-world (跟 V0.29 W6-C 协同)
+
+### V0.30 系列 commit 拆解 (subagent 推 5 commit)
+
+| ver | 状态 | 节点 |
+|-----|------|------|
+| **V0.30.0** | ✅ 本提交 | apply_stealth_plus init script (webdriver/WebGL/permissions) + 6 测 |
+| V0.30.1 | 待 | cassette + vcrpy filter_headers + EvalTask requires_real_net + flaky_repeat + sannysoft probe |
+| V0.30.2 | 待 | 1 wikipedia static task + 三级 env gate |
+| V0.30.3 | 待 | +2 tasks (wikipedia + GitHub README) |
+| V0.30.4 | 待 | --corpus real-world axis filter + report + docs 收尾 |
+
+### Changed (~150 LOC src + ~120 LOC test)
+
+- `src/web_agent/browser.py` +60 行:
+  - `_STEALTH_PLUS_JS` 字符串常量含 3 项加固 JS:
+    1. `Object.defineProperty(navigator, 'webdriver', {get: () => undefined})` (双保险)
+    2. `WebGLRenderingContext.prototype.getParameter` hook UNMASKED_VENDOR/RENDERER (37445/37446),
+       per-context random pick from {Intel/NVIDIA/AMD} 池
+    3. `navigator.permissions.query` notifications 一致性 (返 Notification.permission, 防 Headless
+       Chrome 默 'denied' 暴露 bot 痕迹)
+  - `apply_stealth_plus(page)` async — `page.add_init_script(_STEALTH_PLUS_JS)`. graceful 不阻塞
+    (跟 apply_stealth 同模式). 不依赖 playwright-stealth lib (lib 升级断时本路径仍生效).
+- `src/web_agent/cli.py` 2 行: import + run_task 内 `apply_stealth(page)` 后 `apply_stealth_plus(page)` 复合调
+- `tests/test_stealth_plus.py` **新建** 6 测:
+  - 注入 1 init script + webdriver hide / WebGL randomize / permissions consistency 各覆盖 token
+  - graceful 路径 (page.add_init_script raise → logger.warning + 不阻塞)
+  - cli.py 集成 import 验
+
+### Compatibility
+
+- 0 改老 caller (新 helper apply_stealth_plus 加 cli 入口 + 测; 老 task / fixture 0 影响)
+- mypy strict 0 (44 src); ruff 0; pytest **640 + 17 skip** (V0.29.5 634+17 → +6)
+- 真 chromium 15/15 全过 (无新, sannysoft probe slow opt-in 留 V0.30.1)
+- playwright-stealth 2.x lib 仍在 deps 复合用 (apply_stealth 老路径不破)
+
+### V0.27 + V0.28 + V0.29 + V0.30 累计 subagent 真发现 = 10 处 (V0.30.0 0 新)
+
+### Why minor (V0.30.0) 不 patch
+
+- V0.30 主题切换 (V0.29 W6-C → V0.30 D real-world + G stealth) = SemVer minor "向后兼容功能新增"
+- 跟 V0.21.0/V0.22.0/V0.25.0/V0.26.0/V0.27.0/V0.28.0/V0.29.0 主题开篇 minor 风格一致
+- V0.30.1+ patch 累加 cassette / corpus / axis filter / docs
+
+### V0.30 隐藏风险 (subagent 提前识别, V0.30.1+ 处理)
+
+1. **cassette LLM key 泄漏** (最关键): vcrpy 默录 Authorization/x-api-key header → V0.30.1 必须
+   配 `filter_headers=['authorization','x-api-key']` + `before_record_response` strip; review commit
+   前 grep cassette `sk-ant\|sk-` 防泄
+2. **wikipedia 内容漂移**: page 改首段 → predicate 失效. 缓解: 选稳定句 + tag flaky_corpus_source
+3. **CI lock**: 真外网 task 加进 ALL_TASKS 默跑 → CI 烧/挂. 缓解: REAL_WORLD_TASKS 单独 list
+4. **wallclock 不稳**: V0.30 task max_wallclock_s 给 90s + flaky_repeat=3 median pass
+5. **stealth 真生效证伪难**: sannysoft 跑分非二元, V0.30.1 加手验 + 截图归档
+6. **playwright-stealth 2.x API drift**: V0.30.0 init script 不依赖 lib, 防断
+
 ## [0.29.5] - 2026-05-10
 
 ### Add (V0.29 W6-C 收口 — chain --reflect 接通 + 修 V0.28.3 bucket 命名 silent bug)
