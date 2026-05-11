@@ -20,10 +20,15 @@ V0.29 关键决策 (Plan subagent 全采纳):
 
 from __future__ import annotations
 
+import asyncio
 import re
+import time
+import uuid
 from collections import defaultdict, deque
 from dataclasses import dataclass, field
-from typing import Any, Literal
+from typing import Any, Awaitable, Callable, Literal, Protocol, runtime_checkable
+
+from web_agent.memory import is_success
 
 
 class ChainSpecError(ValueError):
@@ -186,14 +191,153 @@ def build_node_goal(node: ChainNode, prev_results: dict[str, str]) -> str:
     return substitute_vars(node.goal, prev_results)
 
 
+@runtime_checkable
+class RunTaskFn(Protocol):
+    """V0.29.1: chain runner DI 接口 — async run_task callable, 防 chain.py 直 import cli.run_task 循环.
+
+    cli.chain_main 用 closure 包 cli.run_task 把 cdp_url/provider/model 等 chain-level args bind 进去,
+    chain runner 只需传 goal + max_wallclock_s. **kwargs 兜底防 V0.30 加 reset_session 等参数破签名.
+
+    跟 V0.21.2 LLMClient Protocol + V0.27.1 SecretStore Protocol 同 @runtime_checkable 模式.
+    """
+
+    async def __call__(
+        self, *, goal: str, max_wallclock_s: float | None = None, **kwargs: Any,
+    ) -> str: ...
+
+
+# on_node_done callback type alias (chain runner 调, async 让 cb 能 awaitable)
+OnNodeDoneCb = Callable[["ChainNodeResult"], Awaitable[None]]
+
+
+@dataclass(frozen=True, slots=True)
+class ChainNodeResult:
+    """V0.29.1: chain 单 node 跑完结果. web_agent_task_id V0.29.1 留 None (loop task_id 没暴露
+    return path, V0.29.2/3 加 trace.db schema chain_id migration 时填; 字段先占位避后续 schema 改).
+    """
+
+    node_id: str
+    result: str
+    success: bool
+    wallclock_s: float
+    web_agent_task_id: str | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class ChainResult:
+    """V0.29.1: chain 跑完总结果. completed=True iff 全 node success 或 全 abort 完整跑完
+    (含 on_failure=continue 链尾); False iff 中途 abort / wallclock 超时中断."""
+
+    chain_id: str
+    started_at: float
+    ended_at: float
+    node_results: tuple[ChainNodeResult, ...]
+    completed: bool
+
+
+async def run_chain(
+    spec: ChainSpec,
+    run_task_fn: RunTaskFn,
+    *,
+    on_node_done_cb: OnNodeDoneCb | None = None,
+    max_total_wallclock_s: float = 1800.0,
+    chain_id: str | None = None,
+) -> ChainResult:
+    """V0.29.1 W6-C 编排器: topo 序逐 node 跑 + 失败处理 + 跨 node var 传递 + 总 wallclock cap.
+
+    Args:
+        spec: V0.29.0 parse_chain_spec 输出
+        run_task_fn: DI Protocol — caller (cli.chain_main / mcp web_agent_run_chain) 用 closure
+            包 cli.run_task 把 cdp/provider/model bind 进, chain 只传 goal + max_wallclock_s
+        on_node_done_cb: per-node 完成 cb (cli/mcp 用来 progress 输出)
+        max_total_wallclock_s: chain 整体 wallclock cap (默 1800s = 30min, 防 chain 跑天)
+        chain_id: 默 uuid.uuid4().hex[:12]; caller 提供时用 (V0.30 spec-hash 关联多 run 用)
+
+    Returns:
+        ChainResult — completed=True iff 完整跑完 (含 continue 失败的链尾); False iff abort/wallclock
+
+    Raises:
+        ChainCycleError: spec 含环 (Kahn detect)
+        ChainVarError: build_node_goal 引未知 node id (spec 设计 bug, 跑前 reraise 不污染半截 result)
+
+    Chrome session: chain runner 不持 ctx/page (DI run_task_fn 是黑盒, run_task 内自己开关
+    cdp 连接). 跨 node session 复用是 cdp 9222 持久 Chrome 的天然行为, V0.29.1 不加 reset_session
+    字段 (V0.30 真实施时要决 cookies/localStorage/SW 谁清).
+    """
+    cid = chain_id or uuid.uuid4().hex[:12]
+    ordered = topological_order(spec)
+    prev_results: dict[str, str] = {}
+    node_results: list[ChainNodeResult] = []
+    chain_started_at = time.time()
+    t0 = time.monotonic()
+
+    for node in ordered:
+        elapsed = time.monotonic() - t0
+        remaining = max_total_wallclock_s - elapsed
+        if remaining <= 0:
+            # chain wallclock 耗尽, 不跑剩 node, completed=False
+            return ChainResult(
+                chain_id=cid, started_at=chain_started_at, ended_at=time.time(),
+                node_results=tuple(node_results), completed=False,
+            )
+
+        # build_node_goal 抛 ChainVarError 让 caller 知 spec bug, 不 graceful (subagent 决 H)
+        goal = build_node_goal(node, prev_results)
+
+        node_t0 = time.monotonic()
+        try:
+            # asyncio.wait_for +5s 边界冗余防 run_task 内部 graceful return 也卡;
+            # 内 run_task 路径会先 return WALLCLOCK_EXCEEDED 字符串 (loop.py:475)
+            result = await asyncio.wait_for(
+                run_task_fn(goal=goal, max_wallclock_s=remaining),
+                timeout=remaining + 5.0,
+            )
+            success = is_success(result)
+        except Exception as e:
+            # run_task 已 catch LLM/wallclock/loop 6 marker 走 graceful return,
+            # 真 raise 是 connect/Chrome 启动级别 / asyncio.TimeoutError
+            result = f"CHAIN_NODE_EXCEPTION: {type(e).__name__}: {e}"
+            success = False
+
+        node_wallclock = time.monotonic() - node_t0
+        node_result = ChainNodeResult(
+            node_id=node.id, result=result, success=success, wallclock_s=node_wallclock,
+        )
+        node_results.append(node_result)
+        if on_node_done_cb is not None:
+            await on_node_done_cb(node_result)
+
+        # subagent 决 F: continue 时存 abort marker 原文让下个 node prompt 含失败 hint;
+        # success 总存; abort 立即出 (completed=False)
+        if success:
+            prev_results[node.id] = result
+        elif node.on_failure == "continue":
+            prev_results[node.id] = result
+        else:  # abort
+            return ChainResult(
+                chain_id=cid, started_at=chain_started_at, ended_at=time.time(),
+                node_results=tuple(node_results), completed=False,
+            )
+
+    return ChainResult(
+        chain_id=cid, started_at=chain_started_at, ended_at=time.time(),
+        node_results=tuple(node_results), completed=True,
+    )
+
+
 __all__ = [
     "ChainCycleError",
     "ChainNode",
+    "ChainNodeResult",
+    "ChainResult",
     "ChainSpec",
     "ChainSpecError",
     "ChainVarError",
+    "OnNodeDoneCb",
+    "RunTaskFn",
     "build_node_goal",
     "parse_chain_spec",
+    "run_chain",
     "substitute_vars",
     "topological_order",
 ]

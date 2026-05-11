@@ -182,5 +182,80 @@ def main() -> None:
     print(result)
 
 
+def chain_main() -> None:
+    """V0.29.1 W6-C 长 task chain CLI entry — `web-agent-chain spec.yaml`.
+
+    yaml file → parse_chain_spec → run_chain(closure 包 cli.run_task DI) → 输出 per-node summary +
+    chain_completion_rate. ChainSpecError/ChainCycleError/ChainVarError 走 sys.exit(1) 不糊用户脸.
+    跟 web-agent-eval V0.26.3 console_script 同模式 (独立命令 vs 复用 web-agent --chain 因 argparse
+    分裂 + mcp tool schema 乱).
+    """
+    import yaml
+
+    from web_agent.chain import (
+        ChainCycleError,
+        ChainSpecError,
+        ChainVarError,
+        ChainNodeResult,
+        parse_chain_spec,
+        run_chain,
+    )
+
+    logging.basicConfig(level=logging.INFO, stream=sys.stderr, format="[%(name)s] %(message)s")
+    parser = argparse.ArgumentParser(
+        prog="web-agent-chain",
+        description="V0.29 W6-C 长 task chain runner (yaml spec → 多 task 编排 + 失败 reflect 桥接)",
+    )
+    parser.add_argument("spec_path", help="chain spec YAML 文件路径")
+    parser.add_argument("--max-total-wallclock-s", type=float, default=None,
+                        help="chain 整体 wallclock cap (默 1800s = 30min)")
+    parser.add_argument("--cdp-url", default=None, help="覆盖 WEB_AGENT_CDP_URL")
+    parser.add_argument("--provider", default=None, help="覆盖 WEB_AGENT_LLM_PROVIDER")
+    parser.add_argument("--model", default=None, help="覆盖 WEB_AGENT_MODEL")
+    args = parser.parse_args()
+
+    load_dotenv()
+    yaml_text = Path(args.spec_path).read_text(encoding="utf-8")
+    try:
+        spec_data = yaml.safe_load(yaml_text)
+        spec = parse_chain_spec(spec_data)
+    except (ChainSpecError, ChainCycleError) as e:
+        sys.stderr.write(f"chain spec 错: {e}\n")
+        sys.exit(1)
+
+    # closure 包 cli.run_task: chain runner 只传 goal + max_wallclock_s, cdp/provider/model 已 bind
+    async def _chain_run_task_fn(*, goal: str, max_wallclock_s: float | None = None, **_: object) -> str:
+        return await run_task(
+            goal=goal,
+            max_wallclock_s=max_wallclock_s,
+            cdp_url=args.cdp_url,
+            provider=args.provider,
+            model=args.model,
+        )
+
+    async def _print_node(nr: ChainNodeResult) -> None:
+        flag = "OK" if nr.success else "FAIL"
+        sys.stderr.write(f"[chain] node {nr.node_id} {flag} ({nr.wallclock_s:.1f}s)\n")
+
+    try:
+        result = asyncio.run(run_chain(
+            spec, _chain_run_task_fn,
+            on_node_done_cb=_print_node,
+            max_total_wallclock_s=args.max_total_wallclock_s or 1800.0,
+        ))
+    except ChainVarError as e:
+        sys.stderr.write(f"chain spec var 错 ({e}) — 检查节点 goal 里 ${{X.result}} 引用是否拼对.\n")
+        sys.exit(1)
+
+    print(f"\n=== Chain {result.chain_id} {'COMPLETED' if result.completed else 'INCOMPLETE'} ===")
+    for nr in result.node_results:
+        flag = "PASS" if nr.success else "FAIL"
+        print(f"  {nr.node_id}: {flag}  {nr.wallclock_s:.1f}s")
+        print(f"    {nr.result[:200]}")
+    if result.node_results:
+        rate = sum(1 for nr in result.node_results if nr.success) / len(result.node_results)
+        print(f"\nchain_completion_rate: {rate:.2%} ({len(result.node_results)} nodes)")
+
+
 if __name__ == "__main__":
     main()

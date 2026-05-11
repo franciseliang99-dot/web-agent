@@ -2,6 +2,86 @@
 
 All notable changes to web-agent. 版本号遵循 SemVer 简化形式（V<major>.<minor>.<patch>）。
 
+## [0.29.1] - 2026-05-10
+
+### Add (V0.29 W6-C 系列 commit 2/4 — chain runner async + cli wire web-agent-chain entry)
+
+V0.29.0 chain.py 纯函数之上, 加 async run_chain 编排器 + ChainResult/ChainNodeResult dataclass +
+RunTaskFn DI Protocol + cli `web-agent-chain spec.yaml` console_script + pyyaml dep.
+
+### Plan subagent 7 决策点全采纳
+
+- **A DI**: `RunTaskFn(Protocol)` `goal` + `max_wallclock_s` + `**kwargs` 兜底 (mypy 检关键 kwarg,
+  kwargs 防 V0.30 加 reset_session 破签名). 跟 V0.21.2 LLMClient + V0.27.1 SecretStore 同
+  @runtime_checkable 模式
+- **B chain_id**: `uuid.uuid4().hex[:12]` 默 (跟 loop task_id 同 pattern, 同 spec 重跑当独立 run);
+  spec hash 关联是 V0.30 trace 查询层
+- **C trace.db**: V0.29.1 **不动 schema**, chain_id 仅 ChainResult dataclass + cli logger.info.
+  schema migration (ALTER tasks 加 chain_id + 改 trace.start_task 签名) 串 5+ 文件, 留 V0.29.2/3
+  单做
+- **D Chrome reset**: V0.29.1 **不加** `reset_session` 字段 (chain runner 不持 ctx/page, reset
+  实施需改 run_task 签名 + ctx.clear_cookies 语义判 cookies/localStorage/SW 谁清, 留 V0.30).
+  ChainNode docstring 写明 "默 cdp 持久不跨 node reset"
+- **E wallclock**: `remaining = max_total - elapsed`, 直接传 `max_wallclock_s=remaining`,
+  `asyncio.wait_for` 包 +5s 边界冗余防 run_task 内部 graceful return 也卡
+- **F continue prev_results**: 存 **abort marker 原文** (let LLM 下个 node prompt 拼到
+  "(max_steps 耗尽未完成)" 能自适应; 比存 "" silent 错 / 抛 ChainVarError 强制 abort=True 死板都好)
+- **G 测试**: tests/test_chain_runner.py 新建 8 测 (sequential/abort/continue/wallclock/var error/
+  cb/chain_id default+override/exception path)
+
+### Changed
+
+- `src/web_agent/chain.py` +200 行:
+  - `RunTaskFn(Protocol)` @runtime_checkable — async __call__(goal, max_wallclock_s, **kwargs) -> str
+  - `OnNodeDoneCb` type alias = Callable[[ChainNodeResult], Awaitable[None]]
+  - `ChainNodeResult` frozen+slots dataclass (node_id/result/success/wallclock_s/web_agent_task_id)
+  - `ChainResult` frozen+slots dataclass (chain_id/started_at/ended_at/node_results tuple/completed)
+  - `async def run_chain(spec, run_task_fn, *, on_node_done_cb=None, max_total_wallclock_s=1800.0,
+    chain_id=None) -> ChainResult` — topo 序逐 node 跑 + var 传递 + 失败 abort/continue 处理 +
+    wallclock cap + per-node cb. ChainVarError reraise (subagent H, spec bug 不 graceful);
+    run_task raise 自动包 CHAIN_NODE_EXCEPTION marker 标 fail
+  - 加 `from web_agent.memory import is_success` (success 判定复用)
+- `src/web_agent/cli.py` +50 行:
+  - `chain_main()` console_script entry — argparse spec_path/--max-total-wallclock-s/--cdp-url/
+    --provider/--model + yaml.safe_load + parse_chain_spec + closure run_task_fn 包 cli.run_task +
+    on_node_done_cb 进度 stderr + 输出 chain summary + chain_completion_rate
+  - ChainSpecError/ChainCycleError/ChainVarError → sys.exit(1) 不糊用户脸 (subagent 隐藏风险 #1)
+- `pyproject.toml` 改:
+  - `[project] dependencies` 加 `pyyaml>=6.0,<7` (chain spec 解析硬依赖)
+  - `[project.scripts]` 加 `web-agent-chain = "web_agent.cli:chain_main"` (跟 V0.26.3 web-agent-eval
+    同 console_script 模式)
+  - `[dependency-groups] dev` 加 `types-PyYAML>=6.0` (mypy strict 比 ignore_missing_imports 严)
+- `tests/test_chain_runner.py` **新建** 8 测 (subagent 推 7 + 1 bonus exception path)
+
+### V0.29 W6-C 系列进度 (2/4)
+
+| ver | 状态 | 节点 |
+|-----|------|------|
+| V0.29.0 | ✅ | chain.py 纯函数 + 22 测 |
+| V0.29.1 | ✅ | 本提交 — async run_chain + cli wire web-agent-chain |
+| V0.29.2 | 待 | mcp tool web_agent_run_chain (接 spec dict inline) |
+| V0.29.3 | 待 | eval --chain + 2-3 chain corpus + chain_completion_rate (验 reflection 跨 node 污染) |
+
+### 隐藏风险 (subagent 提前识别)
+
+1. **ChainVarError graceful**: cli.chain_main try/except 已包 (sys.exit 1 + stderr msg)
+2. **asyncio.wait_for + playwright cleanup hang**: +5s 边界冗余, 内 run_task 先 return WALLCLOCK_EXCEEDED 是首选路径
+3. **cdp_url 中途断**: V0.29.1 不处理, on_node_done_cb 让用户看到失败; V0.30 加 pre-flight check
+4. **on_failure=continue 链坏**: 节点 A continue + B `${A.result}` 拿 abort marker → B 也 fail
+   continue → C 拿第二层 marker, 链能跑完但全 fail. spec 设计者职责, ChainNode docstring 明示
+5. **PyYAML strict mypy**: 选 dev 装 types-PyYAML 比 ignore_missing_imports 严
+
+### Compatibility
+
+- 老 caller 0 改 — 新 console_script + 新公共 API (RunTaskFn/run_chain 等), 不改老接口
+- mypy strict 0 (43 src); ruff 0; pytest **622 + 17 skip** (V0.29.0 614+17 → +8 V0.29.1 测)
+- 真 chromium 15/15 全过 (无新)
+
+### Why patch (V0.29.1) 不 minor
+
+- V0.29 主题 minor bump 已发生在 V0.29.0; V0.29.1+ patch 累加 runner / mcp / eval
+- 跟 V0.21.x/V0.27.x/V0.28.x 系列 patch 风格一致
+
 ## [0.29.0] - 2026-05-10
 
 ### Add (V0.29 W6-C 长 task chain 系列开篇 1/4 — chain.py 纯函数 + spec 校验)

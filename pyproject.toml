@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "web-agent"
-version = "0.29.0"
+version = "0.29.1"
 description = "MultiOn-style 高度拟人 AI web agent (Python + Playwright + VLM/SoM + stealth, multi-LLM)"
 readme = "README.md"
 license = "MIT"
@@ -28,6 +28,7 @@ dependencies = [
     "playwright-stealth>=2.0.3",
     "pillow>=10.4",
     "python-dotenv>=1.0",
+    "pyyaml>=6.0,<7",
 ]
 
 [project.optional-dependencies]
@@ -36,6 +37,7 @@ all = ["openai>=2.33,<3"]
 
 [project.scripts]
 web-agent = "web_agent.cli:main"
+web-agent-chain = "web_agent.cli:chain_main"
 web-agent-replay = "web_agent.replay:main"
 web-agent-memory = "web_agent.memory:main"
 web-agent-mcp = "web_agent.mcp_server:main"
@@ -54,6 +56,7 @@ dev = [
     "pytest-asyncio>=0.24",
     "pytest-recording>=0.13.4",
     "ruff>=0.7",
+    "types-PyYAML>=6.0",
 ]
 
 [tool.pytest.ini_options]
