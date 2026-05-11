@@ -3,9 +3,9 @@
 [![CI](https://github.com/franciseliang99-dot/web-agent/actions/workflows/ci.yml/badge.svg)](https://github.com/franciseliang99-dot/web-agent/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 [![Python 3.12+](https://img.shields.io/badge/python-3.12+-blue.svg)](pyproject.toml)
-[![tests](https://img.shields.io/badge/tests-255_passed-green.svg)](tests/)
+[![tests](https://img.shields.io/badge/tests-769_passed-green.svg)](tests/)
 [![mypy strict](https://img.shields.io/badge/mypy-strict_0_errors-blue.svg)](pyproject.toml)
-[![CHANGELOG](https://img.shields.io/badge/CHANGELOG-V0.16.28-orange.svg)](CHANGELOG.md)
+[![CHANGELOG](https://img.shields.io/badge/CHANGELOG-V0.34.0-orange.svg)](CHANGELOG.md)
 
 ## 📝 Featured Blogs (3 篇系列, 全部 web-agent dogfooding publish)
 
