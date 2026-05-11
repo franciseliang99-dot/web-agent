@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "web-agent"
-version = "0.35.3"
+version = "0.36.0"
 description = "MultiOn-style 高度拟人 AI web agent (Python + Playwright + VLM/SoM + stealth, multi-LLM)"
 readme = "README.md"
 license = "MIT"
@@ -48,6 +48,7 @@ web-agent-list-jds = "web_agent.list_extract:main"
 web-agent-eval = "eval.cli:main"
 web-agent-token-baseline = "eval.token_baseline:main"
 web-agent-perceive-bench = "eval.perceive_bench:main"
+web-agent-disk-baseline = "eval.disk_baseline:main"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/web_agent", "eval"]

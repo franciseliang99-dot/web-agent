@@ -1,0 +1,82 @@
+{
+  "captured_at": 1778540118.1922727,
+  "data_root": "data",
+  "dirs": [
+    {
+      "path": "data/screenshots",
+      "bytes": 76336382,
+      "file_count": 393,
+      "oldest_mtime": 1777663260.6171544,
+      "newest_mtime": 1778358448.882409,
+      "avg_file_bytes": 194240.15776081424
+    },
+    {
+      "path": "data/downloads",
+      "bytes": 0,
+      "file_count": 0,
+      "oldest_mtime": null,
+      "newest_mtime": null,
+      "avg_file_bytes": 0.0
+    },
+    {
+      "path": "data/replays",
+      "bytes": 144330,
+      "file_count": 11,
+      "oldest_mtime": 1777869209.8980422,
+      "newest_mtime": 1777869209.9060845,
+      "avg_file_bytes": 13120.90909090909
+    },
+    {
+      "path": "data/eval",
+      "bytes": 486225,
+      "file_count": 58,
+      "oldest_mtime": 1778441894.0342906,
+      "newest_mtime": 1778442387.6840398,
+      "avg_file_bytes": 8383.189655172413
+    },
+    {
+      "path": "data/bench",
+      "bytes": 3189,
+      "file_count": 2,
+      "oldest_mtime": 1778535701.9536216,
+      "newest_mtime": 1778537215.0623746,
+      "avg_file_bytes": 1594.5
+    },
+    {
+      "path": "data/stealth_probes",
+      "bytes": 0,
+      "file_count": 0,
+      "oldest_mtime": null,
+      "newest_mtime": null,
+      "avg_file_bytes": 0.0
+    }
+  ],
+  "dbs": [
+    {
+      "path": "data/trace.db",
+      "bytes": 548864,
+      "tables": {
+        "steps": 391,
+        "tasks": 87
+      }
+    },
+    {
+      "path": "data/memory.db",
+      "bytes": 81920,
+      "tables": {
+        "memories": 778,
+        "sqlite_sequence": 1
+      }
+    },
+    {
+      "path": "data/upwork.db",
+      "bytes": 32768,
+      "tables": {
+        "upwork_jds": 7,
+        "sqlite_sequence": 1
+      }
+    }
+  ],
+  "total_bytes": 77633678,
+  "per_task_bytes": 892341.1264367816
+}

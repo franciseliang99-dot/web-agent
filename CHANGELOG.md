@@ -2,6 +2,106 @@
 
 All notable changes to web-agent. 版本号遵循 SemVer 简化形式（V<major>.<minor>.<patch>）。
 
+## [0.36.0] - 2026-05-11
+
+### Feat (V0.36 I 内存优化系列开篇 1/N — disk baseline framework, 跟 V0.33.0 / V0.34.0 同节奏)
+
+V0.35.3 收尾 user 选 I 主题. **V0.34 教训应用**: framework first, 实施前真测 baseline 防
+"没数据就优化是猜". V0.36.0 = disk baseline framework + 真跑 baseline 数据底座, 不真删 data/.
+
+### V0.34 教训应用: 实施前真测 baseline
+
+V0.34.5 沉淀 "synthetic ≠ 真, 真测 baseline 是 ROI 决策基础". V0.36.0 之前真跑:
+
+```bash
+du -sh data/screenshots data/downloads data/replays data/trace.db data/memory.db
+# 74M data/screenshots
+# 12K data/bench (含 V0.34.3 fan-out + V0.36.0 disk baseline)
+# 168K data/replays
+# 540K data/trace.db
+# 84K data/memory.db
+# data/downloads 0B (空 dir tree, 2932 子 dir 但 0 file)
+```
+
+**关键发现 (真测推翻初步假设)**:
+- screenshots **是绝对大头** (74M / 87M ≈ 85%), 推算 1000 task → ~870 MB
+- downloads 子目录 2932 个但 **0 byte** — V0.23.2 listener 创建空 subdir 但未真 download
+  (V0.36.x 后续真发现?)
+- trace.db / memory.db / upwork.db 全 < 1 MB 算不上"问题"
+- **当前总 87 MB 算不上"内存爆炸"** — V0.36 是**预防性优化**给 1000+ task 长期项目, 不是 fix
+  危机. 诚实降级跟 V0.33.3 WebP "不直减 token" / V0.34.4 F1 "真节省 3%" 同模式
+
+### V0.36.0 真跑数据 (data/bench/v0.36.0-disk-baseline.json)
+
+```
+total: 74.0 MB (871.4 KB/task across 87 task)
+data/screenshots:  72.8 MB | 393 files | avg 189.7 KB | oldest 2026-05-01
+data/eval:         474.8 KB | 58 files
+data/replays:      140.9 KB | 11 files
+data/bench:          3.1 KB |  2 files (V0.34.3 fan-out + V0.36.0 本)
+data/downloads:        0 B  |  0 files (空 dir tree 2932 subdir, V0.36.x 真发现)
+data/stealth_probes:   0 B  |  0 files
+data/trace.db:     536 KB | steps=391, tasks=87
+data/memory.db:     80 KB | memories=778
+data/upwork.db:     32 KB | upwork_jds=7
+```
+
+### Changed (~250 src LOC + 13 测)
+
+- `eval/disk_baseline.py` **新建** ~250 LOC:
+  - `DirStats` frozen+slots dataclass (path / bytes / file_count / oldest+newest_mtime / avg_file_bytes)
+  - `SqliteStats` frozen+slots (path / bytes / tables: dict[name, row_count])
+  - `DiskBaselineReport` frozen+slots (captured_at / data_root / dirs / dbs / total_bytes / per_task_bytes)
+  - `measure_dir` 递归 rglob 测 bytes/files/mtime (空/missing 路径 safe return)
+  - `measure_sqlite` 查 sqlite_master + COUNT(*) 各表 (防御表名含 `"` 注入)
+  - `build_baseline_report` 全量 snapshot, per_task_bytes 从 trace.db tasks 表读 (无 tasks → None)
+  - `load_baseline_json` JSON roundtrip (V0.36.3 compare 用)
+  - `render_baseline_markdown` 跟 V0.33.0 / V0.34.0 同 pattern 渲表格
+  - `main(argv)` cli: `web-agent-disk-baseline [--data-root path] [--out json]`
+- `tests/test_disk_baseline.py` **新建** ~200 LOC, 13 单测:
+  - measure_dir missing/empty/with_files
+  - measure_sqlite missing/with_tables/rejects_malicious_table_name (sqlite_master 注入防御)
+  - DiskBaselineReport json_roundtrip / per_task_bytes_zero_division_safe / per_task_bytes_computed
+  - render_baseline_markdown 含子目录 + tables
+  - cli stdout_markdown / out_json / data_root_missing_returns_1
+- `pyproject.toml` `[project.scripts]` 加 `web-agent-disk-baseline = "eval.disk_baseline:main"`
+- `data/bench/v0.36.0-disk-baseline.json` 真跑 baseline dump
+- `pyproject.toml` / `__init__.py` 0.35.3 → **0.36.0** (V0.36 系列开篇 major-minor bump)
+- `uv.lock` 同步
+
+### 解耦审查 (CLAUDE.md 依赖方向)
+
+- `eval/disk_baseline.py` → 仅 stdlib (pathlib / sqlite3 / dataclasses / json / argparse / time)
+- 0 `web_agent.*` import → eval/ 仍是叶子, src/web_agent/ 不反向依赖
+- 跟 `eval/token_baseline.py` (V0.33.0) / `eval/perceive_bench.py` (V0.34.0) 同层级 + 同 pattern
+
+### Verify
+
+- `uv run pytest` → **791 passed, 25 skipped** (+13 V0.36.0 fast 测, 0 现测破)
+- `uv run ruff check` → all clean (auto-fix 3 unused imports)
+- `uv run mypy` → Success no issues in 51 src files (+1 disk_baseline.py)
+- 真跑 `uv run web-agent-disk-baseline` → 74 MB total, markdown 渲正确, JSON dump 正常
+
+### V0.36 系列 plan (subagent 商议后)
+
+| ver | scope | autonomous |
+|-----|-------|------------|
+| **V0.36.0** | ✅ 本提交: disk baseline framework + 真跑 baseline 数据底座 | ✅ OK |
+| V0.36.1 | loop.py 改 per-task subdir 让 cleanup 粒度对齐 task + replay.py BC fallback | ✅ OK |
+| V0.36.2 | data-clean CLI: TTL + `--dry-run` 默 dry, 真删需 user 同意 retention policy | 🛑 红线 — destructive 真删 + retention 产品决策 |
+| V0.36.3 | sqlite VACUUM + index 体检 + 系列收尾 retrospective + compare 用 V0.36.0 baseline JSON | ✅ OK (+ backup 保护) |
+| V0.36.4 (可选) | downloads listener V0.23.2 过激发 root cause (2932 空 subdir!) + per-task quota | 🛑 红线 |
+
+跟 V0.32.1 / V0.33.4 / V0.35.1 deferred 同 SemVer pattern: V0.36.2 / V0.36.4 跳号留 maintainer
+真删需 user 同意时跑.
+
+### 主题诚实降级
+
+V0.36 不是 fix "内存爆炸" (87 MB 算不上), 是**预防性优化**给 1000+ task 长期项目准备. V0.36.0
+单独 ROI 低 (只测量不省 disk), 真 ROI 在 V0.36.1+ (per-task subdir 让 cleanup 粒度对齐) 和
+V0.36.3 (sqlite VACUUM + index). 跟 V0.34.0 perceive_bench 单独 ROI=0 类似性质 (framework
+给后续判断 ROI).
+
 ## [0.35.3] - 2026-05-11
 
 ### Feat + Doc (V0.35 A 真站点 eval 双轴扩系列收尾 3/3 — virtual axis filter + retrospective)
