@@ -2,6 +2,155 @@
 
 All notable changes to web-agent. 版本号遵循 SemVer 简化形式（V<major>.<minor>.<patch>）。
 
+## [0.34.5] - 2026-05-11
+
+### Doc (V0.34 F sub-route 优化系列收尾 6/6 — 系列总结 + 3 真发现复盘 + chromium architecture 沉淀)
+
+V0.34.0-V0.34.4 5 commit 落地后, 本提交是**系列收尾文档**: 不动 src 代码, 只补 CHANGELOG 系列
+总结 + 3 真发现 (#15 #16 #17) 复盘 + chromium architecture 沉淀 box + 限制遗留 + 真节省 vs
+估算诚实对照. 跟 V0.31.3 / V0.32.3 / V0.33.4 系列收尾同节奏.
+
+**诚实降级前置**: V0.34 是 framework + 真发现系列, **0 实质性能净收益**. 估算 F1 67-74% 节省
+被真测推翻为 ~3%. 沉淀价值 = 3 真发现 + chromium architecture 限制制度化, 不是性能数字.
+
+### V0.34 系列回顾 (5 commit + 1 收尾)
+
+| ver | 主题 | scope | 真节省 (vs 估算) |
+|-----|------|-------|-------------------|
+| V0.34.0 | bench harness framework | BenchFixture/Result/Compare + cli fixture/compare/stats + 24 测 | 0 (基础设施) |
+| V0.34.1 | 真跑 chromium adapter | eval/perceive_bench_adapter.py + run subcmd + 7 unit + 3 slow smoke | 0 (基础设施 deferred 真测路径) |
+| V0.34.2 | fix #15 #16 fixture HTML bug | JS DOM API iframe chain + shadow attachShadow 递归 + escape `</`→`<\/` + 8 测 | 修 framework 自身 bug, 0 性能 |
+| V0.34.3 | fan-out fixture extension + F1 ROI 决策 | siblings_per_layer 参数 + fan-out baseline + Plan agent 估 F1 67-74% | 0 (基础设施, 估算 only) |
+| V0.34.4 | F1 实施 + 真发现 #17 | RENUMBER_JS + 并发 walker + 6 unit + V0.22.x contract 保 | **~3% (vs 估 67-74%, 推翻)** |
+| V0.34.5 | 系列收尾 + 文档 | CHANGELOG 总结 + 真发现 #15/#16/#17 复盘 + chromium 沉淀 | 0 (文档) |
+
+**V0.34 F sub-route 优化系列闭环 (6 commit 全闭环)**. 4 个 framework/基础设施 + 1 次真性能尝试
+被真测推翻, 不是 V0.33 系列那种"框架 → 实施 → 量化" 节奏 (V0.33 真省 token / 磁盘是真值, V0.34
+真节省 ~3% 等于 noise).
+
+### 真发现 #15 / #16 / #17 累计沉淀 (V0.34 系列贡献 3 个)
+
+**#15 HTML unquoted attribute value 在 space 终止** (V0.34.2 plan agent + 真测发现)
+
+V0.34.0 fixture iframe 嵌套用 `<iframe srcdoc="...<iframe srcdoc=&quot;...&quot;>...">`. 单层
+escape OK (outer srcdoc 解 entity 1 次 → inner raw `"`); 多层时 outer srcdoc parse 看到
+`&quot;` 当 entity 解后为 `"`, 但 attribute value parsing 把 inner `srcdoc=&quot;` 当
+**unquoted attribute** (因 `&quot;` 不是 raw quote char, 走 unquoted state). Unquoted
+attribute value **第一个 space 终止** → inner iframe srcdoc 残缺 → button 丢.
+
+→ V0.34.2 fix: iframe 改 JS DOM API (`ifr.srcdoc = string` via property), HTML parser 完全
+不参与 srcdoc 内容 escape, JSON.stringify 处理 JS string literal 任意层安全.
+
+**教训**: HTML attribute parser 状态机非 quote-context-aware, 多层嵌套 web 标准不直接支持.
+现代 DOM-driven 方案绕过 attribute parsing 才稳.
+
+**#16 `<script>` raw text 模式 `</script>` 在 JS string literal 内即关闭外层 script**
+(V0.34.2 真测发现)
+
+JS DOM API fix 后 1 层 work 但 2+ 层仍 mark=0. 因 inner JS string literal 含 `</script>`
+substring, HTML5 spec script element content 为 "script data" raw text mode — 任何位置
+遇 `</script>` (case-insensitive) 立即终止外层 script tag, JS parse 中断 → outer iframe
+永不创建.
+
+→ V0.34.2 fix: `json.dumps(html).replace("</", r"<\/")` 把 inner `</` 转 `<\/` JS escape (JS
+string literal 解析时 `<\/` === `</` 不影响语义, HTML raw text parser 不识为 script close).
+
+**教训**: HTML inline script 内嵌 raw text 任何含 `</script>` substring 的都需 `<\/script>`
+escape. 这是 30 年老坑, 现代 framework (React/Vue) 都内嵌处理.
+
+**#17 chromium same-origin iframe shared renderer 主线程 serialize 跨 frame JS** (V0.34.4
+真测发现)
+
+V0.34.3 Plan agent 估 F1 67-74% 节省, 基于"Playwright IPC 并发 evaluate" 假设. V0.34.4 实施
+后真测仅 ~3%. Micro experiment 证 Playwright IPC 确实真并发 (same-frame 5×100ms setTimeout
+533ms→116ms 4.6x; cross-page 同 5.0x), 但**chromium same-origin iframe 共享 renderer 进程
+主线程**, 跨 frame sync JS (SoM inject querySelectorAll + DOM 写) renderer thread 仍
+serialized.
+
+→ Cross-origin iframe → V0.22.4 perceiver 早已 catch+skip 不 evaluate → F1 在 cross-origin
+也无影响. F1 真节省路径需要**独立 renderer** (chromium site-isolation cross-process iframe),
+但 V0.22.4 skip 路径下没法 evaluate.
+
+**教训**: chromium architecture 是 F sub-route 主限制, 不是 Playwright IPC. 跟 #13 image
+tile 固定计费 WebP 不省 token 同模式 — **平台层假设没 micro experiment 验证是 silent 性能
+猜测**. 任何 F sub-route 优化 plan 前要先 micro bench renderer 层并发性, 不止 Playwright
+IPC 层.
+
+(累计真发现至 V0.34: 17 个; V0.34 系列 +3: #15 #16 #17.)
+
+### chromium architecture 沉淀 (新元素, 给未来 F sub-route plan agent reference)
+
+V0.34 系列暴露的 chromium architecture 三角形约束, V0.35+ F sub-route 优化 plan agent 起手必读:
+
+1. **Playwright IPC 并发 evaluate 真有效** (5x speedup verified): 同 frame / 跨 page setTimeout
+   并发都真节省. 但 sync JS 受 chromium renderer thread serialize 限制.
+
+2. **chromium same-origin iframe shared renderer 主线程 serialize**: 同 origin (同 srcdoc /
+   同 host) iframe SoM inject 跨 frame sync JS 排队跑, 跨 frame 并发 ROI ~0.
+
+3. **chromium cross-origin iframe site-isolation cross-process**: 不同 site (eTLD+1) iframe
+   独立 renderer process, 跨 frame JS 可真并发. **但 V0.22.4 perceiver catch+skip
+   cross-origin frame 不 evaluate**, 故 F1 类并发优化在 cross-origin 路径也无效.
+
+**推论**: F sub-route 优化主战场不是 frame DFS 并发, 而是**单 frame 内 SoM JS 自身降耗**
+(F2 walker 合并 / F3 mark dedup / F5 TreeWalker 优化). 整个 V0.34 系列教训沉淀给 V0.35+:
+F sub-route 优化下次 plan 必须 ROI 假设前 micro experiment 验证 renderer 层 (不止 Python).
+
+### 限制与遗留
+
+- **F1 真值 = 0**: V0.34.4 实施 F1 代码 OK 但真节省 ~3% (chromium #17 限制). cross-origin
+  真验 (Option 1 V0.34.4 plan) 推演 ROI 也为 0 (V0.22.4 perceiver skip cross-origin), 故
+  **withdrawn 不做**. F1 代码作为 RENUMBER_JS architectural prep 保留, 真值在 cross-process
+  fixture (eTLD+1 不同 host) 才能验, 但 web-agent 不真站点 eval scope 没此 fixture.
+- **F2 SoM JS 三 walker 合并**: V0.34.2 baseline 已知 microbench local chromium ~2-4ms 节省
+  (3 evaluate RTT), real-world remote chromium ~50-100ms RTT × 3 → ~100-200ms 节省. 但
+  web-agent 接管本地 9222 Chrome, real-world 场景 = local → 真节省微. 推 V0.35+ 决策
+  (代码 simplification 不是 perf gain).
+- **synthetic fixture 与真站点 gap**: V0.34.x baseline 全 synthetic, 真站点 iframe 结构
+  (Gmail/Outlook compose iframe + Stripe Element + Twitter widget) 没 mapping 到 fixture.
+  真 ROI 决策须 eval framework (V0.26+) 真站点双轴交叉, V0.34 没接.
+- **systemd-style 批量 audit 兑现**: V0.33.4 提的"每 5 commit 一次跨 commit audit"在 V0.34
+  系列**有兑现** — V0.34.3 Plan agent 推 ROI 67-74%, V0.34.4 实施真测推翻为 ~3% (Plan agent
+  ROI 估算 ÷ 22). 这是正面案例: **真测 + Plan agent 对照 = 暴露假设漏洞的可靠通道**, 沉淀
+  给 V0.35+ 复用.
+
+### Changed (~0 src LOC, ~180 doc LOC)
+
+- `CHANGELOG.md` V0.34.5 entry (本): ~180 行 (系列总结 + #15/#16/#17 复盘 + chromium 沉淀 +
+  限制 + 主题路径 inventory)
+- `pyproject.toml` / `__init__.py` 0.34.4 → 0.34.5
+- `uv.lock` 同步
+
+### Verify
+
+- `uv run pytest` → **772 passed, 25 skipped** (V0.34.4 状态, 0 src 改 → 0 测变)
+- 0 src 改 → 0 ruff/mypy 重检需求
+
+### V0.34 系列状态
+
+| ver | 状态 | scope |
+|-----|------|-------|
+| V0.34.0 | ✅ | bench harness framework |
+| V0.34.1 | ✅ | 真跑 chromium adapter |
+| V0.34.2 | ✅ | fix #15 #16 fixture HTML bug |
+| V0.34.3 | ✅ | fan-out fixture extension + F1 ROI 估算 |
+| V0.34.4 | ✅ | F1 实施 + 真发现 #17 推翻估算 |
+| **V0.34.5** | ✅ 本提交 | 系列收尾 + 真发现 + chromium 沉淀 |
+
+**V0.34 F sub-route 优化系列闭环 (6 commit 全闭环)**.
+
+### V0.35 主题路径 inventory (留 user 选)
+
+跟 V0.33.4 line 556 同句式. user 看了选, autonomous 红线 = 项目方向决策需 user 输入.
+
+候选路径:
+- **G stealth 加固**: sannysoft.com 当前 ~72% 通过率, 升 85%+ 需更深 fingerprint 模拟
+- **I 内存优化**: trace.db SQLite 长期 session 增长, screenshots/ 磁盘清理策略
+- **A 真站点 eval 双轴扩**: V0.26 eval framework + V0.32 chain real-world 跨, 补 perceiver / actuator 真站点轴
+- **B' lean / WebP 改默后 baseline 双跑**: V0.33.4 deferred 的真节省量化, maintainer 真录 cassette
+- **F2 SoM JS 三 walker 合并** (代码 simplification, 不是 perf gain)
+- 其他用户提的方向
+
 ## [0.34.4] - 2026-05-11
 
 ### Feat (V0.34 F sub-route 优化系列 5/N — F1 iframe DFS 并发实施 + chromium 限制真测发现 #17)
