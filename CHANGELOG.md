@@ -2,6 +2,86 @@
 
 All notable changes to web-agent. 版本号遵循 SemVer 简化形式（V<major>.<minor>.<patch>）。
 
+## [0.31.1] - 2026-05-10
+
+### Add (V0.31 系列 commit 2/4 — console_script web-agent-vault set/get/delete/list)
+
+V0.31.0 KeyringSecretStore 真实现之上, 加 cli `web-agent-vault` 让用户 set/get/delete/list keyring vault.
+
+### Plan subagent 7 决策点全采纳 + 5 隐藏风险
+
+- A vault.py 加 main() (跟 memory.py 同模式, 单 module 简单)
+- B argparse subparsers 4 子命令
+- C set 默 getpass 隐式输入 + opt-in `--from-stdin` (CI 自动化), **非 tty 强制 --from-stdin**
+  (拒 silent fallback echo 泄 password)
+- D get 默真显 (跟 `gh auth token` 一致, 用户主动 get 是显式意图)
+- E list 仅枚举 `_KNOWN_KEYS = ("ANTHROPIC_API_KEY", "OPENAI_API_KEY", "OPENAI_BASE_URL")`,
+  显 SET/MISSING **不显 value** (V0.32 加 index-key 方案支持自定义 key list)
+- F delete 不询问 (scriptable cli 默不交互), missing key 友好 stderr + exit 1
+- G monkeypatch sys.argv + memory backend mock (跟 V0.31.0 同 fixture, 不 subprocess 因子进程没 mock)
+
+### Changed (~200 LOC)
+
+- `src/web_agent/vault.py` +90 行:
+  - `_KNOWN_KEYS` 常量元组 (3 web-agent 自管 key)
+  - `main(argv: list[str] | None = None) -> int` argparse subparsers 4 子命令:
+    - `set KEY [--from-stdin]` getpass 隐式 / pipe 友好, 非 tty 强制 --from-stdin
+    - `get KEY` 真显 stdout, missing → exit 1
+    - `delete KEY` 不询问, missing/backend fail → exit 1 + 友好 stderr
+    - `list` 枚举 _KNOWN_KEYS 显 SET/MISSING (不显 value, 防 ssh hist 泄)
+  - 顶层 try/except RuntimeError → exit 3 + 提示 `pip install web-agent[keyring]`
+- `pyproject.toml` 加 `web-agent-vault = "web_agent.vault:main"` console_script
+- `tests/test_vault.py` +10 测 (set/get round-trip + from-stdin + non-tty 拒 + missing key
+  +/- 4 case + list 不泄 value + 空 value 拒 + keyring extra 未装 / entry-point 注册)
+
+### V0.31 系列进度 (2/4)
+
+| ver | 状态 | 节点 |
+|-----|------|------|
+| V0.31.0 | ✅ | KeyringSecretStore 真实现 + ChainedSecretStore + opt-in extra |
+| V0.31.1 | ✅ | 本提交 — console_script web-agent-vault (set/get/delete/list) |
+| V0.31.2 | 待 | default_store opt-in env WEB_AGENT_USE_KEYRING=1 + cli/mcp 透传验 |
+| V0.31.3 | 待 | CHANGELOG 系列总结 + maintainer how-to |
+
+### 5 隐藏风险 (subagent 已识别)
+
+1. **getpass 非 tty fallback echo 泄漏**: `sys.stdin.isatty()` 检查, 非 tty 强制 --from-stdin
+2. **list 漏自定义 key**: 文档明示 _KNOWN_KEYS 是 web-agent 自管, V0.32 加 index-key 方案
+3. **Linux dbus 不可用**: cli main() RuntimeError catch + exit 3 + 友好提示
+4. **keyring extra 未装**: 同 #3 catch
+5. **set 空串**: 显式 reject (空串 exit 1), 防意外回车污染
+
+### Compatibility
+
+- 老 caller 0 改 (新 console_script + 新公共 main 函数, 不改老 API)
+- mypy strict 0 (45 src); ruff 0; pytest **681 + 18 skip** (V0.31.0 671+18 → +10)
+- 真 chromium 15/15 全过 (无新)
+
+### maintainer how-to (V0.31.1)
+
+```bash
+# 装 keyring extra (Linux 还需 dbus + libsecret)
+pip install 'web-agent[keyring]'
+
+# 写 ANTHROPIC_API_KEY 到 keyring (getpass 隐式输入, 不留 shell hist)
+web-agent-vault set ANTHROPIC_API_KEY
+# Enter value for ANTHROPIC_API_KEY: ********
+
+# 列已知 key 状态
+web-agent-vault list
+#   ANTHROPIC_API_KEY: SET
+#   OPENAI_API_KEY: MISSING
+#   OPENAI_BASE_URL: MISSING
+
+# CI 自动化 (pipe friendly)
+echo "$ANTHROPIC_API_KEY" | web-agent-vault set ANTHROPIC_API_KEY --from-stdin
+```
+
+### Why patch (V0.31.1) 不 minor
+
+- V0.31 主题 minor bump 已发生在 V0.31.0; V0.31.1+ patch 累加 cli/integration/收尾
+- 跟 V0.21.x/V0.27.x/V0.28.x/V0.29.x/V0.30.x patch 风格一致
+
 ## [0.31.0] - 2026-05-10
 
 ### Add (V0.31 keyring 系列开篇 1/4 — KeyringSecretStore 真实现 + ChainedSecretStore + opt-in extra)

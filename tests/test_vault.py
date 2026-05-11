@@ -85,7 +85,6 @@ def test_env_secret_store_has_missing_key(monkeypatch):
 def _setup_memory_backend(monkeypatch):
     """V0.31.0: keyring memory backend mock (CI 无 dbus 也跑)."""
     import keyring
-    from keyring.backends.fail import Keyring as FailKeyring
 
     # Reset 防上次测残留
     class _MemBackend(keyring.backend.KeyringBackend):
@@ -403,3 +402,145 @@ def test_in_memory_secret_store_constructor_copies_dict():
     src["NEW"] = "added"
     assert s.get("K") == "v"  # 不受 caller mutate 影响
     assert s.has("NEW") is False
+
+
+# ---------- V0.31.1 web-agent-vault cli (set/get/delete/list) ----------
+
+
+def test_vault_cli_set_then_get_round_trip(monkeypatch, capsys):
+    """V0.31.1: set (getpass) → get → 真显 value (round-trip mock backend)."""
+    from web_agent.vault import main
+
+    _setup_memory_backend(monkeypatch)
+    monkeypatch.setattr("sys.stdin.isatty", lambda: True)
+    monkeypatch.setattr("getpass.getpass", lambda prompt: "sk-test-via-getpass")
+
+    rc = main(["set", "ANTHROPIC_API_KEY"])
+    assert rc == 0
+    out_set = capsys.readouterr().out
+    assert "ANTHROPIC_API_KEY" in out_set
+    assert "已写入 keyring" in out_set
+
+    rc = main(["get", "ANTHROPIC_API_KEY"])
+    assert rc == 0
+    assert capsys.readouterr().out.strip() == "sk-test-via-getpass"
+
+
+def test_vault_cli_set_from_stdin(monkeypatch, capsys):
+    """V0.31.1: --from-stdin 路径 (CI 自动化), pipe 友好."""
+    import io
+    from web_agent.vault import main
+
+    _setup_memory_backend(monkeypatch)
+    monkeypatch.setattr("sys.stdin", io.StringIO("sk-from-stdin\n"))
+
+    rc = main(["set", "OPENAI_API_KEY", "--from-stdin"])
+    assert rc == 0
+    capsys.readouterr()  # 清 set 输出
+    rc = main(["get", "OPENAI_API_KEY"])
+    assert rc == 0
+    assert capsys.readouterr().out.strip() == "sk-from-stdin"
+
+
+def test_vault_cli_set_non_tty_requires_stdin_flag(monkeypatch, capsys):
+    """V0.31.1: stdin 非 tty + 不带 --from-stdin → exit 1 防 getpass silent fallback echo 泄."""
+    from web_agent.vault import main
+
+    _setup_memory_backend(monkeypatch)
+    monkeypatch.setattr("sys.stdin.isatty", lambda: False)
+
+    rc = main(["set", "K"])
+    assert rc == 1
+    err = capsys.readouterr().err
+    assert "tty" in err
+    assert "--from-stdin" in err
+
+
+def test_vault_cli_get_missing_key(monkeypatch, capsys):
+    """V0.31.1: get 不存在 key → exit 1 + 友好 stderr."""
+    from web_agent.vault import main
+
+    _setup_memory_backend(monkeypatch)
+
+    rc = main(["get", "NOT_SET_KEY"])
+    assert rc == 1
+    err = capsys.readouterr().err
+    assert "NOT_SET_KEY" in err
+    assert "set 先" in err
+
+
+def test_vault_cli_delete_existing(monkeypatch, capsys):
+    """V0.31.1: delete 已存 key → 删除 + has=False."""
+    from web_agent.vault import KeyringSecretStore, main
+
+    _setup_memory_backend(monkeypatch)
+    KeyringSecretStore().set("KEY_TO_DELETE", "val")
+
+    rc = main(["delete", "KEY_TO_DELETE"])
+    assert rc == 0
+    assert "已删" in capsys.readouterr().out
+    assert KeyringSecretStore().has("KEY_TO_DELETE") is False
+
+
+def test_vault_cli_delete_missing_key(monkeypatch, capsys):
+    """V0.31.1: delete 不存在 key → exit 1 + 友好 stderr (catch keyring.errors.PasswordDeleteError)."""
+    from web_agent.vault import main
+
+    _setup_memory_backend(monkeypatch)
+
+    rc = main(["delete", "NEVER_SET"])
+    assert rc == 1
+    err = capsys.readouterr().err
+    assert "NEVER_SET" in err
+    assert "失败" in err
+
+
+def test_vault_cli_list_shows_known_keys_status(monkeypatch, capsys):
+    """V0.31.1: list 枚举 _KNOWN_KEYS, set 的显 SET / 未 set 显 MISSING (不显 value)."""
+    from web_agent.vault import KeyringSecretStore, main
+
+    _setup_memory_backend(monkeypatch)
+    KeyringSecretStore().set("ANTHROPIC_API_KEY", "sk-secret-not-shown")
+
+    rc = main(["list"])
+    assert rc == 0
+    out = capsys.readouterr().out
+    assert "ANTHROPIC_API_KEY: SET" in out
+    assert "OPENAI_API_KEY: MISSING" in out
+    # 不泄 value
+    assert "sk-secret-not-shown" not in out
+
+
+def test_vault_cli_set_empty_value_rejected(monkeypatch, capsys):
+    """V0.31.1: getpass 返空串 → exit 1 拒写 (防意外回车空串污染)."""
+    from web_agent.vault import main
+
+    _setup_memory_backend(monkeypatch)
+    monkeypatch.setattr("sys.stdin.isatty", lambda: True)
+    monkeypatch.setattr("getpass.getpass", lambda prompt: "")
+
+    rc = main(["set", "K"])
+    assert rc == 1
+    assert "value 不能为空" in capsys.readouterr().err
+
+
+def test_vault_cli_keyring_extra_not_installed(monkeypatch, capsys):
+    """V0.31.1: keyring lib 未装 → exit 3 + 提示 pip install web-agent[keyring]."""
+    import sys
+    from web_agent.vault import main
+
+    monkeypatch.setitem(sys.modules, "keyring", None)
+    rc = main(["get", "ANY"])
+    assert rc == 3
+    err = capsys.readouterr().err
+    assert "web-agent[keyring]" in err
+
+
+def test_vault_cli_entry_point_registered():
+    """V0.31.1: web-agent-vault console_script 注册到 entry points (验 pyproject.scripts)."""
+    import importlib.metadata as md
+
+    entry_points = md.entry_points(group="console_scripts")
+    matching = [ep for ep in entry_points if ep.name == "web-agent-vault"]
+    assert len(matching) == 1, f"web-agent-vault 未注册, found: {[e.name for e in entry_points]}"
+    assert matching[0].value == "web_agent.vault:main"

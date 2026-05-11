@@ -106,6 +106,15 @@ class KeyringSecretStore:
         keyring.delete_password(_KEYRING_SERVICE, key)
 
 
+# V0.31.1 cli web-agent-vault list 命令枚举的 web-agent 自管 key 集 (硬编码).
+# 用户自定义 key 不显示 (V0.32 加 index-key 方案 — 维护 set 同步 set/delete).
+_KNOWN_KEYS: tuple[str, ...] = (
+    "ANTHROPIC_API_KEY",
+    "OPENAI_API_KEY",
+    "OPENAI_BASE_URL",
+)
+
+
 class ChainedSecretStore:
     """V0.31.0: 链式 SecretStore — 按 stores 顺序短路 has/get (前者 hit 即返).
 
@@ -147,6 +156,98 @@ class MissingSecretError(RuntimeError):
     def __init__(self, key: str) -> None:
         self.key = key
         super().__init__(f"{key} 未设置 — 请填 .env 或 export 环境变量")
+
+
+def main(argv: list[str] | None = None) -> int:
+    """V0.31.1: web-agent-vault cli — set/get/delete/list keyring vault.
+
+    subagent 7 决策全采纳:
+    - argparse subparsers 4 子命令 (set/get/delete/list)
+    - set 默 getpass 隐式输入 + opt-in --from-stdin (CI 自动化), 非 tty 强制 --from-stdin (拒 silent fallback)
+    - get 默真显 (用户调显式取值, mask 反烦; shell hist 风险用户自管 HISTCONTROL=ignorespace)
+    - delete 不询问 (scriptable cli 默不交互), missing key 友好 stderr + exit 1
+    - list 仅枚举 _KNOWN_KEYS (硬编码 ANTHROPIC/OPENAI key + URL), 显 SET/MISSING 不显 value
+    - keyring extra 未装 → RuntimeError catch + exit 3 + 提示 pip install 'web-agent[keyring]'
+    """
+    import argparse
+    import getpass
+    import sys
+
+    parser = argparse.ArgumentParser(
+        prog="web-agent-vault",
+        description="V0.31.1 keyring vault cli — 跨平台 OS-native secret store (macOS keychain / "
+                    "Linux Secret Service / Windows Credential Manager). 需装 extra: "
+                    "pip install 'web-agent[keyring]'",
+    )
+    sub = parser.add_subparsers(dest="cmd", required=True)
+
+    sp_set = sub.add_parser("set", help="写 key 到 keyring (默 getpass 隐式输入)")
+    sp_set.add_argument("key", help="key 名 (e.g. ANTHROPIC_API_KEY)")
+    sp_set.add_argument(
+        "--from-stdin", action="store_true",
+        help="从 stdin 读 value (CI/自动化用; 非 tty 终端强制此 flag)",
+    )
+
+    sp_get = sub.add_parser("get", help="读 key value (默真显)")
+    sp_get.add_argument("key")
+
+    sp_del = sub.add_parser("delete", help="删 key (不询问)")
+    sp_del.add_argument("key")
+
+    sub.add_parser("list", help=f"列已知 key SET/MISSING 状态 (枚举 {len(_KNOWN_KEYS)} 个 web-agent 自管 key)")
+
+    args = parser.parse_args(argv)
+
+    store = KeyringSecretStore()
+
+    try:
+        if args.cmd == "set":
+            if args.from_stdin:
+                value = sys.stdin.read().rstrip("\n")
+            else:
+                if not sys.stdin.isatty():
+                    sys.stderr.write(
+                        "ERROR: stdin 非 tty 终端必须用 --from-stdin (防 getpass silent fallback echo 泄 password).\n"
+                        "用法: echo 'sk-xxx' | web-agent-vault set ANTHROPIC_API_KEY --from-stdin\n",
+                    )
+                    return 1
+                value = getpass.getpass(f"Enter value for {args.key}: ")
+            if not value:
+                sys.stderr.write("ERROR: value 不能为空 (空串拒).\n")
+                return 1
+            store.set(args.key, value)
+            sys.stdout.write(f"OK: {args.key} 已写入 keyring (service=web-agent).\n")
+            return 0
+
+        if args.cmd == "get":
+            v = store.get(args.key)
+            if v is None:
+                sys.stderr.write(f"ERROR: key {args.key!r} 不在 keyring (set 先).\n")
+                return 1
+            sys.stdout.write(f"{v}\n")
+            return 0
+
+        if args.cmd == "delete":
+            try:
+                store.delete(args.key)
+            except Exception as e:  # noqa: BLE001 — keyring.errors.PasswordDeleteError 等
+                sys.stderr.write(f"ERROR: 删 {args.key!r} 失败 ({type(e).__name__}: {e})\n")
+                return 1
+            sys.stdout.write(f"OK: {args.key} 已删.\n")
+            return 0
+
+        if args.cmd == "list":
+            for k in _KNOWN_KEYS:
+                status = "SET" if store.has(k) else "MISSING"
+                sys.stdout.write(f"  {k}: {status}\n")
+            return 0
+
+    except RuntimeError as e:
+        # KeyringSecretStore lazy import 失败 (keyring extra 未装) → 友好提示
+        sys.stderr.write(f"ERROR: {e}\n")
+        return 3
+
+    return 0  # unreachable (subparsers required=True)
 
 
 class InMemorySecretStore:
