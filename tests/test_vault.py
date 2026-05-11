@@ -79,17 +79,139 @@ def test_env_secret_store_has_missing_key(monkeypatch):
 # --- KeyringSecretStore stub ---
 
 
-def test_keyring_secret_store_get_raises_not_implemented():
-    """V0.27.1: stub 防误用 — V0.28 真实现, V0.27 raise NotImplementedError + 提示用 EnvSecretStore."""
+# V0.31.0: KeyringSecretStore 真实现 (V0.27.1 stub 已替换). Memory backend mock 跑 CI 安全.
+
+
+def _setup_memory_backend(monkeypatch):
+    """V0.31.0: keyring memory backend mock (CI 无 dbus 也跑)."""
+    import keyring
+    from keyring.backends.fail import Keyring as FailKeyring
+
+    # Reset 防上次测残留
+    class _MemBackend(keyring.backend.KeyringBackend):
+        priority = 1000  # type: ignore[assignment]
+
+        def __init__(self):
+            self._store: dict[tuple[str, str], str] = {}
+
+        def get_password(self, service, username):
+            return self._store.get((service, username))
+
+        def set_password(self, service, username, password):
+            self._store[(service, username)] = password
+
+        def delete_password(self, service, username):
+            if (service, username) not in self._store:
+                from keyring.errors import PasswordDeleteError
+                raise PasswordDeleteError(f"no entry: {service}/{username}")
+            del self._store[(service, username)]
+
+    backend = _MemBackend()
+    monkeypatch.setattr(keyring, "get_password",
+                        lambda s, u: backend.get_password(s, u))
+    monkeypatch.setattr(keyring, "set_password",
+                        lambda s, u, p: backend.set_password(s, u, p))
+    monkeypatch.setattr(keyring, "delete_password",
+                        lambda s, u: backend.delete_password(s, u))
+    return backend
+
+
+def test_keyring_secret_store_get_missing_returns_default(monkeypatch):
+    """V0.31.0: keyring 没值 → 返 default."""
+    _setup_memory_backend(monkeypatch)
     s = KeyringSecretStore()
-    with pytest.raises(NotImplementedError, match="V0.28 实现"):
+    assert s.get("MISSING_KEY", "fallback") == "fallback"
+    assert s.get("MISSING_KEY") is None
+
+
+def test_keyring_secret_store_set_then_get(monkeypatch):
+    """V0.31.0: set + get round-trip."""
+    _setup_memory_backend(monkeypatch)
+    s = KeyringSecretStore()
+    s.set("ANTHROPIC_API_KEY", "sk-ant-test-keyring")
+    assert s.get("ANTHROPIC_API_KEY") == "sk-ant-test-keyring"
+    assert s.has("ANTHROPIC_API_KEY") is True
+
+
+def test_keyring_secret_store_delete(monkeypatch):
+    """V0.31.0: delete 后 get 返 None / has False."""
+    _setup_memory_backend(monkeypatch)
+    s = KeyringSecretStore()
+    s.set("KEY_TO_DELETE", "val")
+    assert s.has("KEY_TO_DELETE") is True
+    s.delete("KEY_TO_DELETE")
+    assert s.has("KEY_TO_DELETE") is False
+    assert s.get("KEY_TO_DELETE") is None
+
+
+def test_keyring_secret_store_satisfies_secret_store_protocol(monkeypatch):
+    """V0.31.0: 跟 EnvSecretStore 同 Protocol (1:1 swap)."""
+    _setup_memory_backend(monkeypatch)
+    s = KeyringSecretStore()
+    assert isinstance(s, SecretStore)
+
+
+def test_keyring_secret_store_import_error_when_keyring_not_installed(monkeypatch):
+    """V0.31.0: keyring lib 未装 → RuntimeError 友好提示 pip install [keyring]."""
+    import sys
+    # 模拟 keyring 未装
+    monkeypatch.setitem(sys.modules, "keyring", None)
+    s = KeyringSecretStore()
+    with pytest.raises(RuntimeError, match=r"web-agent\[keyring\]"):
         s.get("any-key")
 
 
-def test_keyring_secret_store_has_raises_not_implemented():
+def test_keyring_get_backend_fail_returns_default(monkeypatch):
+    """V0.31.0: keyring backend raise (e.g. dbus unavail) → silent 返 default."""
+    import keyring
+
+    def _boom(service, username):
+        raise RuntimeError("dbus unavailable")
+
+    monkeypatch.setattr(keyring, "get_password", _boom)
     s = KeyringSecretStore()
-    with pytest.raises(NotImplementedError, match="V0.28 实现"):
-        s.has("any-key")
+    assert s.get("ANY", "fallback") == "fallback"
+
+
+# ---- ChainedSecretStore (V0.31.0) ----
+
+
+def test_chained_secret_store_short_circuit_first_hit(monkeypatch):
+    """V0.31.0: ChainedSecretStore 按 stores 顺序短路 — 第一 store hit 直接返."""
+    from web_agent.vault import ChainedSecretStore, EnvSecretStore
+
+    _setup_memory_backend(monkeypatch)
+    keyring_store = KeyringSecretStore()
+    keyring_store.set("FIRST_KEY", "from-keyring")
+
+    monkeypatch.setenv("FIRST_KEY", "from-env")  # env 也有, 但 keyring 优先
+    monkeypatch.setenv("ENV_ONLY_KEY", "env-only-val")
+
+    chain = ChainedSecretStore([keyring_store, EnvSecretStore()])
+    assert chain.get("FIRST_KEY") == "from-keyring"  # keyring 在前
+    assert chain.get("ENV_ONLY_KEY") == "env-only-val"  # keyring 缺 → env fallback
+    assert chain.get("MISSING") is None
+
+
+def test_chained_secret_store_has_short_circuit(monkeypatch):
+    """V0.31.0: ChainedSecretStore.has 任一 store hit 即 True."""
+    from web_agent.vault import ChainedSecretStore, EnvSecretStore
+
+    _setup_memory_backend(monkeypatch)
+    monkeypatch.setenv("ENV_KEY", "v")
+    monkeypatch.delenv("MISSING_BOTH", raising=False)
+
+    chain = ChainedSecretStore([KeyringSecretStore(), EnvSecretStore()])
+    assert chain.has("ENV_KEY") is True
+    assert chain.has("MISSING_BOTH") is False
+
+
+def test_chained_secret_store_satisfies_protocol(monkeypatch):
+    from web_agent.vault import ChainedSecretStore
+
+    _setup_memory_backend(monkeypatch)
+    chain = ChainedSecretStore([KeyringSecretStore()])
+    assert isinstance(chain, SecretStore)
 
 
 # --- make_client 注入 (V0.27.1) ---

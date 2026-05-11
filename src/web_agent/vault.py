@@ -13,7 +13,7 @@ V0.27 系列 vault scope:
 from __future__ import annotations
 
 import os
-from typing import Protocol, runtime_checkable
+from typing import Any, Protocol, runtime_checkable
 
 
 @runtime_checkable
@@ -52,24 +52,80 @@ class EnvSecretStore:
         return key in os.environ
 
 
-class KeyringSecretStore:
-    """V0.27.1 占位 stub: V0.28 真实现 (keyring lib 跨平台 macOS keychain / Linux Secret Service /
-    Windows Credential Manager).
+_KEYRING_SERVICE = "web-agent"  # V0.31.0: 单一 service, key 名复用 EnvSecretStore (1:1 swap)
 
-    Raise NotImplementedError 防 V0.27.1 误用 — 接口预留是为让 V0.28 加 backend 时
-    make_client(secret_store=KeyringSecretStore(...)) 立即可用 0 改 caller.
+
+class KeyringSecretStore:
+    """V0.31.0 真实现: 跨平台 OS-native secret store (macOS keychain / Linux Secret Service /
+    Windows Credential Manager) 通过 keyring lib (PyPI 标准跨平台).
+
+    keyring 是 opt-in extra dep — `pip install web-agent[keyring]` (Linux 还需 dbus + libsecret).
+    lazy import 防默 install 不装 keyring 时本类构造也能 work (V0.31.2 opt-in env 切换), 调用
+    get/has/set/delete 时才真 import + RuntimeError 指 extra.
+
+    service name 单一 "web-agent" + key 名复用 EnvSecretStore key ("ANTHROPIC_API_KEY" 等), 让
+    `KeyringSecretStore()` 跟 `EnvSecretStore()` 1:1 swap (cli/mcp caller 0 改).
+
+    跟 EnvSecretStore 同 SecretStore Protocol (get/has 同步), 加 set/delete 让 cli web-agent-vault
+    (V0.31.1) 可写 vault.
     """
 
+    def _import_keyring(self) -> Any:
+        """V0.31.0: lazy import keyring + ImportError 友好错误指 extra."""
+        try:
+            import keyring
+        except ImportError as e:
+            raise RuntimeError(
+                "KeyringSecretStore 需 keyring 包: pip install 'web-agent[keyring]' "
+                "(Linux 还需 dbus + libsecret). 当前缺包 → 用 EnvSecretStore() 默 backend."
+            ) from e
+        return keyring
+
     def get(self, key: str, default: str | None = None) -> str | None:
-        raise NotImplementedError(
-            "V0.27.1 KeyringSecretStore 是占位 stub, V0.28 实现 (跨平台 keyring lib). "
-            "当前用 EnvSecretStore() 默 backend."
-        )
+        keyring = self._import_keyring()
+        try:
+            value = keyring.get_password(_KEYRING_SERVICE, key)
+        except Exception:
+            # keyring backend fail (e.g. Linux dbus unavailable) → 视作缺值
+            return default
+        return value if value is not None else default
 
     def has(self, key: str) -> bool:
-        raise NotImplementedError(
-            "V0.27.1 KeyringSecretStore 占位 stub, V0.28 实现."
-        )
+        return self.get(key) is not None
+
+    def set(self, key: str, value: str) -> None:
+        """V0.31.0: 写 key 到 keyring (cli web-agent-vault set 用). 不在 SecretStore Protocol 内
+        (Protocol 只 get/has). caller 用 isinstance(store, KeyringSecretStore) 取 set 能力."""
+        keyring = self._import_keyring()
+        keyring.set_password(_KEYRING_SERVICE, key, value)
+
+    def delete(self, key: str) -> None:
+        """V0.31.0: 删 key (cli web-agent-vault delete 用). key 不存在时 raise PasswordDeleteError
+        (keyring lib 行为), caller 自行 catch."""
+        keyring = self._import_keyring()
+        keyring.delete_password(_KEYRING_SERVICE, key)
+
+
+class ChainedSecretStore:
+    """V0.31.0: 链式 SecretStore — 按 stores 顺序短路 has/get (前者 hit 即返).
+
+    V0.31.2 用 `default_store()` opt-in `WEB_AGENT_USE_KEYRING=1` 时切
+    `ChainedSecretStore([KeyringSecretStore(), EnvSecretStore()])`, 让 keyring miss 自动 fallback env.
+
+    跟 EnvSecretStore 同 SecretStore Protocol, V0.27.1 SecretStore.get/has 模式一致.
+    """
+
+    def __init__(self, stores: list["SecretStore"]) -> None:
+        self._stores = list(stores)
+
+    def get(self, key: str, default: str | None = None) -> str | None:
+        for store in self._stores:
+            if store.has(key):
+                return store.get(key, default)
+        return default
+
+    def has(self, key: str) -> bool:
+        return any(store.has(key) for store in self._stores)
 
 
 def default_store() -> SecretStore:

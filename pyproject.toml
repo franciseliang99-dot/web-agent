@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "web-agent"
-version = "0.30.5"
+version = "0.31.0"
 description = "MultiOn-style 高度拟人 AI web agent (Python + Playwright + VLM/SoM + stealth, multi-LLM)"
 readme = "README.md"
 license = "MIT"
@@ -33,7 +33,8 @@ dependencies = [
 
 [project.optional-dependencies]
 openai = ["openai>=2.33,<3"]
-all = ["openai>=2.33,<3"]
+keyring = ["keyring>=25,<26"]  # V0.31.0: vault KeyringSecretStore 真实现, opt-in extra (Linux 需 dbus+libsecret)
+all = ["openai>=2.33,<3", "keyring>=25,<26"]
 
 [project.scripts]
 web-agent = "web_agent.cli:main"

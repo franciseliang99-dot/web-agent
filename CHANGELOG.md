@@ -2,6 +2,68 @@
 
 All notable changes to web-agent. 版本号遵循 SemVer 简化形式（V<major>.<minor>.<patch>）。
 
+## [0.31.0] - 2026-05-10
+
+### Add (V0.31 keyring 系列开篇 1/4 — KeyringSecretStore 真实现 + ChainedSecretStore + opt-in extra)
+
+V0.30 D real-world + G stealth 联动收尾后, 用户选 V0.31 主线 = **C keyring 真实现** (V0.27 vault
+系列尾气, 不烧 token, 跨平台 macOS keychain / Linux Secret Service / Windows Credential Manager).
+
+V0.31.0 开篇做 framework: V0.27.1 KeyringSecretStore stub (NotImplementedError) → 真实现 (lazy
+import keyring + memory backend mock 测) + ChainedSecretStore (短路 has 优先, V0.31.2 让
+default_store opt-in 切 [Keyring, Env] 链).
+
+### Plan subagent 5 决策点全采纳 + 4 commit 拆解
+
+- **A** lib `keyring` (PyPI 跨平台) + `[project.optional-dependencies] keyring` extra (跟 openai
+  extra 同模式) + lazy import + ImportError 友好错误指 `pip install web-agent[keyring]`
+- **B** service "web-agent" + key 名复用 EnvSecretStore key (1:1 swap, cli/mcp caller 0 改)
+- **C** V0.31.1 新 console_script `web-agent-vault` (跟 web-agent-eval/-chain/-replay/-jd 同模式)
+- **D** V0.31.0 不改 default_store 默 (V0.31.2 加 opt-in env `WEB_AGENT_USE_KEYRING=1` 切链, V0.32 评估改默)
+- **E** 测: mock memory backend 默跑 (CI 安全) + 真 keyring slow opt-in (跟 sannysoft probe 同模式)
+
+### V0.31 系列 commit 拆解 (4 commit)
+
+| ver | 状态 | scope |
+|-----|------|-------|
+| **V0.31.0** | ✅ 本提交 | KeyringSecretStore 真实现 + ChainedSecretStore + opt-in extra + 11 测 |
+| V0.31.1 | 待 | console_script `web-agent-vault` set/get/delete/list 子命令 |
+| V0.31.2 | 待 | default_store opt-in env WEB_AGENT_USE_KEYRING=1 切 [Keyring, Env] 链 + cli/mcp 透传验 |
+| V0.31.3 | 待 | CHANGELOG 系列总结 + maintainer how-to 收尾 |
+
+### Changed (~150 LOC)
+
+- `src/web_agent/vault.py` +60 行:
+  - `_KEYRING_SERVICE = "web-agent"` 常量 (单一 service + key 1:1 swap)
+  - `KeyringSecretStore` 真实现 (V0.27.1 stub 替): `_import_keyring()` lazy import + ImportError
+    指 extra; `get(key, default)` 调 `keyring.get_password(_KEYRING_SERVICE, key)` (backend fail
+    silent 返 default 防 dbus 不可用阻塞); `has(key)` 复用 get; `set(key, value)` + `delete(key)`
+    给 V0.31.1 cli vault 命令用 (Protocol 外加方法, isinstance 取能力)
+  - `ChainedSecretStore` 链式 (按 stores 顺序短路 has → get hit 即返), V0.31.2 default_store 用
+- `pyproject.toml` `[project.optional-dependencies]` 加 `keyring = ["keyring>=25,<26"]` 跟 `all`
+  extra 加 keyring (Linux 还需 dbus + libsecret, opt-in dep 不强制)
+- `tests/test_vault.py` 改 2 stub 测 + 加 11 真测:
+  - `_setup_memory_backend` fixture (keyring memory backend mock 注入, CI 无 dbus 也跑)
+  - get missing default / set+get round-trip / delete / Protocol 兼容 / ImportError friendly /
+    backend fail silent default
+  - ChainedSecretStore: 短路 first hit / has 任一 hit / Protocol 兼容
+
+### Compatibility
+
+- 老 caller 0 改 (默 default_store 仍 EnvSecretStore, V0.31.2 才 opt-in 切链)
+- mypy strict 0 (45 src); ruff 0; pytest **671 + 18 skip** (V0.30.5 664+18 → +7 V0.31.0 测净
+  [+11 新 -2 stub raise 改 +0 真测 = +9 实际, 算上 stub 改 +7])
+- 真 chromium 15/15 全过 (无新)
+- 老 caller 跑 `uv sync` 不装 keyring (extra opt-in), V0.31.0 用户跑 `pip install web-agent[keyring]`
+  才装 PyPI keyring + Linux libsecret
+
+### V0.27+V0.28+V0.29+V0.30+V0.31 累计 subagent 真发现 = **12 处** (V0.31.0 0 新)
+
+### Why minor (V0.31.0) 不 patch
+
+- V0.31 主题切换 (V0.30 D real-world + G stealth → V0.31 C keyring 真实现) = SemVer minor 功能新增
+- 跟 V0.21.0/V0.22.0/V0.25.0/V0.26.0/V0.27.0/V0.28.0/V0.29.0/V0.30.0 主题开篇 minor 风格一致
+
 ## [0.30.5] - 2026-05-10
 
 ### Add (V0.30 系列收尾 commit 6/6 — cli --corpus real-world help update + axis filter 验)
