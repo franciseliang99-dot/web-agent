@@ -7,7 +7,13 @@ unit test (需真 browser + shadow DOM fixture), 用 substring smoke 检测关�
 
 from __future__ import annotations
 
-from web_agent.perceiver import _SOM_INJECT_JS, Mark, marks_to_text
+from web_agent.perceiver import (
+    _SOM_INJECT_JS,
+    Mark,
+    current_screenshot_format,
+    current_screenshot_quality,
+    marks_to_text,
+)
 
 
 def _mk(id_: int, tag: str = "button", role: str = "", text: str = "") -> Mark:
@@ -220,6 +226,56 @@ def test_marks_to_text_lean_case_insensitive(monkeypatch):
         )
         out = marks_to_text([m])
         assert "→" not in out, f"{val!r} 应 lean, got {out!r}"
+
+
+# ---------- V0.33.3: screenshot WebP opt-in (WEB_AGENT_SCREENSHOT_FORMAT=webp) ----------
+
+
+def test_screenshot_format_default_png(monkeypatch):
+    """V0.33.3: 缺省 → png (兼容 V0.33.2 baseline 字节级)."""
+    monkeypatch.delenv("WEB_AGENT_SCREENSHOT_FORMAT", raising=False)
+    assert current_screenshot_format() == "png"
+
+
+def test_screenshot_format_webp_explicit(monkeypatch):
+    """V0.33.3: env=webp → "webp" (case-insensitive + strip)."""
+    for val in ("webp", "WEBP", "WebP", "  webp  "):
+        monkeypatch.setenv("WEB_AGENT_SCREENSHOT_FORMAT", val)
+        assert current_screenshot_format() == "webp", f"{val!r} 应 webp"
+
+
+def test_screenshot_format_invalid_falls_back_to_png(monkeypatch):
+    """V0.33.3: 非 'webp' 值 (jpeg/avif/拼错/空) 全 fallback png — 不静默 webp."""
+    for val in ("jpeg", "jpg", "avif", "wepb", "true", "1", ""):
+        monkeypatch.setenv("WEB_AGENT_SCREENSHOT_FORMAT", val)
+        assert current_screenshot_format() == "png", f"{val!r} 应 fallback png"
+
+
+def test_screenshot_quality_default_75(monkeypatch):
+    """V0.33.3: 默 75 (WebP sweet spot — SoM 数字仍清, byte 减 ~70%)."""
+    monkeypatch.delenv("WEB_AGENT_SCREENSHOT_QUALITY", raising=False)
+    assert current_screenshot_quality() == 75
+
+
+def test_screenshot_quality_valid_range(monkeypatch):
+    """V0.33.3: 1-100 valid."""
+    for val in ("1", "50", "75", "100"):
+        monkeypatch.setenv("WEB_AGENT_SCREENSHOT_QUALITY", val)
+        assert current_screenshot_quality() == int(val)
+
+
+def test_screenshot_quality_out_of_range_falls_back(monkeypatch):
+    """V0.33.3: <1 或 >100 → 75 fallback (silent clamp 比 raise 更友好, env 配置错不该挂掉 task)."""
+    for val in ("0", "-1", "101", "9999"):
+        monkeypatch.setenv("WEB_AGENT_SCREENSHOT_QUALITY", val)
+        assert current_screenshot_quality() == 75, f"{val!r} 应 fallback 75"
+
+
+def test_screenshot_quality_non_int_falls_back(monkeypatch):
+    """V0.33.3: 非整数 (浮点 / 字符串) → 75 fallback."""
+    for val in ("75.5", "high", "", "abc"):
+        monkeypatch.setenv("WEB_AGENT_SCREENSHOT_QUALITY", val)
+        assert current_screenshot_quality() == 75
 
 
 # ---------- V0.22.1: perceive() iframe DFS + id_offset + 跨域 catch ----------

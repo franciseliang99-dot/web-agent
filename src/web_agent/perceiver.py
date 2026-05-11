@@ -294,7 +294,19 @@ async def perceive(page: Page) -> tuple[list[Mark], str, list[str]]:
     # 同源 iframe DFS; 跨域 catch 时收集 host (V0.22.4)
     cross_origin_hosts: list[str] = []
     await _walk_child_frames(page.main_frame, "", shadow_on, marks, cross_origin_hosts)
-    screenshot_bytes = await page.screenshot(type="png", full_page=False)
+    # V0.33.3: env `WEB_AGENT_SCREENSHOT_FORMAT=webp` opt-in (默 png 兼容 V0.33.2 baseline).
+    # WebP 走 quality kwarg (Playwright Chromium 原生 encoder); PNG lossless 不接 quality.
+    _fmt = current_screenshot_format()
+    if _fmt == "webp":
+        # Playwright type stub 滞后 (Literal["jpeg","png"]) 但 Chromium 原生支持 WebP encoder,
+        # runtime 接 type="webp" + quality 正常工作. type stub 修后可去 ignore.
+        screenshot_bytes = await page.screenshot(
+            type="webp",  # type: ignore[arg-type]
+            quality=current_screenshot_quality(),
+            full_page=False,
+        )
+    else:
+        screenshot_bytes = await page.screenshot(type="png", full_page=False)
     # cleanup 主 frame 的 SoM (iframe 已在 _walk_child_frames 内 cleanup 完)
     await _remove_som_in_frame(page.main_frame)
     # 去重保 DFS 顺序 (LLM prompt 缓存命中率看顺序)
@@ -305,6 +317,31 @@ async def perceive(page: Page) -> tuple[list[Mark], str, list[str]]:
 _LEAN_ROLE_KEEP_TAGS = frozenset({"div", "span", "li", "section", "article"})
 """V0.33.2: lean 模式下仅这些通用 tag 保留 role (语义靠 role 撑),
 button / input / a 等 tag 已自带语义, role 重复字段砍."""
+
+
+def current_screenshot_format() -> str:
+    """V0.33.3: env `WEB_AGENT_SCREENSHOT_FORMAT` 单源读 (caller: perceive / anthropic / openai / loop).
+
+    返 "png" (默) 或 "webp". 任何非 "webp" 值都视 "png" (跟 V0.33.2 lean 模式 fallback 同模型).
+
+    定位 (V0.33.0 #13 警告诚实降级): WebP **不省 token** — Anthropic 按 image tile 固定计费
+    ~1568 tok/image, OpenAI vision detail=high 同按 tile. WebP 真省的是: ① 落盘磁盘 (~70% bytes
+    减) ② 网络上传 latency. V0.33.4 baseline 双跑量化验证.
+    """
+    return "webp" if os.environ.get("WEB_AGENT_SCREENSHOT_FORMAT", "png").strip().lower() == "webp" else "png"
+
+
+def current_screenshot_quality() -> int:
+    """V0.33.3: WebP lossy quality (1-100, 默 75 是 sweet spot — SoM 红边 + 数字仍清).
+
+    PNG 路径忽略此值 (PNG 是 lossless). env `WEB_AGENT_SCREENSHOT_QUALITY` 解析失败 → 75 fallback.
+    """
+    raw = os.environ.get("WEB_AGENT_SCREENSHOT_QUALITY", "75").strip()
+    try:
+        q = int(raw)
+        return q if 1 <= q <= 100 else 75
+    except ValueError:
+        return 75
 
 
 def marks_to_text(marks: list[Mark]) -> str:

@@ -2,6 +2,70 @@
 
 All notable changes to web-agent. 版本号遵循 SemVer 简化形式（V<major>.<minor>.<patch>）。
 
+## [0.33.3] - 2026-05-11
+
+### Add (V0.33 E 性能优化系列 4/5 — screenshot WebP opt-in via WEB_AGENT_SCREENSHOT_FORMAT=webp)
+
+V0.33.2 SoM lean (text token 主战场, 估省 ~16k tok/run) 之后, 本提交补 image byte 优化:
+WebP framework 替 PNG 截图. **诚实定位 (V0.33.0 #13 警告兑现)**: WebP **不省 token** —
+Anthropic 按 image tile 固定计费 ~1568 tok/image, OpenAI vision detail=high 同按 tile 算.
+WebP 真省的是 ① 落盘磁盘 (~70% bytes 减) ② 网络上传 latency. V0.33.4 baseline 双跑量化.
+
+### Plan subagent 揭 4 处散读 → 单源 helper
+
+**4 处散读 env 漂移风险**: perceiver.perceive 截图 type / anthropic.media_type / openai.url mime /
+loop.shot_path 后缀 — 4 个文件各自 `os.environ.get(...)` 容易将来一处改了别的没改. **改进**:
+perceiver.py 暴露 `current_screenshot_format() -> "png"|"webp"` + `current_screenshot_quality() -> int`
+两个 module 级 helper, 4 个 caller 单源 lazy 读.
+
+### Changed (~150 LOC)
+
+- `src/web_agent/perceiver.py`:
+  - `current_screenshot_format()` 模块级 helper, 默 "png", env "webp" (case-insensitive + strip) 切换
+  - `current_screenshot_quality()` 模块级 helper, 默 75, range [1,100], 非整数 / 越界 → 75 fallback
+  - `perceive()` screenshot 调用按 `_fmt` 分支: WebP 走 `type="webp", quality=N`, PNG 走 `type="png"`
+  - WebP 路径加 `# type: ignore[arg-type]` (Playwright type stub Literal["jpeg","png"] 滞后, runtime 支持 WebP)
+- `src/web_agent/llm/anthropic.py`:
+  - `media_type` 从 hardcode "image/png" → `f"image/{current_screenshot_format()}"` lazy 读
+- `src/web_agent/llm/openai.py`:
+  - data URI mime 从 hardcode "image/png" → `f"image/{current_screenshot_format()}"` lazy 读 (OpenAI/Kimi/Moonshot 兼容)
+- `src/web_agent/loop.py`:
+  - `shot_path` 后缀从 hardcode `.png` → `.{current_screenshot_format()}` (.webp 模式 ~70% 磁盘省)
+- `tests/test_perceiver.py` +7 测:
+  - `test_screenshot_format_default_png` — 缺省 png (V0.33.2 baseline 兼容)
+  - `test_screenshot_format_webp_explicit` — webp/WEBP/WebP/带空格 全视 webp
+  - `test_screenshot_format_invalid_falls_back_to_png` — jpeg/avif/拼错/'true'/'1'/空 全视 png
+  - `test_screenshot_quality_default_75` — 默 75
+  - `test_screenshot_quality_valid_range` — 1/50/75/100 真值
+  - `test_screenshot_quality_out_of_range_falls_back` — 0/-1/101/9999 → 75
+  - `test_screenshot_quality_non_int_falls_back` — '75.5'/'high'/'abc' → 75
+- `pyproject.toml` / `__init__.py` 0.33.2 → 0.33.3
+- `uv.lock` 同步 (V0.33.1+V0.33.2 漏的 chore 同 commit, 这次跟住)
+
+### Verify
+
+- `uv run pytest` → **727 passed, 18 skipped** (+7, 0 现有测破)
+- `uv run ruff check` → all clean
+- `uv run mypy src/web_agent/` → no issues (WebP path `type: ignore` 注释)
+
+### 风险与限制
+
+- **token 不减**: V0.33.0 #13 已揭 — Anthropic / OpenAI vision 按 tile 固定计费, byte 减不直接转 token.
+- **真节省 = 磁盘 + 网络**: long-run eval (数千 step) 落盘 ~70% 减; LLM API 上传 latency 边际改善.
+- **WebP quality 75 SoM 风险**: SoM 红边 + 数字字符 lossy 75 仍清, V0.33.4 baseline 验 success rate.
+- **VCR cassette**: 默 png 不影响; webp 模式录的新 cassette 自洽 (跟 V0.33.2 lean 同安全模型).
+- **Playwright stub 滞后**: 加 `type: ignore[arg-type]` workaround, 等上游 stub 更新可去.
+
+### V0.33 系列进度
+
+| ver | 状态 | scope |
+|-----|------|-------|
+| V0.33.0 | ✅ | token baseline framework + CLI subcommand |
+| V0.33.1 | ✅ | per-step token accumulator 修 V0.26.2 silent bug #14 |
+| V0.33.2 | ✅ | SoM 字段 lean mode opt-in (WEB_AGENT_SOM_FIELDS=lean) |
+| **V0.33.3** | ✅ 本提交 | screenshot WebP opt-in (WEB_AGENT_SCREENSHOT_FORMAT=webp) |
+| V0.33.4 | 待 | real_world baseline 双跑 + 系列总结 |
+
 ## [0.33.2] - 2026-05-11
 
 ### Add (V0.33 E 性能优化系列 3/5 — SoM 字段 lean mode opt-in via WEB_AGENT_SOM_FIELDS=lean)

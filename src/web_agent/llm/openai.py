@@ -74,11 +74,15 @@ class OpenAIClient:
         current_idx: int = 0,
         cross_origin_hosts: list[str] | None = None,
     ) -> Action:
+        # V0.33.3: data URI mime 跟 perceiver 截图格式一致 (env `WEB_AGENT_SCREENSHOT_FORMAT=webp` 切 WebP).
+        # OpenAI vision 原生支持 png/jpeg/gif/webp; data URL scheme 无关 OpenAI Kimi/Moonshot 兼容层.
+        from web_agent.perceiver import current_screenshot_format
+        _mime = f"image/{current_screenshot_format()}"
         user_content: list[dict[str, Any]] = [
             {
                 "type": "image_url",
                 "image_url": {
-                    "url": f"data:image/png;base64,{screenshot_b64}",
+                    "url": f"data:{_mime};base64,{screenshot_b64}",
                     "detail": "high",  # 'low' 省 token 但 SoM 编号易看不清；'high' 更稳
                 },
             },

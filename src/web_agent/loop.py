@@ -555,7 +555,9 @@ async def run_react_loop(
             recent_pages.append(fp)
             _maybe_inject_reflect_hint(trace, recent_pages, fp)
 
-            shot_path = screenshots_dir / f"{task_id}-{step_i:02d}.png"
+            # V0.33.3: 落盘后缀跟 perceiver 截图格式一致 (.webp 模式 ~70% 磁盘省).
+            from web_agent.perceiver import current_screenshot_format
+            shot_path = screenshots_dir / f"{task_id}-{step_i:02d}.{current_screenshot_format()}"
             shot_path.write_bytes(base64.b64decode(screenshot_b64))
 
             logger.info("step %d perceive: %d marks, screenshot %s | t+%.1fs", step_i, len(marks), shot_path, elapsed)

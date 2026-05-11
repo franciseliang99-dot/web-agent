@@ -65,12 +65,16 @@ class AnthropicClient:
         current_idx: int = 0,
         cross_origin_hosts: list[str] | None = None,
     ) -> Action:
+        # V0.33.3: media_type 跟 perceiver 截图格式一致 (env `WEB_AGENT_SCREENSHOT_FORMAT=webp` 切 WebP).
+        # Anthropic vision 原生支持 png/jpeg/gif/webp 4 种.
+        from web_agent.perceiver import current_screenshot_format
+        _media_type = f"image/{current_screenshot_format()}"
         user_content = [
             {
                 "type": "image",
                 "source": {
                     "type": "base64",
-                    "media_type": "image/png",
+                    "media_type": _media_type,
                     "data": screenshot_b64,
                 },
             },
