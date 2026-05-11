@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
+import asyncio
 import base64
 import logging
 import os
+from dataclasses import replace
 from typing import cast
 from urllib.parse import urlparse
 
@@ -85,6 +87,7 @@ _SOM_INJECT_JS = """
     });
     const tag = document.createElement('div');
     tag.dataset.somMark = 'tag';
+    tag.dataset.somId = String(id);  // V0.34.4: renumber 时同步改 attr + textContent 一致
     tag.textContent = id;
     Object.assign(tag.style, {
       position: 'fixed', left: r.left + 'px', top: Math.max(0, r.top - 18) + 'px',
@@ -122,6 +125,43 @@ _SOM_REMOVE_JS = """
   // 在 _SOM_INJECT_JS 内自动清旧 data-som-id 再注入新, 不污染跨步骤 selector.
   // agent 退出关 Chrome 时 data-som-id 随 page 一并消失, 不污染用户长留 session.
   document.querySelectorAll('[data-som-mark]').forEach(e => e.remove());
+}
+"""
+
+_SOM_RENUMBER_JS = """
+(opts) => {
+  // V0.34.4: 把 DOM data-som-id (元素 + 视觉框 tag) 从局部 id 改到全局 DFS 顺序 id.
+  // F1 同层 sibling iframe SoM inject 用 asyncio.gather 并发, 各 frame 内部 id_offset=0
+  // 局部 1..N_local, Python 端 DFS 拼后 renumber, 调本 JS 修 DOM 端同步.
+  // opts.id_map: {old_id_str: new_id_int} per-frame (主调用方 dict[str(old)] = new).
+  // opts.shadow: bool 跟 _SOM_INJECT_JS 同 SHADOW_ON 模式 (穿透 open shadowRoot).
+  const idMap = opts && opts.id_map ? opts.id_map : {};
+  const SHADOW_ON = !opts || opts.shadow !== false;
+  const visited = new WeakSet();
+  const stack = [document];
+  while (stack.length) {
+    const root = stack.pop();
+    if (visited.has(root)) continue;
+    visited.add(root);
+    // 元素层 data-som-id (actuator frame.locator('[data-som-id="N"]') 路径)
+    root.querySelectorAll('[data-som-id]').forEach(e => {
+      const old = e.getAttribute('data-som-id');
+      if (old !== null && idMap[old] !== undefined) {
+        const newId = idMap[old];
+        e.setAttribute('data-som-id', String(newId));
+        // 视觉框 tag 同步 textContent (LLM 看到的数字)
+        if (e.dataset.somMark === 'tag') {
+          e.textContent = String(newId);
+        }
+      }
+    });
+    if (!SHADOW_ON) continue;
+    root.querySelectorAll('*').forEach(e => {
+      if (e.shadowRoot && e.shadowRoot.mode === 'open' && !visited.has(e.shadowRoot)) {
+        stack.push(e.shadowRoot);
+      }
+    });
+  }
 }
 """
 
@@ -235,37 +275,72 @@ def _frame_host(frame: Frame) -> str:
         return url[:60]
 
 
-async def _walk_child_frames(
-    parent: Frame, parent_path: str, shadow_on: bool,
-    marks: list[Mark], cross_origin_hosts: list[str],
-) -> None:
-    """V0.22.1: DFS 递归注入 child frame SoM, 累加到 marks. 跨域/detached frame 跳过子树.
+async def _process_child_frame_concurrent(
+    child: Frame, child_path: str, shadow_on: bool,
+) -> tuple[list[Mark], list[tuple[Frame, str, int]], list[str]]:
+    """V0.34.4 F1 helper: 单 child frame 处理 (id_offset=0 局部 id), 返 functional tuple.
 
-    每层用 `len(marks)` 作 id_offset → 全局 id 连续无冲突. frame_path 编码深度优先索引,
-    主 frame 父调用 path="", 第 1 个 child path="0", child 的第 2 个 child path="0.1".
+    返:
+      - local + sub marks (DFS 顺序, 各 frame 内部 id 局部 1..N_local 等 Python 端 renumber)
+      - frames_for_renumber: [(frame, frame_path, local_id_count), ...] 让主调用方组 id_map
+      - hosts: 跨域 host (DFS 顺序, 主调用方 dict.fromkeys 去重)
 
-    V0.22.4: 跨域 frame catch 时把 host append 到 cross_origin_hosts (调用方 dict.fromkeys
-    去重保 DFS 顺序). LLM 看到 build_user_text footer 知道反爬 widget 存在, 不会瞎点.
+    跨域 / detached frame catch 后整子树 skip, 返 ([], [], [host]).
     """
-    for i, child in enumerate(parent.child_frames):
-        child_path = f"{parent_path}.{i}" if parent_path else str(i)
-        try:
-            # 等 iframe load 防 timing 抢跑; timeout 短 (2s) 防慢站拖整体 perceive.
-            await child.wait_for_load_state("domcontentloaded", timeout=2000)
-            child_marks = await _inject_som_in_frame(
-                child, child_path, shadow_on, id_offset=len(marks),
-            )
-        except Exception as e:
-            host = _frame_host(child)
-            cross_origin_hosts.append(host)
-            logger.warning(
-                "frame %r (path=%s, host=%s) SoM inject failed (cross-origin/detached?), 跳过子树: %r",
-                getattr(child, "url", "")[:80], child_path, host, e,
-            )
-            continue  # 跨域父跳了子也访问不到, 整子树 skip
-        marks.extend(child_marks)
-        await _walk_child_frames(child, child_path, shadow_on, marks, cross_origin_hosts)
-        await _remove_som_in_frame(child)
+    try:
+        # 等 iframe load 防 timing 抢跑; timeout 短 (2s) 防慢站拖整体 perceive.
+        await child.wait_for_load_state("domcontentloaded", timeout=2000)
+        local_marks = await _inject_som_in_frame(child, child_path, shadow_on, id_offset=0)
+    except Exception as e:
+        host = _frame_host(child)
+        logger.warning(
+            "frame %r (path=%s, host=%s) SoM inject failed (cross-origin/detached?), 跳过子树: %r",
+            getattr(child, "url", "")[:80], child_path, host, e,
+        )
+        return [], [], [host]
+
+    # 子层递归 (孙辈也并发 — 各孙辈深度依赖 child inject 完成但孙辈互之间无依赖)
+    sub_marks, sub_frames, sub_hosts = await _walk_child_frames_concurrent(
+        child, child_path, shadow_on,
+    )
+    all_marks = local_marks + sub_marks
+    # 本 frame 也要 renumber (注入到 frames_for_renumber 头部, DFS 顺序)
+    frames_for_renumber = [(child, child_path, len(local_marks))] + sub_frames
+    return all_marks, frames_for_renumber, sub_hosts
+
+
+async def _walk_child_frames_concurrent(
+    parent: Frame, parent_path: str, shadow_on: bool,
+) -> tuple[list[Mark], list[tuple[Frame, str, int]], list[str]]:
+    """V0.34.4 F1: 同层 child sibling 用 asyncio.gather 并发 inject SoM.
+
+    取代 V0.22.1 顺序循环. 各 child 用 `id_offset=0` 局部 1..N_local, Python 端 DFS 拼后
+    renumber 全局 (主调用方 perceive). gather 保返回顺序 = input 顺序 (DFS index 一致).
+    跨域 frame catch 在 _process_child_frame_concurrent 内, 整子树 skip, return tuple
+    不共享 mutable list 消除竞态.
+
+    返 (marks_dfs_order, frames_for_renumber, hosts_dfs).
+    """
+    children = list(parent.child_frames)
+    if not children:
+        return [], [], []
+    tasks = [
+        _process_child_frame_concurrent(
+            child,
+            f"{parent_path}.{i}" if parent_path else str(i),
+            shadow_on,
+        )
+        for i, child in enumerate(children)
+    ]
+    sub_results = await asyncio.gather(*tasks)
+    all_marks: list[Mark] = []
+    all_frames: list[tuple[Frame, str, int]] = []
+    all_hosts: list[str] = []
+    for child_marks, child_frames, child_hosts in sub_results:
+        all_marks.extend(child_marks)
+        all_frames.extend(child_frames)
+        all_hosts.extend(child_hosts)
+    return all_marks, all_frames, all_hosts
 
 
 async def perceive(page: Page) -> tuple[list[Mark], str, list[str]]:
@@ -289,17 +364,45 @@ async def perceive(page: Page) -> tuple[list[Mark], str, list[str]]:
         logger.info("auto-dismissed %d popup(s): %s", len(dismissed), dismissed)
     # W5-B: WEB_AGENT_SOM_SHADOW=false 退化到 V0.11.x light-DOM only 行为
     shadow_on = os.environ.get("WEB_AGENT_SOM_SHADOW", "true").lower() not in ("false", "0", "no", "off")
-    # 主 frame 不 catch (fail-fast 跟 V0.22.0 行为对齐)
-    marks = await _inject_som_in_frame(page.main_frame, "", shadow_on, id_offset=0)
-    # 同源 iframe DFS; 跨域 catch 时收集 host (V0.22.4)
-    cross_origin_hosts: list[str] = []
-    await _walk_child_frames(page.main_frame, "", shadow_on, marks, cross_origin_hosts)
+    # 主 frame 不 catch (fail-fast 跟 V0.22.0 行为对齐); id_offset=0 局部, 主 frame 必在 DFS 头
+    main_marks = await _inject_som_in_frame(page.main_frame, "", shadow_on, id_offset=0)
+    # V0.34.4 F1: 同层 child sibling iframe 并发 inject (各 id_offset=0 局部), DFS 顺序拼.
+    child_marks, child_frames, hosts = await _walk_child_frames_concurrent(
+        page.main_frame, "", shadow_on,
+    )
+    # Python 端 DFS 顺序 renumber 全局 1..N, 同时组每 frame 的 old→new id_map
+    new_marks: list[Mark] = []
+    main_id_map: dict[str, int] = {}
+    for i, m in enumerate(main_marks):
+        new_id = i + 1
+        main_id_map[str(m.id)] = new_id
+        new_marks.append(replace(m, id=new_id))
+    cursor = len(main_marks)
+    child_id_maps: dict[str, dict[str, int]] = {}  # frame_path → id_map
+    child_marks_offset = 0
+    for _frame, fpath, local_count in child_frames:
+        id_map: dict[str, int] = {}
+        for j in range(local_count):
+            old_local = child_marks[child_marks_offset + j].id  # local 1..local_count
+            new_id = cursor + j + 1
+            id_map[str(old_local)] = new_id
+            new_marks.append(replace(child_marks[child_marks_offset + j], id=new_id))
+        child_id_maps[fpath] = id_map
+        cursor += local_count
+        child_marks_offset += local_count
+    # 并发跑 RENUMBER_JS 各 frame (主 + child) 修 DOM data-som-id + 视觉框 tag.textContent
+    renumber_tasks = [
+        page.main_frame.evaluate(_SOM_RENUMBER_JS, {"id_map": main_id_map, "shadow": shadow_on}),
+    ]
+    for frame, fpath, _count in child_frames:
+        renumber_tasks.append(
+            frame.evaluate(_SOM_RENUMBER_JS, {"id_map": child_id_maps[fpath], "shadow": shadow_on}),
+        )
+    # renumber 失败不致命 (DOM 端 stale id, 但 Mark.id 已是新值) — log + 继续
+    await asyncio.gather(*renumber_tasks, return_exceptions=True)
     # V0.33.3: env `WEB_AGENT_SCREENSHOT_FORMAT=webp` opt-in (默 png 兼容 V0.33.2 baseline).
-    # WebP 走 quality kwarg (Playwright Chromium 原生 encoder); PNG lossless 不接 quality.
     _fmt = current_screenshot_format()
     if _fmt == "webp":
-        # Playwright type stub 滞后 (Literal["jpeg","png"]) 但 Chromium 原生支持 WebP encoder,
-        # runtime 接 type="webp" + quality 正常工作. type stub 修后可去 ignore.
         screenshot_bytes = await page.screenshot(
             type="webp",  # type: ignore[arg-type]
             quality=current_screenshot_quality(),
@@ -307,11 +410,14 @@ async def perceive(page: Page) -> tuple[list[Mark], str, list[str]]:
         )
     else:
         screenshot_bytes = await page.screenshot(type="png", full_page=False)
-    # cleanup 主 frame 的 SoM (iframe 已在 _walk_child_frames 内 cleanup 完)
-    await _remove_som_in_frame(page.main_frame)
+    # V0.34.4: cleanup 主 + 所有 child frame 并发 (各 frame _remove_som 独立)
+    cleanup_tasks = [_remove_som_in_frame(page.main_frame)]
+    for frame, _fpath, _count in child_frames:
+        cleanup_tasks.append(_remove_som_in_frame(frame))
+    await asyncio.gather(*cleanup_tasks)
     # 去重保 DFS 顺序 (LLM prompt 缓存命中率看顺序)
-    deduped_hosts = list(dict.fromkeys(cross_origin_hosts))
-    return marks, base64.b64encode(screenshot_bytes).decode(), deduped_hosts
+    deduped_hosts = list(dict.fromkeys(hosts))
+    return new_marks, base64.b64encode(screenshot_bytes).decode(), deduped_hosts
 
 
 _LEAN_ROLE_KEEP_TAGS = frozenset({"div", "span", "li", "section", "article"})

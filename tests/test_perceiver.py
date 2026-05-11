@@ -323,32 +323,39 @@ async def test_perceive_main_frame_only_no_iframes():
 
 
 async def test_perceive_iframe_dfs_id_offset_continuous():
-    """V0.22.1: 主 frame 2 marks + iframe 3 marks → id 全局连续 1-5, frame_path='' / '0'.
+    """V0.34.4: 主 frame 2 marks + iframe 3 marks (local id 1..3) → Python renumber 全局 1..5.
 
-    关键: iframe.evaluate 被调用时 opts 含 id_offset=2 (主 frame 已用 id 1-2).
+    V0.22.1 用 id_offset 在 JS 内加 → V0.34.4 改各 frame inject id_offset=0 局部 id,
+    Python 端 DFS 顺序拼后 renumber, 各 frame 跑 RENUMBER_JS 修 DOM data-som-id 一致.
     """
     from unittest.mock import AsyncMock, MagicMock
-    from web_agent.perceiver import _SOM_INJECT_JS, perceive
+    from web_agent.perceiver import _SOM_INJECT_JS, _SOM_RENUMBER_JS, perceive
     iframe = _mk_frame(
         child_frames=[],
-        evaluate_returns=[_mk_raw(3, 3, tag="input"), None],  # id 3,4,5 (offset=2 → JS 内 +2)
+        # V0.34.4: child id_offset=0 → JS 返 local id 1..3 (mock 直接给 local)
+        evaluate_returns=[_mk_raw(1, 3, tag="input"), None, None],  # INJECT, RENUMBER, REMOVE
         url="about:srcdoc",
     )
     main_frame = _mk_frame(
         child_frames=[iframe],
-        evaluate_returns=[_mk_raw(1, 2), None],
+        evaluate_returns=[_mk_raw(1, 2), None, None],  # INJECT, RENUMBER, REMOVE
     )
     page = MagicMock()
     page.main_frame = main_frame
     page.evaluate = AsyncMock(return_value=[])
     page.screenshot = AsyncMock(return_value=b"\x89PNG\r\n\x1a\n" + b"\x00" * 8)
     marks, _, _ = await perceive(page)
+    # Python renumber 后全局 id 1..5 DFS 顺序 (主 1..2 + child local 1..3 → renumber 3..5)
     assert [m.id for m in marks] == [1, 2, 3, 4, 5]
     assert [m.frame_path for m in marks] == ["", "", "0", "0", "0"]
-    # iframe.evaluate 第 1 调用 (SoM inject) opts 含 id_offset=2
+    # V0.34.4 iframe inject 用 id_offset=0 (各 frame 局部 id, 不是 V0.22.1 global offset)
     inject_call = iframe.evaluate.call_args_list[0]
     assert inject_call.args[0] == _SOM_INJECT_JS
-    assert inject_call.args[1]["id_offset"] == 2
+    assert inject_call.args[1]["id_offset"] == 0
+    # V0.34.4 第 2 调用 RENUMBER_JS, id_map dict[str, int] (JS object key 必须 str)
+    renumber_call = iframe.evaluate.call_args_list[1]
+    assert renumber_call.args[0] == _SOM_RENUMBER_JS
+    assert renumber_call.args[1]["id_map"] == {"1": 3, "2": 4, "3": 5}
 
 
 async def test_perceive_cross_origin_iframe_skipped_main_continues():

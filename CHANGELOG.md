@@ -2,6 +2,107 @@
 
 All notable changes to web-agent. 版本号遵循 SemVer 简化形式（V<major>.<minor>.<patch>）。
 
+## [0.34.4] - 2026-05-11
+
+### Feat (V0.34 F sub-route 优化系列 5/N — F1 iframe DFS 并发实施 + chromium 限制真测发现 #17)
+
+V0.34.3 真测 fan-out baseline 推 F1 ROI ~67-74% (基于 Playwright 真并发 evaluate 假设), 但
+V0.34.4 实施完 F1 后**真测节省仅 ~3%** (if1-sib5: 244ms → 235ms; if2-sib3: 426ms → 416ms),
+远低于预期. Micro experiment 诊断真根因 + 沉淀真发现 #17 (chromium architecture 限制).
+
+### 真发现 #17 chromium same-origin iframe shared renderer 主线程 serialize 跨 frame JS
+
+**Hypothesis (V0.34.3 Plan agent 估算)**: F1 同层 sibling iframe SoM inject 用 asyncio.gather
+并发, cap at slowest sibling → 5 sibling 节省 ~67%.
+
+**真测推翻 (V0.34.4)**: V0.34.3 fan-out fixture (srcdoc same-origin) 真测节省 ~3% (实测).
+
+**Micro experiment 诊断**: Playwright IPC channel 真并发 evaluate (5x speedup verified for
+async setTimeout JS), 但 chromium **same-origin iframe 共享 renderer 进程主线程**, 跨 frame
+sync JS (SoM inject 含 querySelectorAll + DOM 写) **renderer thread 仍 serialized**.
+
+```python
+# micro test (V0.34.4 调研期间):
+# same-frame 5 × 100ms setTimeout: seq 533ms, gather 116ms (4.6x speedup) ← Playwright 并发真
+# cross-page 5 × 100ms setTimeout: seq 536ms, gather 107ms (5.0x speedup) ← page 间并发真
+# 但 V0.34.3 fan-out fixture sibling 是 srcdoc same-origin iframe, 共享 renderer → JS 仍串
+```
+
+**校正**: F1 真节省路径需要**独立 renderer**:
+- Cross-origin iframe → V0.22.4 perceiver 早已 catch+skip 不 evaluate → F1 无影响
+- Site-isolation cross-process iframe → 极少 (典型 web app 嵌套 iframe 多为 same-origin)
+- 实际效果: F1 在 same-origin fan-out 节省 ~3% (Python gather IPC overhead 微减), 不到预期 1/20
+
+**教训**: chromium architecture 是 F1 主限制, 不是 Playwright IPC. 跟 #13 (image tile 固定计费
+WebP 不省 token) 同模式 — **平台层假设没 micro experiment 验证是 silent 性能猜测**. 任何 F
+sub-route 优化 plan 前要先 micro bench renderer 层并发性, 不止 Playwright IPC 层.
+
+### F1 状态: implemented but ROI 不及预期, cross-origin 真验 deferred
+
+代码实施完整 (RENUMBER_JS + 并发 walker + 6 单测全过 + V0.22.x contract 保), 但 V0.34.3
+synthetic fan-out fixture (srcdoc same-origin) 不能验真 cross-origin / cross-process ROI.
+V0.34.5 加 cross-origin fixture (localhost 双端口 server) 真验后, F1 真实价值才能 lock.
+
+### 解耦审查 (CLAUDE.md 依赖方向)
+
+- `_walk_child_frames` 重写为 `_walk_child_frames_concurrent` + `_process_child_frame_concurrent`,
+  functional return tuple `(marks, frames_for_renumber, hosts)` 不共享 mutable list (并发竞态消除)
+- `perceive` 主入口 Python 端 DFS 顺序拼 + renumber 全局 `Mark.id` 1..N, 各 frame 跑
+  `_SOM_RENUMBER_JS` 修 DOM 端 `data-som-id` + 视觉框 tag textContent (V0.22.2 actuator 契约保)
+- `_SOM_INJECT_JS` 前置改: 给视觉框 tag 也挂 `data-som-id` mirror (renumber 时一并改)
+- `cross_origin_hosts` 改 functional return, 不共享 mutable list
+
+V0.22.x actuator iframe path 0 改动 (Python `Mark.id` == DOM `data-som-id` 仍一致).
+
+### Changed (~120 src LOC, +8 测)
+
+- `src/web_agent/perceiver.py`:
+  - 顶部 imports: +asyncio, +dataclasses.replace
+  - `_SOM_INJECT_JS`: +1 行 `tag.dataset.somId = String(id)` (renumber 视觉框前置)
+  - `_SOM_RENUMBER_JS` **新** ~35 行: shadow walker 穿透 + 元素 data-som-id + 视觉框 tag (textContent + data-som-id) 同步改
+  - `_walk_child_frames_concurrent` **新** + `_process_child_frame_concurrent` **新** (替代 V0.22.1 `_walk_child_frames` 顺序 for loop, ~50 行)
+  - `perceive` 主入口重写: Python 端 DFS renumber + asyncio.gather RENUMBER + asyncio.gather cleanup
+- `tests/test_perceiver.py`: 修 1 测 `test_perceive_iframe_dfs_id_offset_continuous` → V0.34.4 contract (id_offset=0 局部 + RENUMBER call args 验证)
+- `tests/test_perceiver_concurrent.py` **新** ~150 行 6 单测:
+  - main_only renumber identity / 3 sibling fan-out DFS / 1 sibling raises skipped / 嵌套 fan-out tree / RENUMBER id_map keys str / RENUMBER shadow param
+- `tests/test_perceive_bench_real.py`: +2 slow smoke (fan-out sibling + fan-out tree mark_count 契约验, 不强制 ms 节省 — 真发现 #17 诚实)
+- `pyproject.toml` / `__init__.py` 0.34.3 → 0.34.4
+- `uv.lock` 同步
+
+### Verify
+
+- `uv run pytest` → **772 passed, 25 skipped** (+6 V0.34.4 unit + 2 V0.34.4 slow smoke skipped, 0 现测破)
+- `uv run ruff check` → all clean
+- `uv run mypy` → Success no issues in 49 src files
+- 真测 4 fixture × 8 samples: mark_count 全命中, V0.22.x契约保 (Python Mark.id == DOM data-som-id)
+
+### V0.34.5 plan 重审 (subagent 商议后 reframe)
+
+V0.34.4 真发现 #17 推翻 V0.34.3 F1 ROI 估算 → V0.34.5 不应直接做 F2, 应先**做 cross-origin
+fixture 真验 F1 + F2 在 cross-process renderer 下的真节省**:
+
+1. `eval/perceive_bench_cross_origin.py` 新建: localhost 双端口 server (Python http.server 起 8001/8002)
+2. fan-out fixture 加 `cross_origin: bool` 参数, 真测 cross-process iframe → 应触发 chromium
+   site-isolation, 独立 renderer process, 真测 F1 节省
+3. F2 SoM JS 三 walker 合并: V0.34.2 baseline 已知 microbench local chromium ~2-4ms 节省微,
+   cross-origin remote 才显著. 同样需 cross-origin baseline 决策
+
+V0.34.5 = cross-origin fixture 真验 (~50-80 LOC server + fixture extension + baseline).
+
+### V0.34 系列进度
+
+| ver | 状态 | scope |
+|-----|------|-------|
+| V0.34.0 | ✅ | bench harness framework |
+| V0.34.1 | ✅ | 真跑 chromium adapter |
+| V0.34.2 | ✅ | fix iframe/shadow 嵌套 bug + linear baseline |
+| V0.34.3 | ✅ | fan-out fixture extension + 真测 F1 ROI 决策 (估 67-74%) |
+| **V0.34.4** | ✅ 本提交 | F1 实施 + 真测 #17 chromium same-origin renderer serialize 限制 (真节省 ~3%, 远低预期) |
+| V0.34.5 | 待 | cross-origin fixture (localhost 双端口 server) 真验 F1/F2 cross-process ROI |
+| V0.34.6 | 待 | F2 SoM JS 三 walker 合并 (待 cross-origin baseline 决策) + V0.34 收尾 |
+
+详细 #17 真发现 + V0.34.5 plan 见 [`docs/perceive-bench-fan-out-V0.34.3.md`](../docs/perceive-bench-fan-out-V0.34.3.md) 附录.
+
 ## [0.34.3] - 2026-05-11
 
 ### Feat (V0.34 F sub-route 优化系列 4/N — fan-out fixture extension + F1 ROI 真测决策)
