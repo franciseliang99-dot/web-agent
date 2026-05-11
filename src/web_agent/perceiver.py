@@ -302,21 +302,33 @@ async def perceive(page: Page) -> tuple[list[Mark], str, list[str]]:
     return marks, base64.b64encode(screenshot_bytes).decode(), deduped_hosts
 
 
+_LEAN_ROLE_KEEP_TAGS = frozenset({"div", "span", "li", "section", "article"})
+"""V0.33.2: lean 模式下仅这些通用 tag 保留 role (语义靠 role 撑),
+button / input / a 等 tag 已自带语义, role 重复字段砍."""
+
+
 def marks_to_text(marks: list[Mark]) -> str:
     """把 marks 列表序列化成给 LLM 的简洁文本（DOM 瘦身）。
 
     V0.22.0: 加 `@<frame_path>` 后缀标记 iframe 内元素 (主 frame 不显示).
     LLM 看到 `@0` / `@0.2` 知道该 mark 在嵌套 iframe; actuator V0.22.2 自动按 frame_path 路由.
+
+    V0.33.2: env `WEB_AGENT_SOM_FIELDS=lean` 触发 lean mode (省 ~50% text token, V0.33 E 性能优化系列):
+    - 砍 href (a[href] 长字符不入 LLM, list_extract 走独立路径不受影响)
+    - 条件砍 role (仅 generic tag div/span/li/section/article 时保, button/a/input 已自带语义)
+    - 保 id / tag / text / frame_path (LLM 必须能引 click(mark_id=N) + 跨 frame 语义)
+    缺省 / 任何非 "lean" 值 → full mode 字节级兼容 V0.33.1 行为, baseline 不破.
     """
+    lean = os.environ.get("WEB_AGENT_SOM_FIELDS", "full").strip().lower() == "lean"
     lines = []
     for m in marks:
         s = f"[{m.id}] <{m.tag}"
-        if m.role:
+        if m.role and (not lean or m.tag in _LEAN_ROLE_KEEP_TAGS):
             s += f" role={m.role}"
         s += ">"
         if m.text:
             s += f" {m.text!r}"
-        if m.href:
+        if m.href and not lean:
             s += f" → {m.href}"  # V0.20.8: a[href] 暴露给 LLM (list extract 必须看到 link target)
         if m.frame_path:
             s += f" @{m.frame_path}"  # V0.22.0: iframe 路径

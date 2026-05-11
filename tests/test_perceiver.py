@@ -122,6 +122,106 @@ def test_marks_to_text_iframe_path_after_href():
     assert out.index("→") < out.index("@")
 
 
+# ---------- V0.33.2: SoM lean mode opt-in (WEB_AGENT_SOM_FIELDS=lean) ----------
+
+
+def test_marks_to_text_default_full_mode_unchanged(monkeypatch):
+    """V0.33.2: 缺省 / 任何非 'lean' 值 → full mode 字节级兼容 V0.33.1 (baseline 不破)."""
+    monkeypatch.delenv("WEB_AGENT_SOM_FIELDS", raising=False)
+    m = Mark(
+        id=1, tag="a", role="link", text="Sign in",
+        bbox={"x": 0, "y": 0, "w": 1, "h": 1},
+        href="https://example.com/login",
+    )
+    # full: id + tag + role + text + href 全保 (V0.33.1 行为)
+    assert marks_to_text([m]) == "[1] <a role=link> 'Sign in' → https://example.com/login"
+
+
+def test_marks_to_text_lean_drops_href(monkeypatch):
+    """V0.33.2 lean: a[href] → URL 砍掉 (典型 long string ~60 char/mark, 是 token 大头)."""
+    monkeypatch.setenv("WEB_AGENT_SOM_FIELDS", "lean")
+    m = Mark(
+        id=1, tag="a", role="link", text="Sign in",
+        bbox={"x": 0, "y": 0, "w": 1, "h": 1},
+        href="https://example.com/very/long/login/path?utm=foo",
+    )
+    out = marks_to_text([m])
+    assert "→" not in out, f"lean 应砍 href, got {out!r}"
+    assert "example.com" not in out
+
+
+def test_marks_to_text_lean_drops_role_for_semantic_tags(monkeypatch):
+    """V0.33.2 lean: button/a/input 等 tag 自带语义, role 重复字段砍掉."""
+    monkeypatch.setenv("WEB_AGENT_SOM_FIELDS", "lean")
+    m = Mark(
+        id=1, tag="button", role="button", text="Submit",
+        bbox={"x": 0, "y": 0, "w": 1, "h": 1},
+    )
+    assert marks_to_text([m]) == "[1] <button> 'Submit'"
+
+
+def test_marks_to_text_lean_keeps_role_for_generic_tags(monkeypatch):
+    """V0.33.2 lean: div/span/li 等 generic tag 必须保 role (语义全靠 aria role 撑).
+
+    实际场景: SPA `<div role=tab>Profile</div>` 是 tab 控件, 砍 role 后 LLM 看到 `<div>` 不知是 tab.
+    """
+    monkeypatch.setenv("WEB_AGENT_SOM_FIELDS", "lean")
+    cases = [
+        (Mark(id=1, tag="div", role="tab", text="Profile",
+              bbox={"x": 0, "y": 0, "w": 1, "h": 1}),
+         "[1] <div role=tab> 'Profile'"),
+        (Mark(id=2, tag="span", role="button", text="More",
+              bbox={"x": 0, "y": 0, "w": 1, "h": 1}),
+         "[2] <span role=button> 'More'"),
+        (Mark(id=3, tag="li", role="menuitem", text="Settings",
+              bbox={"x": 0, "y": 0, "w": 1, "h": 1}),
+         "[3] <li role=menuitem> 'Settings'"),
+    ]
+    for m, expected in cases:
+        assert marks_to_text([m]) == expected, f"{m.tag} role={m.role} 应保 role"
+
+
+def test_marks_to_text_lean_keeps_id_tag_text_frame(monkeypatch):
+    """V0.33.2 lean: id / tag / text / frame_path 必留 (LLM click 引 id, frame_path 跨 frame 必须)."""
+    monkeypatch.setenv("WEB_AGENT_SOM_FIELDS", "lean")
+    m = Mark(
+        id=42, tag="button", role="button", text="Pay",
+        bbox={"x": 0, "y": 0, "w": 1, "h": 1},
+        frame_path="0.2",
+    )
+    out = marks_to_text([m])
+    assert "[42]" in out, "id 必留"
+    assert "<button>" in out, "tag 必留"
+    assert "'Pay'" in out, "text 必留"
+    assert "@0.2" in out, "frame_path 必留 (跨 frame 路由)"
+
+
+def test_marks_to_text_lean_invalid_value_falls_back_to_full(monkeypatch):
+    """V0.33.2: env 任何非 'lean' (含拼错 'leann' / 空 / 'true') → 走 full, 不要静默 lean."""
+    for val in ("leann", "true", "1", "yes", "", "FULL"):
+        monkeypatch.setenv("WEB_AGENT_SOM_FIELDS", val)
+        m = Mark(
+            id=1, tag="a", role="link", text="x",
+            bbox={"x": 0, "y": 0, "w": 1, "h": 1},
+            href="https://x/y",
+        )
+        out = marks_to_text([m])
+        assert "→" in out, f"非 'lean' 值 {val!r} 应 full, got {out!r}"
+
+
+def test_marks_to_text_lean_case_insensitive(monkeypatch):
+    """V0.33.2: 'LEAN' / 'Lean' / 大小写混合都视 lean (跟 V0.30 _normalize_provider 同 strip().lower() pattern)."""
+    for val in ("lean", "LEAN", "Lean", "  lean  "):
+        monkeypatch.setenv("WEB_AGENT_SOM_FIELDS", val)
+        m = Mark(
+            id=1, tag="a", role="link", text="x",
+            bbox={"x": 0, "y": 0, "w": 1, "h": 1},
+            href="https://x/y",
+        )
+        out = marks_to_text([m])
+        assert "→" not in out, f"{val!r} 应 lean, got {out!r}"
+
+
 # ---------- V0.22.1: perceive() iframe DFS + id_offset + 跨域 catch ----------
 
 

@@ -2,6 +2,80 @@
 
 All notable changes to web-agent. 版本号遵循 SemVer 简化形式（V<major>.<minor>.<patch>）。
 
+## [0.33.2] - 2026-05-11
+
+### Add (V0.33 E 性能优化系列 3/5 — SoM 字段 lean mode opt-in via WEB_AGENT_SOM_FIELDS=lean)
+
+V0.33.0 baseline framework + V0.33.1 per-step token 真累加之后, 本提交是 V0.33 E 系列**真节省 token 的核心**.
+按 V0.33.0 #13 发现 (Anthropic image tile 固定计费 ~1568 tok/image, WebP 减 70% bytes 不直接减
+token), text 才是真主源 — `marks_to_text` 渲染的 SoM 文本串联进 trace.for_llm × N step 是 token 大头.
+
+### Plan subagent 揭真主源定位 + 字段保/砍 grid
+
+**真主源**: `src/web_agent/perceiver.py:305-324` `marks_to_text()`. 该函数 `list[Mark]` → 多行 text →
+`_schema.build_user_text` (`src/web_agent/llm/_schema.py:275`) → `client.plan()` user message.
+**Mark dataclass 本身不直传 LLM** (只在内存里给 actuator/safety 用 bbox/role), 所以 dataclass / SoM JS
+零改, 单点改 `marks_to_text` 即可.
+
+**字段保/砍 grid (lean 模式)**:
+
+| 字段 | full 渲染 | lean 处理 | 理由 |
+|------|----------|----------|------|
+| `id` | `[N]` | **保** | LLM 必须引 `click(mark_id=N)` |
+| `tag` | `<button>` | **保** | LLM 凭 tag 判 input/button/a, 砍后准确度暴跌 |
+| `role` | ` role=button` | **条件保** | button/a/input 等 tag 自带语义 → 砍; div/span/li/section/article 等 generic tag → 保 (`<div role=tab>` 在 SPA 常见) |
+| `text` | ` 'Submit'` | **保** | 图标按钮无 text, 但有 text 的 99% 是 LLM 唯一识别锚 |
+| `href` | ` → URL` | **砍** | 平均长 ~60 char, list_extract 走独立路径不受影响 |
+| `frame_path` | ` @0.2` | **保** | actuator 跨 frame 路由 + iframe 语义必须 |
+
+### Token 节省估算
+
+典型 mark full 行 `[12] <a role=link 'Sign in to your account' → https://example.com/login` ≈ 75 char.
+lean 行 `[12] <a> 'Sign in to your account'` ≈ 35 char. **节省 ~53%**.
+N=20 marks/step × 20 step ≈ **省 ~16k tokens/run** (text-only, ~4 char/token).
+跟 V0.33.0 CHANGELOG 提的 "ROI 大很多" 吻合.
+
+### Changed (~110 LOC)
+
+- `src/web_agent/perceiver.py`:
+  - `_LEAN_ROLE_KEEP_TAGS = frozenset({"div","span","li","section","article"})` 模块常量 (条件保 role 的 tag whitelist)
+  - `marks_to_text(marks)` 内部 lazy `os.environ.get("WEB_AGENT_SOM_FIELDS","full").strip().lower() == "lean"`
+    (跟 `WEB_AGENT_AUTO_DISMISS` / `WEB_AGENT_SOM_SHADOW` 同 pattern, lazy 取值便于 monkeypatch 测)
+  - lean 分支: `role` 条件保 (tag in _LEAN_ROLE_KEEP_TAGS), `href` 直砍, `id/tag/text/frame_path` 必留
+  - 函数签名零改 → 所有 caller (`_schema.py:275` 唯一 caller) 不需改
+- `tests/test_perceiver.py` +7 测:
+  - `test_marks_to_text_default_full_mode_unchanged` — 缺省 env → 字节级兼容 V0.33.1 (baseline 不破)
+  - `test_marks_to_text_lean_drops_href` — a[href] 长 URL 砍掉
+  - `test_marks_to_text_lean_drops_role_for_semantic_tags` — button/a/input role 砍
+  - `test_marks_to_text_lean_keeps_role_for_generic_tags` — div/span/li role 保 (3 tag 参数化)
+  - `test_marks_to_text_lean_keeps_id_tag_text_frame` — 4 必留字段 + frame_path 跨 frame
+  - `test_marks_to_text_lean_invalid_value_falls_back_to_full` — 'leann'/'true'/'1'/'yes'/'FULL' 都视 full (不静默 lean)
+  - `test_marks_to_text_lean_case_insensitive` — 'LEAN'/'Lean'/'  lean  ' 都视 lean
+- `pyproject.toml` / `__init__.py` 0.33.1 → 0.33.2
+
+### Verify
+
+- `uv run pytest` → **720 passed, 18 skipped** (+7 新测, 0 现有测破)
+- `uv run ruff check src/web_agent/perceiver.py tests/test_perceiver.py` → all clean
+- `uv run mypy src/web_agent/perceiver.py` → no issues
+
+### 风险与限制
+
+- **lean 不是默认**: 默 full → V0.33.0 baseline 字节级兼容, VCR cassette / mock client 复放完全一致.
+- **list_extract.py 不受影**: list_extract 走独立 CLI 路径不调 marks_to_text, href 砍仅影响 ReAct loop.
+- **pytest-recording cassette 兼容**: 任何已录 cassette 在 lean=False (默) 下仍能复放, 因为 marks_to_text 输出字节级一致.
+- **未来 V0.33.4 baseline 双跑**: 用 V0.33.0 token_baseline compare 量化 lean vs full 真节省, 如果 ≥30% 而 success rate 不掉 (>= V0.33.1 baseline) 则可考虑改默 lean.
+
+### V0.33 系列进度
+
+| ver | 状态 | scope |
+|-----|------|-------|
+| V0.33.0 | ✅ | token baseline framework + CLI subcommand |
+| V0.33.1 | ✅ | per-step token accumulator 修 V0.26.2 silent bug #14 |
+| **V0.33.2** | ✅ 本提交 | SoM 字段 lean mode opt-in (WEB_AGENT_SOM_FIELDS=lean) |
+| V0.33.3 | 待 | screenshot WebP opt-in (WEB_AGENT_SCREENSHOT_FORMAT=webp) |
+| V0.33.4 | 待 | real_world baseline 双跑 + 系列总结 |
+
 ## [0.33.1] - 2026-05-11
 
 ### Fix (V0.33 E 性能优化系列 2/5 — per-step token accumulator 修 V0.26.2 silent bug #14)
