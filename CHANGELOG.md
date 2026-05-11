@@ -2,6 +2,41 @@
 
 All notable changes to web-agent. 版本号遵循 SemVer 简化形式（V<major>.<minor>.<patch>）。
 
+## [0.29.3] - 2026-05-10
+
+### Refactor (V0.29.2 simplify pass — 抽 _make_safety_cb helper)
+
+V0.29.2 commit 留的尾巴: web_agent_run (V0.18.0) + web_agent_run_chain (V0.29.2) 各自有一份
+`_elicit_safety` closure (15 行), 内容近 100% 重复, 仅 msg 差 `"web-agent"` vs `"web-agent (chain)"`
++ `"abort task"` vs `"abort 当前 node task"`. V0.29.2 subagent E 决"V0.29.4 simplify pass 再做",
+本提交即 simplify pass 兑现.
+
+### Change
+
+- **mcp_server.py**: 抽 `_make_safety_cb(ctx, scope_label="")` module-level helper.
+  - `ctx is None` → 返 None (cli mode 无 elicit, loop 维持 abort 行为).
+  - `scope_label` 空 → "web-agent" + "abort task" (V0.18.0 文案).
+  - `scope_label="(chain)"` → "web-agent (chain)" + "abort 当前 node task" (V0.29.2 文案).
+  - try/except + AcceptedElicitation 校验 + decline default 全保, 行为 0 变.
+- **web_agent_run** L177-183: 18 行 closure → `safety_approval_cb = _make_safety_cb(ctx)` 1 行.
+- **web_agent_run_chain** L266-284: 19 行 closure → `safety_approval_cb = _make_safety_cb(ctx, scope_label="(chain)")` 1 行.
+
+### Why
+
+- 单点修改: 未来加 elicit 默 timeout / 改 SafetyApproval schema 字段 / 加 audit log 只动一处.
+- DRY: 30 行重复 closure → 1 个 25 行 helper + 2 行 callsite, 净省 ~5 行 + 心智单点.
+- 行为契约不变: 25 个 mcp_server tests 全 pass (含 V0.29.2 加的 5 个 chain 测 + V0.18.0/V0.27.4
+  elicit 测), pytest **627 + 17 skip** 维持.
+
+### Skip
+
+- `capability_hint → select_provider` 4 行 if-else 不抽 (helper 5 行净负收益).
+- `_chain_result_to_dict` domain-specific (chain → JSON), 跟 metric_to_dict pattern 同, 不抽.
+
+### CI
+
+- mypy strict 0 (43 src); ruff 0; pytest 627 + 17 skip (V0.29.2 同, 仅 refactor 不加测).
+
 ## [0.29.2] - 2026-05-10
 
 ### Add (V0.29 W6-C 系列 commit 3/4 — mcp tool web_agent_run_chain 接 spec dict inline)

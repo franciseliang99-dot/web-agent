@@ -101,6 +101,42 @@ def _check_chrome_alive(cdp_url: str, timeout: float = 2.0) -> None:
     ensure_chrome_running(cdp_url)
 
 
+def _make_safety_cb(
+    ctx: Context[Any, Any] | None,
+    scope_label: str = "",
+) -> SafetyApprovalCallback | None:
+    """V0.29.3: 把 ctx.elicit 包成 SafetyApprovalCallback (web_agent_run + web_agent_run_chain 共用).
+
+    ctx 为 None → 返 None (cli mode 无 elicit, loop 维持 abort).
+    client 不支持 elicitation / 异常 → 视作 decline (安全 default, 不放行).
+
+    Args:
+        ctx: FastMCP Context, None 时无法 elicit.
+        scope_label: msg 内 scope 标识 (空=单 task, "(chain)"=chain 内 node) + abort 文案差异化.
+    """
+    if ctx is None:
+        return None
+
+    abort_phrase = "abort 当前 node task" if scope_label else "abort task"
+    label_suffix = f" {scope_label}" if scope_label else ""
+
+    async def _elicit_safety(rule: str, reason: str) -> bool:
+        msg = (
+            f"web-agent{label_suffix} 检测到敏感动作 (rule={rule}): {reason}\n"
+            f"是否放行本次动作? 拒绝将 {abort_phrase}."
+        )
+        try:
+            result = await ctx.elicit(message=msg, schema=SafetyApproval)
+        except Exception as e:
+            logger.warning("ctx.elicit 失败 (%r) → 视作 decline", e)
+            return False
+        if isinstance(result, AcceptedElicitation):
+            return bool(result.data.approve)
+        return False
+
+    return _elicit_safety
+
+
 @mcp.tool()
 async def web_agent_run(
     goal: str,
@@ -141,26 +177,9 @@ async def web_agent_run(
     # ctx.report_progress(progress, total, message) bound method 直接 1:1 对齐 ProgressCallback
     progress_cb = ctx.report_progress if ctx is not None else None
 
-    # V0.18.0 elicitation: ctx 可用时把 ctx.elicit 包成 SafetyApprovalCallback.
-    # safety check fail (env AUTO_APPROVE 未放行) → 弹 elicitation 让用户在 client 同意/拒绝.
-    # client 不支持 elicitation / 异常 → 视作 decline (loop 维持 abort 现状, 安全 default).
-    safety_approval_cb: SafetyApprovalCallback | None = None
-    if ctx is not None:
-        async def _elicit_safety(rule: str, reason: str) -> bool:
-            msg = (
-                f"web-agent 检测到敏感动作 (rule={rule}): {reason}\n"
-                f"是否放行本次动作? 拒绝将 abort task."
-            )
-            try:
-                result = await ctx.elicit(message=msg, schema=SafetyApproval)
-            except Exception as e:
-                logger.warning("ctx.elicit 失败 (%r) → 视作 decline", e)
-                return False
-            if isinstance(result, AcceptedElicitation):
-                return bool(result.data.approve)
-            return False
-
-        safety_approval_cb = _elicit_safety
+    # V0.18.0 elicitation: safety check fail → 弹 elicitation 让用户 client 同意/拒绝.
+    # V0.29.3: 抽 _make_safety_cb helper, 跟 web_agent_run_chain 共用.
+    safety_approval_cb = _make_safety_cb(ctx)
 
     async with _RUN_LOCK:
         try:
@@ -245,24 +264,8 @@ async def web_agent_run_chain(
         from web_agent.routing import select_provider
         provider = select_provider(capability_hint)  # type: ignore[arg-type]
 
-    # V0.18.0 _elicit_safety closure (跟 web_agent_run 同模式; subagent 决: V0.29.2 不抽 helper
-    # 减 web_agent_run churn, V0.29.4 simplify pass 再做)
-    safety_approval_cb: SafetyApprovalCallback | None = None
-    if ctx is not None:
-        async def _elicit_safety(rule: str, reason: str) -> bool:
-            msg = (
-                f"web-agent (chain) 检测到敏感动作 (rule={rule}): {reason}\n"
-                f"是否放行本次动作? 拒绝将 abort 当前 node task."
-            )
-            try:
-                result = await ctx.elicit(message=msg, schema=SafetyApproval)
-            except Exception as e:
-                logger.warning("ctx.elicit 失败 (%r) → 视作 decline", e)
-                return False
-            if isinstance(result, AcceptedElicitation):
-                return bool(result.data.approve)
-            return False
-        safety_approval_cb = _elicit_safety
+    # V0.29.3: 复用 _make_safety_cb helper (跟 web_agent_run 同; chain scope 走 "(chain)" label).
+    safety_approval_cb = _make_safety_cb(ctx, scope_label="(chain)")
 
     # spec 校验 — ChainSpecError/ChainCycleError reraise 为 RuntimeError 让 client 看 isError + 友好 msg
     try:
