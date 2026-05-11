@@ -190,6 +190,13 @@ def main(argv: list[str] | None = None) -> int:
         description="V0.31.1 keyring vault cli — 跨平台 OS-native secret store (macOS keychain / "
                     "Linux Secret Service / Windows Credential Manager). 需装 extra: "
                     "pip install 'web-agent[keyring]'",
+        epilog=(
+            "V0.31.2: opt-in env `WEB_AGENT_USE_KEYRING=1` 切默 SecretStore backend → "
+            "ChainedSecretStore([Keyring, Env]). Keyring 优先 / Env 自动 fallback (extra 未装时 "
+            "也安全). 默 EnvSecretStore 完全兼容. export 永久: "
+            "`echo 'export WEB_AGENT_USE_KEYRING=1' >> ~/.bashrc`"
+        ),
+        formatter_class=argparse.RawDescriptionHelpFormatter,
     )
     sub = parser.add_subparsers(dest="cmd", required=True)
 
