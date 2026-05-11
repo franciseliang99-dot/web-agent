@@ -216,10 +216,10 @@ def test_trace_obs_contains_not_matched_hints_v024_helper():
 # --- V0.26.1 corpus 完整性 + token-specific lint ---
 
 
-def test_corpus_has_15_tasks_covering_v021_v030():
-    """V0.26.1+V0.29.4-5+V0.30.2+V0.30.4: corpus 共 15 task (10 + 2 chain + 1 V0.30.2 wiki + 2 V0.30.4 (wiki+github))."""
+def test_corpus_has_16_tasks_covering_v021_v032():
+    """V0.32.0: corpus 共 16 task (10 + 2 chain + 1 wiki + 2 (wiki+github) + 1 V0.32.0 chain real-world)."""
     from eval.corpus import ALL_TASKS
-    assert len(ALL_TASKS) == 15
+    assert len(ALL_TASKS) == 16
     axes = {t.capability_axis for t in ALL_TASKS}
     expected = {
         "baseline", "multi-tab", "iframe", "drag", "upload",
@@ -714,3 +714,47 @@ def test_assert_live_net_consistency_no_eval_real_passes(monkeypatch):
         requires_real_net=True,
     )
     _assert_live_net_consistency([real_task])  # 不 raise (cassette 严回放路径)
+
+
+# ---------- V0.32.0 D' chain × real-world: GitHub topic → README ----------
+
+
+def test_v032_github_topic_chain_task_loaded():
+    """V0.32.0: GITHUB_TOPIC_PYTHON_FIRST_README chain × real-world 双标 task loaded."""
+    from eval.corpus import ALL_PREDICATES
+    from eval.corpus.v032_chain_real_world import GITHUB_TOPIC_PYTHON_FIRST_README
+
+    t = GITHUB_TOPIC_PYTHON_FIRST_README
+    assert t.requires_real_net is True
+    assert t.flaky_repeat == 1  # V0.30.3 chain × flaky 互斥
+    assert t.capability_axis == "real-world"
+    assert t.chain_spec is not None  # 双标
+    assert len(t.chain_spec.nodes) == 2
+    assert t.chain_spec.nodes[0].id == "a"
+    assert t.chain_spec.nodes[1].id == "b"
+    assert t.chain_spec.nodes[1].depends_on == ("a",)
+    assert "github.com/topics/python" in t.fixture_url
+    assert t.task_id in ALL_PREDICATES
+    # max_steps=12 / max_wallclock=180 (GitHub UI banner buffer, V0.30.4 octocat 同 risk)
+    assert t.max_steps == 12
+    assert t.max_wallclock_s == 180.0
+
+
+def test_v032_chain_real_world_double_axis_filter_match():
+    """V0.32.0: real-world axis filter 含 chain task (real-world ∩ chain_spec≠None 双标命中)."""
+    from eval.cli import _select_tasks
+
+    real_world = _select_tasks("real-world")
+    chain_real_world = [t for t in real_world if t.chain_spec is not None]
+    assert any(t.task_id == "v032-github-topic-python-first-readme" for t in chain_real_world)
+
+
+def test_v032_chain_real_world_predicate_lenient_substring():
+    """V0.32.0: predicate 'programming language' (20 char + 抗 GitHub topic 月度第一名 repo 漂 +
+    Python topic 任何 repo README/about 几乎必含 universal description)."""
+    from eval.corpus import ALL_PREDICATES
+    from eval.predicates import SubstringPredicate
+
+    pred = ALL_PREDICATES["v032-github-topic-python-first-readme"]
+    assert isinstance(pred, SubstringPredicate)
+    assert pred.substring == "programming language"

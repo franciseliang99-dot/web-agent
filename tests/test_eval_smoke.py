@@ -49,9 +49,9 @@ def test_parse_providers_skip_empty():
 
 
 def test_select_tasks_all_returns_full_corpus():
-    """V0.30.4: --corpus all → 全 15 task (V0.26.1 10 + V0.29 2 chain + V0.30.2 1 wiki + V0.30.4 2 (wiki+github))."""
+    """V0.32.0: --corpus all → 全 16 task (V0.26.1 10 + V0.29 2 chain + V0.30 3 + V0.32.0 1 chain real-world)."""
     tasks = _select_tasks("all")
-    assert len(tasks) == 15
+    assert len(tasks) == 16
 
 
 def test_select_tasks_axis_filter():
@@ -183,19 +183,20 @@ def test_eval_nightly_workflow_default_disabled():
 # ---------- V0.30.5 收尾: --corpus real-world axis filter 验 ----------
 
 
-def test_select_tasks_real_world_axis_returns_3_real_net_tasks():
-    """V0.30.5: --corpus real-world → 3 V0.30.2-4 task (Quantum + Apple_Inc + GitHub octocat).
+def test_select_tasks_real_world_axis_returns_4_real_net_tasks():
+    """V0.30.5+V0.32.0: --corpus real-world → 4 task (V0.30.2-4 3 + V0.32.0 1 chain real-world).
 
     requires_real_net=True 全部 — _select_tasks 是纯函数 (不调 LIVE_NET filter), 测 axis 选对.
     """
     tasks = _select_tasks("real-world")
-    assert len(tasks) == 3
+    assert len(tasks) == 4
     assert all(t.capability_axis == "real-world" for t in tasks)
     assert all(t.requires_real_net for t in tasks)
     task_ids = {t.task_id for t in tasks}
     assert "v030-wikipedia-quantum-entanglement" in task_ids
     assert "v030-wikipedia-apple-inc" in task_ids
     assert "v030-github-octocat-hello-world" in task_ids
+    assert "v032-github-topic-python-first-readme" in task_ids  # V0.32.0 chain real-world
 
 
 def test_argparse_help_mentions_real_world_axis(capsys):

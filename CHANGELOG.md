@@ -2,6 +2,76 @@
 
 All notable changes to web-agent. 版本号遵循 SemVer 简化形式（V<major>.<minor>.<patch>）。
 
+## [0.32.0] - 2026-05-10
+
+### Add (V0.32 D' chain × real-world 交叉系列开篇 1/4 — GitHub topic → README chain task)
+
+V0.31 keyring 系列闭环后, 用户选 V0.32 主线 = **D' real-world chain × axis 交叉** (V0.29 W6-C
+synthetic chain × V0.30 D real-world 双轴叠加, 真高级 task 如 GitHub topic search → README 提取).
+
+V0.32.0 开篇加 1 chain real-world task `v032-github-topic-python-first-readme`: fixture
+`https://github.com/topics/python` + chain spec 2 node (a click first repo card → b extract
+README description). 跨 V0.29.4 chain + V0.30 real-world 框架 (chain_spec 字段 + requires_real_net
+字段 + V0.30.3 vcr 真接 wrap LLM call), 0 改 framework 即可跑.
+
+### Plan subagent A-F 6 决策点全采纳
+
+- A GitHub topic search → first repo README (subagent 推 #1 真高级 chain task)
+- B fixture github.com/topics/python + node a click first repo / node b extract README description
+- C vcr.use_cassette wrap 整 run_one (V0.30.3 已覆 chain branch, ~150KB cassette OK)
+- D flaky_repeat=1 (V0.30.3 chain × flaky 互斥 assert; chain 内 node 自带 retry)
+- E mock 模式 corpus loaded + slow opt-in real net (V0.32.1 maintainer 真录 cassette)
+- F max_steps=12 / max_wallclock_s=180 (GitHub UI banner buffer, V0.30.4 octocat 同 risk)
+
+### V0.32 D' 系列 commit 拆解 (4 commit, 跟 V0.30/V0.31 同节奏)
+
+| ver | 状态 | scope |
+|-----|------|-------|
+| **V0.32.0** | ✅ 本提交 | 1 chain real-world task (GitHub topic→README) + corpus init + 3 测 |
+| V0.32.1 | 待 | maintainer 真录 cassette (EVAL_REAL+LIVE_NET=1) + simplify subagent pass |
+| V0.32.2 | 待 | +1 chain real-world (Wikipedia cross-ref Apple_Inc→Cupertino link→Cupertino) 验非 GitHub 域 |
+| V0.32.3 | 待 | cli --corpus chain-real-world 复合 axis filter 帮工 + 收尾 |
+
+### Changed (~140 LOC)
+
+- `eval/corpus/v032_chain_real_world.py` **新建** ~70 行:
+  - GITHUB_TOPIC_PYTHON_FIRST_README EvalTask: fixture github.com/topics/python +
+    chain_spec ChainSpec(nodes=2): node a click first repo card / node b extract README description
+  - requires_real_net=True (V0.30.1 LIVE_NET filter 默跳) + flaky_repeat=1 (V0.30.3 chain × flaky 互斥)
+  - capability_axis="real-world" (跟 V0.30 同 axis, chain_spec 字段双标 chain × real-world 交叉)
+  - max_steps=12 / max_wallclock_s=180 (GitHub UI banner buffer)
+  - CHAIN_REAL_WORLD_PREDICATES SubstringPredicate("programming language") (20 char + 抗 GitHub
+    topic 月度第一名 repo 漂 + Python topic 任何 repo README/about 几乎必含 universal description)
+- `eval/corpus/__init__.py` +5 行: import + ALL_TASKS append + ALL_PREDICATES update
+- `tests/test_eval_runner.py` +3 测 (chain task loaded 双标 + axis filter 命中 + predicate lenient
+  20 char) + 改 1 测 (corpus 15→16)
+- `tests/test_eval_smoke.py` 改 1 测: --corpus all → 16, --corpus real-world → 4 (V0.30 3 + V0.32 1)
+
+### V0.27+V0.28+V0.29+V0.30+V0.31+V0.32 累计 subagent 真发现 = **12 处** (V0.32.0 0 新)
+
+### Compatibility
+
+- 老 caller 0 改 (V0.32 task 复用 V0.29.4 chain_spec + V0.30.1 requires_real_net 字段, framework 0 改)
+- mypy strict 0 (46 src, +1 v032_chain_real_world.py); ruff 0; pytest **693 + 18 skip**
+  (V0.31.3 690+18 → +3 V0.32.0 测)
+- 真 chromium 15/15 全过 (无新; cassette 真录 V0.32.1 maintainer 跑)
+
+### V0.32 隐藏风险 (subagent 已识别, V0.32.1+ 处理)
+
+1. **GitHub click navigation cassette 录 vs 回放**: vcr 仅 wrap LLM HTTP, 不 wrap browser navigation.
+   cassette 回放不影响 page.click+goto. LLM call 量 chain 2 node × 3-5 step ≈ 6-10 call (比单 wikipedia
+   大 5-10x), V0.32.1 maintainer 录 cassette 60-120s.
+2. **node b 找不到 first repo URL**: V0.32 chain spec 不传 `${a.result}` template (b goal 直接"读
+   当前 page"), 不会触 ChainVarError. 但 node a click 失 → 整 chain abort (默 on_failure=abort), 干净 fail.
+3. **GitHub topic 第一名 repo 月度漂**: predicate "programming language" 而非 repo name 防漂.
+4. **chain real-world × on_failure 默 abort**: node a 失 → chain 终止 + node b 不跑 → predicate 不
+   命中 → 干净 fail (不像 V0.29.5 reflect-trigger 用 continue).
+
+### Why minor (V0.32.0) 不 patch
+
+- V0.32 主题切换 (V0.31 C keyring → V0.32 D' chain × real-world 交叉) = SemVer minor 功能新增
+- 跟 V0.21.0/V0.22.0/.../V0.30.0/V0.31.0 主题开篇 minor 风格一致
+
 ## [0.31.3] - 2026-05-10
 
 ### Add (V0.31 keyring 真实现系列收尾 4/4 — cli vault --help epilog + 系列总结)
