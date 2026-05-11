@@ -2,6 +2,91 @@
 
 All notable changes to web-agent. 版本号遵循 SemVer 简化形式（V<major>.<minor>.<patch>）。
 
+## [0.34.3] - 2026-05-11
+
+### Feat (V0.34 F sub-route 优化系列 4/N — fan-out fixture extension + F1 ROI 真测决策)
+
+V0.34.2 真 baseline 全是 linear chain (siblings_per_layer=1 implicit), F1 iframe DFS
+asyncio.gather 并发**在 linear chain 深度依赖串行无并发空间**, 节省 ~0% — V0.34.0/V0.34.2
+fixture 不是 F1 主战场. 本提交扩 fixture 加 `siblings_per_layer` 参数支持 fan-out 树状,
+跑真测 baseline 验 F1 在 fan-out 站 ROI 是否值得 V0.34.4 实施.
+
+**V0.33 教训重现**: "没 baseline 任何优化都是猜". V0.34.3 之前用 V0.34.2 linear chain
+baseline 推 F1 ROI 是错的 (Plan agent V0.34.3 当时估 "5 层 chain -42%" 其实在 linear chain
+是 ~0%). 真测 fan-out 数据后, F1 才有数据驱动的决策基础.
+
+### 关键发现 (V0.34.3 真测)
+
+**Frame count 是主因, 不是 depth vs width**:
+
+| fixture | total frame | median ms |
+|---------|-------------|-----------|
+| if1-sib5-sh0-leaf3 (6 frame depth=1 fan-out=5) | 6 | 244 |
+| if5-sh0-leaf3 (6 frame depth=5 fan-out=1) | 6 | 240 |
+
+两者 frame 数同, ms 差 <2% in noise. 每 frame `evaluate(SoM JS)` ~20-30ms 顺序 inject.
+但 F1 节省路径不同:
+- Linear chain: 深度依赖, grand-child 必须等 parent load + evaluate 完才 access, F1 节省 ~0%
+- Fan-out 同层: sibling 并发, F1 cap at slowest sibling, 节省 ~67%
+- Fan-out 树状: 同层并发逐层 unfold, 节省 ~74%
+
+### Changed (~70 src LOC + 60 测 LOC + bench data + docs)
+
+- `eval/perceive_bench.py`:
+  - `build_synthetic_fixture` 加 `siblings_per_layer: int = 1` 参数 (默 1 保 V0.34.2 兼容);
+    fixture_id 命名 `if{N}[-sib{K}]-sh{M}-leaf{L}` (sib>1 时插, 默 1 时省)
+  - `_build_iframe_chain_html` 改: 每层 K 个 iframe-host div + 1 个 IIFE for loop 跑 K 次
+    createElement iframe (linear chain K=1 仍兼容, fan-out 树 K>1 解锁)
+  - `_FIXTURE_SPEC_RE` 加 optional `-sib(\d+)` 段; `_parse_fixture_spec` 兼容 V0.34.2 旧 spec +
+    V0.34.3 新 fan-out spec
+- `tests/test_perceive_bench.py`: +5 fast 测 fan-out HTML 结构
+  - `test_build_synthetic_fixture_fanout_default_sib_1`: 默 sib=1 fixture_id 不含 sib
+  - `test_build_synthetic_fixture_fanout_explicit_sib_3`: sib=3 fixture_id 'if2-sib3-sh0-leaf3' + 3 host div
+  - `test_build_synthetic_fixture_invalid_siblings_raises`: sib<1 raise
+  - `test_parse_fixture_spec_fanout`: parse 'if2-sib3-sh1-leaf4' → siblings=3
+  - `test_parse_fixture_spec_fanout_backward_compatible`: V0.34.2 spec 仍 parse OK
+- `data/bench/v0.34.3-fanout-baseline.json` **新**: 7 fixture × 8 sample 真测 (linear vs fan-out 对照)
+- `docs/perceive-bench-fan-out-V0.34.3.md` **新**: 完整数据表 + F1 ROI 估算 + V0.34.4 实施 plan
+- `pyproject.toml` / `__init__.py` 0.34.2 → 0.34.3
+- `uv.lock` 同步
+
+### Verify
+
+- `uv run pytest` → **766 passed, 23 skipped** (+5 V0.34.3 fan-out fast 测, 0 现测破)
+- `uv run ruff check` → all clean
+- `uv run mypy` → Success no issues in 49 src files
+- 真测 7 fixture × 8 samples (含 fan-out 3/5 sibling): mark_count 全命中 (sib^iframe × leaf)
+
+### V0.34.4 F1 plan 收紧 (数据驱动)
+
+V0.34.3 真测数据指 F1 必须并发**同层 sibling**, 不能并发 depth (grand-child 深度依赖串行).
+V0.34.4 实施方案 (基于 Plan agent V0.34.3 plan 修正):
+
+1. `_walk_child_frames` 同层 child 用 `asyncio.gather` 并发跑 `_inject_som_in_frame` (各 child
+   internal 用 id_offset=0, 不知 sibling 间 offset 不能共享 `len(marks)`)
+2. inject 完成后 Python 端按 DFS index 顺序拼 marks, renumber `Mark.id` 1..N 全局连续
+3. 各 frame 跑第二遍 `_SOM_RENUMBER_JS({old_id: new_id})` 修 DOM `data-som-id` + 视觉框
+   `tag.textContent` 一致 (V0.22.2 actuator iframe path 依赖)
+4. **前置改 `_SOM_INJECT_JS`** 给视觉框 tag 也挂 `data-som-id` mirror (renumber 时一并改)
+5. `cross_origin_hosts` 改 functional return tuple, 不共享 mutate (并发竞态)
+6. `tests/test_perceive_bench_real.py` 加 fan-out fixture slow smoke 验 F1 后 ms 节省 >= 50%
+7. **V0.22.2 actuator 兼容性回归** = `tests/test_loop_iframe.py` 必跑通 (V0.22.x 核心契约)
+
+预估 LOC: ~75 src + ~50 测 + CHANGELOG ~25 行. 风险中等.
+
+### V0.34 系列进度
+
+| ver | 状态 | scope |
+|-----|------|-------|
+| V0.34.0 | ✅ | bench harness framework |
+| V0.34.1 | ✅ | 真跑 chromium adapter |
+| V0.34.2 | ✅ | fix iframe/shadow 嵌套 bug + linear chain baseline |
+| **V0.34.3** | ✅ 本提交 | fan-out fixture extension + 真测 F1 ROI 决策 |
+| V0.34.4 | 待 | F1 iframe DFS asyncio.gather 并发实施 (fan-out 节省 ~67-74% 真测验) |
+| V0.34.5 | 待 | F2 SoM JS 三 walker 合并 (低优, remote chromium 才显著) + V0.34 收尾 |
+
+详细数据 + F1 ROI 完整分析见 [`docs/perceive-bench-fan-out-V0.34.3.md`](../docs/perceive-bench-fan-out-V0.34.3.md).
+
 ## [0.34.2] - 2026-05-11
 
 ### Fix (V0.34 F sub-route 优化系列 3/N — V0.34.1 真跑暴露 V0.34.0 framework 两个 fixture HTML bug)

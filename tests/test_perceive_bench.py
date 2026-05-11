@@ -377,3 +377,54 @@ def test_synthetic_html_shadow_chain_param():
         assert "attachShadow" in f.html
         # 不走 innerHTML 注入 script 路径 (V0.34.0 broken pattern)
         assert "sr.innerHTML=`" not in f.html
+
+
+# ---------- V0.34.3 fan-out fixture (siblings_per_layer) fast 测 ----------
+
+
+def test_build_synthetic_fixture_fanout_default_sib_1():
+    """V0.34.3: siblings_per_layer 默 1 → fixture_id 不含 'sib' (V0.34.2 baseline 兼容)."""
+    f = build_synthetic_fixture(iframe_count=2, shadow_count=0, leaf_per_branch=3)
+    assert f.fixture_id == "if2-sh0-leaf3", f"sib=1 默 fixture_id 不含 sib, got {f.fixture_id}"
+    # html 仍含 iframe-host-0 (即使 K=1, _build_iframe_chain_html 也 host-0)
+    assert 'id="iframe-host-0"' in f.html
+
+
+def test_build_synthetic_fixture_fanout_explicit_sib_3():
+    """V0.34.3: siblings_per_layer=3, iframe_count=2 → fixture_id 'if2-sib3-sh0-leaf3',
+    每层 3 个 iframe-host div, JS for loop 跑 3 次."""
+    f = build_synthetic_fixture(iframe_count=2, shadow_count=0, leaf_per_branch=3, siblings_per_layer=3)
+    assert f.fixture_id == "if2-sib3-sh0-leaf3"
+    # 每层 3 个 host div: depth=2 主 frame 3 个, depth=1 在 JS literal 内 3 个 (escape 形)
+    # raw `id="iframe-host-` 出现 3 次 (主 frame 三 host), JS literal escape `id=\"iframe-host-`
+    # 每层 3 个 × 1 inner layer = 3 次 (depth=1 host 在 JS literal). 主 frame + inner = 6 次.
+    assert f.html.count('id="iframe-host-') == 3, (
+        f"主 frame raw 期望 3 host div, 真测 {f.html.count('id=\"iframe-host-')}"
+    )
+    # JS for loop 跑 3 次 (`s < 3` 在 JS source raw)
+    assert "s < 3" in f.html
+
+
+def test_build_synthetic_fixture_invalid_siblings_raises():
+    """V0.34.3: siblings_per_layer < 1 → ValueError."""
+    with pytest.raises(ValueError, match=r"非法 fixture|siblings"):
+        build_synthetic_fixture(iframe_count=1, shadow_count=0, leaf_per_branch=3, siblings_per_layer=0)
+    with pytest.raises(ValueError, match=r"非法 fixture|siblings"):
+        build_synthetic_fixture(iframe_count=1, shadow_count=0, leaf_per_branch=3, siblings_per_layer=-1)
+
+
+def test_parse_fixture_spec_fanout():
+    """V0.34.3: parse 'if2-sib3-sh1-leaf4' → siblings_per_layer=3 (新 sib 段 optional)."""
+    f = _parse_fixture_spec("if2-sib3-sh1-leaf4")
+    assert f.fixture_id == "if2-sib3-sh1-leaf4"
+    assert f.iframe_count == 2
+    assert f.shadow_count == 1
+    assert f.leaf_per_branch == 4
+    # V0.34.3 fast 测: html 含 3 host div 主 frame
+    assert f.html.count('id="iframe-host-') == 3
+
+
+def test_parse_fixture_spec_fanout_backward_compatible():
+    """V0.34.3: 'if2-sh0-leaf3' (V0.34.2 spec, 无 sib) 仍 parse OK, siblings 默 1."""
+    f = _parse_fixture_spec("if2-sh0-leaf3")
+    assert f.fixture_id == "if2-sh0-leaf3"  # 不含 sib (默 1)
