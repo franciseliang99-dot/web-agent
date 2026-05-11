@@ -52,3 +52,4 @@ Thumbs.db
 
 # Claude Code 本地工具状态 (ScheduleWakeup lock 等)
 .claude/
+data/stealth_probes/

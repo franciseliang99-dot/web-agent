@@ -2,6 +2,67 @@
 
 All notable changes to web-agent. 版本号遵循 SemVer 简化形式（V<major>.<minor>.<patch>）。
 
+## [0.30.2] - 2026-05-10
+
+### Add (V0.30 系列 commit 3/5 — 1 wikipedia static corpus task + sannysoft probe slow opt-in)
+
+V0.30.0 G stealth 加固 + V0.30.1 D pipeline framework 之上, 加 1 真外网 corpus task + sannysoft
+probe (G 真生效验). vcr.use_cassette 真接 (修 V0.26.x silent bug #11) **推 V0.30.3+** —
+vcrpy 8.x 无直接 `vcr.stubs.httpx_stubs` (anthropic-sdk httpx 兼容需研究).
+
+### Plan subagent 简化 V0.30.2 scope
+
+subagent 原 V0.30.2 plan 含 vcr 真接 (~250 LOC), 主 agent 精简到 ~180 LOC:
+- vcrpy 8.x 兼容研究推 V0.30.3+ (实测 `from vcr.stubs import httpx_stubs` ImportError)
+- V0.30.2 仅落 corpus task + sannysoft probe + filter 测, 真录 cassette 路径留 V0.30.3+
+
+### Changed (~180 LOC)
+
+- `eval/corpus/v030_real_world.py` **新建** ~50 行:
+  - `WIKIPEDIA_QUANTUM_FIRST_PARA` EvalTask (https://en.wikipedia.org/wiki/Quantum_entanglement,
+    requires_real_net=True, flaky_repeat=3, max_wallclock_s=120, capability_axis="real-world")
+  - `REAL_WORLD_PREDICATES` SubstringPredicate("phenomenon") — 核心定义术语漂移概率最低 (subagent C 决)
+- `eval/corpus/__init__.py` +5 行: import + ALL_TASKS append + ALL_PREDICATES update
+- `tests/test_stealth_probe_sannysoft.py` **新建** ~60 行:
+  - 双 env 守门 (WEB_AGENT_RUN_SLOW=1 + WEB_AGENT_STEALTH_PROBE=1) — pytestmark.slow + 2 skipif
+  - 真访 https://bot.sannysoft.com → screenshot 存 `data/stealth_probes/<UTC date>.png` + size > 10KB
+  - sannysoft 不可达 → pytest.skip (subagent V0.30.1 隐藏风险 #3)
+  - 不真断 sannysoft 表分数 (非二元 + 探测器升级会 break, V0.30 plan D 决)
+- `.gitignore` +1 行: data/stealth_probes/ (probe artifact 不进 git)
+- `tests/test_eval_runner.py` +2 测 (wikipedia loaded + LIVE_NET filter 跳 wikipedia) +
+  改 1 测 (corpus 12→13 task + real-world axis 验)
+- `tests/test_eval_smoke.py` 改 1 测: --corpus all → 13 task
+
+### V0.30 系列进度 (3/5)
+
+| ver | 状态 | 节点 |
+|-----|------|------|
+| V0.30.0 | ✅ | apply_stealth_plus init script (6 测) |
+| V0.30.1 | ✅ | vcr helper + EvalTask field + LIVE_NET filter (7 测 + simplify chore) |
+| V0.30.2 | ✅ | 本提交 — 1 wikipedia task + sannysoft probe (3 测 + 1 slow skip) |
+| V0.30.3 | 待 | +2 tasks (wikipedia + GitHub README) + run_one 真接 vcr.use_cassette (修 #11 silent bug) |
+| V0.30.4 | 待 | --corpus real-world axis filter + report + docs 收尾 |
+
+### 隐藏风险 (V0.30.3+ 处理)
+
+1. **vcrpy 8.x httpx 兼容** (subagent #1 + 主 agent 实测发现): vcrpy 8.x `from vcr.stubs import
+   httpx_stubs` ImportError, anthropic-sdk httpx call 默不 hooked. V0.30.3 决 (a) 降级 vcrpy 6.x /
+   (b) 自实现 httpx mock 层 / (c) 用 respx pytest plugin 替 vcrpy
+2. **wikipedia 内容漂移**: predicate "phenomenon" 单词最抗 (subagent C 决), V0.30.4 加 cassette 校验 lint
+3. **CI lock**: WIKIPEDIA task requires_real_net=True + LIVE_NET filter 默跳, CI 安全
+4. **sannysoft 不可达**: probe 测 pytest.skip 不挂 CI / dev iteration
+
+### Compatibility
+
+- 老 caller 0 改 (新 corpus task + 新 probe, 不改老接口)
+- mypy strict 0 (45 src, +1 v030_real_world.py); ruff 0; pytest **649 + 18 skip** (V0.30.1 647+17 → +2 测 +1 sannysoft slow skip)
+- 真 chromium 15/15 全过 (无新 — sannysoft probe slow opt-in 不进默 pytest)
+
+### Why patch (V0.30.2) 不 minor
+
+- V0.30 主题 minor bump 已发生在 V0.30.0; V0.30.1+ patch 累加 framework / corpus / 真接
+- 跟 V0.21.x/V0.27.x/V0.28.x/V0.29.x patch 风格一致
+
 ## [0.30.1] - 2026-05-10
 
 ### Add (V0.30 系列 commit 2/5 — vcr config helper + EvalTask requires_real_net/flaky_repeat + LIVE_NET filter)

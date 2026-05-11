@@ -49,9 +49,9 @@ def test_parse_providers_skip_empty():
 
 
 def test_select_tasks_all_returns_full_corpus():
-    """V0.26.3+V0.29.4+V0.29.5: --corpus all → 全 12 task (V0.26.1 10 + V0.29.4 1 chain + V0.29.5 1 chain reflect)."""
+    """V0.26.3+V0.29.4+V0.29.5+V0.30.2: --corpus all → 全 13 task (V0.26.1 10 + V0.29 2 chain + V0.30.2 1 wikipedia)."""
     tasks = _select_tasks("all")
-    assert len(tasks) == 12
+    assert len(tasks) == 13
 
 
 def test_select_tasks_axis_filter():

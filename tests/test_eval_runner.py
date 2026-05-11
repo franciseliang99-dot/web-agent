@@ -216,21 +216,24 @@ def test_trace_obs_contains_not_matched_hints_v024_helper():
 # --- V0.26.1 corpus 完整性 + token-specific lint ---
 
 
-def test_corpus_has_12_tasks_covering_v021_v029():
-    """V0.26.1+V0.29.4+V0.29.5: corpus 共 12 task (V0.26.1 10 + V0.29.4 1 chain + V0.29.5 1 chain reflect).
-    drop retry/backtrack 推迟 V0.26.3."""
+def test_corpus_has_13_tasks_covering_v021_v030():
+    """V0.26.1+V0.29.4+V0.29.5+V0.30.2: corpus 共 13 task (V0.26.1 10 + V0.29.4-5 2 chain + V0.30.2 1 wikipedia)."""
     from eval.corpus import ALL_TASKS
-    assert len(ALL_TASKS) == 12
+    assert len(ALL_TASKS) == 13
     axes = {t.capability_axis for t in ALL_TASKS}
     expected = {
         "baseline", "multi-tab", "iframe", "drag", "upload",
         "download", "dialog", "keyboard-nav", "failure-recovery",
+        "real-world",  # V0.30.2 D 首次落实
     }
     missing = expected - axes
     assert not missing, f"corpus 缺 capability_axis: {missing}"
     # V0.29.4+V0.29.5 W6-C: 至少 2 chain task (CHAIN_REVEAL_2NODE + CHAIN_REFLECT_TRIGGER)
     chain_tasks = [t for t in ALL_TASKS if t.chain_spec is not None]
     assert len(chain_tasks) >= 2, "V0.29.4+V0.29.5 加 2 chain task"
+    # V0.30.2 D real-world: 至少 1 task (requires_real_net=True)
+    real_net_tasks = [t for t in ALL_TASKS if t.requires_real_net]
+    assert len(real_net_tasks) >= 1, "V0.30.2 加 1 wikipedia task"
 
 
 def test_all_tasks_have_predicate_binding():
@@ -513,3 +516,31 @@ async def test_run_corpus_chain_flaky_repeat_mutex_assert():
             db_path=Path("/tmp/dummy.db"), screenshots_dir=Path("/tmp/dummy"),
             chromium_launcher=fake_chromium,
         )
+
+
+# ---------- V0.30.2 D real-world: wikipedia corpus task ----------
+
+
+def test_wikipedia_quantum_corpus_task_loaded():
+    """V0.30.2: eval.corpus 含 WIKIPEDIA_QUANTUM_FIRST_PARA + requires_real_net=True + flaky_repeat=3."""
+    from eval.corpus import ALL_PREDICATES
+    from eval.corpus.v030_real_world import WIKIPEDIA_QUANTUM_FIRST_PARA
+
+    assert WIKIPEDIA_QUANTUM_FIRST_PARA.requires_real_net is True
+    assert WIKIPEDIA_QUANTUM_FIRST_PARA.flaky_repeat == 3
+    assert WIKIPEDIA_QUANTUM_FIRST_PARA.capability_axis == "real-world"
+    assert WIKIPEDIA_QUANTUM_FIRST_PARA.fixture_url.startswith("https://en.wikipedia.org/wiki/")
+    assert WIKIPEDIA_QUANTUM_FIRST_PARA.task_id in ALL_PREDICATES
+
+
+def test_wikipedia_corpus_filtered_when_no_live_net_env(monkeypatch):
+    """V0.30.2: WEB_AGENT_EVAL_LIVE_NET 未设 → wikipedia task 默被 _filter_requires_real_net 跳."""
+    from eval.cli import _filter_requires_real_net
+    from eval.corpus import ALL_TASKS
+
+    monkeypatch.delenv("WEB_AGENT_EVAL_LIVE_NET", raising=False)
+    out = _filter_requires_real_net(list(ALL_TASKS))
+    out_ids = {t.task_id for t in out}
+    assert "v030-wikipedia-quantum-entanglement" not in out_ids, (
+        "V0.30.2 wikipedia task 默应被 LIVE_NET filter 跳"
+    )

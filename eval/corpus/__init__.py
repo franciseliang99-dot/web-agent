@@ -39,6 +39,10 @@ from eval.corpus.v029_chain import (
     CHAIN_REFLECT_TRIGGER,
     CHAIN_REVEAL_2NODE,
 )
+from eval.corpus.v030_real_world import (
+    REAL_WORLD_PREDICATES,
+    WIKIPEDIA_QUANTUM_FIRST_PARA,
+)
 from eval.predicates import Predicate, SubstringPredicate
 from eval.types import EvalTask
 
@@ -78,6 +82,7 @@ ALL_TASKS: list[EvalTask] = [
     POPUP_WITH_IFRAME_CLICK,
     CHAIN_REVEAL_2NODE,  # V0.29.4 W6-C 收尾: chain task (eval --chain pipeline 验)
     CHAIN_REFLECT_TRIGGER,  # V0.29.5 W6-C 收口: chain task 触发 reflect 验 reflective_uplift on chain
+    WIKIPEDIA_QUANTUM_FIRST_PARA,  # V0.30.2 D real-world: wikipedia 静态 page (requires_real_net=True 默跳)
 ]
 
 # 合并所有 predicate 到单 dict (runner 反查用). 各子 dict value 类型 mypy 默认推断为
@@ -92,6 +97,7 @@ for _sub_dict in (
     RECOVERY_PREDICATES,
     CROSS_FEATURE_PREDICATES,
     CHAIN_PREDICATES,  # V0.29.4 W6-C
+    REAL_WORLD_PREDICATES,  # V0.30.2 D real-world
 ):
     ALL_PREDICATES.update(_sub_dict)
 
