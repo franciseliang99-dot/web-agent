@@ -2,6 +2,68 @@
 
 All notable changes to web-agent. 版本号遵循 SemVer 简化形式（V<major>.<minor>.<patch>）。
 
+## [0.35.2] - 2026-05-11
+
+### Feat (V0.35 A 真站点 eval 双轴扩 2/N — actuator click navigation + actuator scroll 真站点轴)
+
+V0.35.0 开篇 1 task (wikipedia 搜索 actuator type+click). V0.35.2 横向扩 +2 task 覆盖另外
+两个 actuator 子轴: **click navigation** (GitHub octocat commits page extract) + **scroll**
+(wikipedia 长 article scroll-to-section). 至此 V0.35 系列 capability × real-world 矩阵
+3 个 actuator 子轴 (search / click-nav / scroll) 各 1 task.
+
+跳 V0.35.1 (跟 V0.32.1 / V0.33.4 deferred 同 SemVer pattern): autonomous 红线 V0.35.1 真录
+cassette 需 ANTHROPIC_API_KEY + 真烧 token + maintainer 介入. V0.35.x.1 文档明记 maintainer
+when ready 跑.
+
+### V0.34 教训应用: subagent micro experiment 推荐 fixture
+
+V0.35.2 选 fixture 前 subagent 商议 + curl probe 验:
+- 候选 B (octocat commits): `api.github.com/repos/octocat/Hello-World/commits` 返 3 commit, 第 1
+  message "Merge pull request #6 from Spaceghost/patch-1" freezed since 2014 — 选 ✓
+- 候选 A (wikipedia QFT scroll): `id="History"` anchor 5+ 年稳, 首句含 "theoretical physicists" — 选 ✓
+- 候选 C (octocat contributors): predicate 语义不符 (3 人不是 "1 contributor") — 否决
+- 候选 D (wiki sidebar toc): Vector 2022 skin sticky sidebar 不同 viewport 渲染不一 — 否决
+
+V0.34 教训 "synthetic ≠ 真, micro experiment 验" 制度化第 2 次应用 (V0.35.0 W3C iframe page
+首次推翻 Plan agent 假设, V0.35.2 用同模式选 2 个稳 fixture).
+
+### Changed (~75 src LOC + ~30 test LOC)
+
+- `eval/corpus/v035_capability_real_world.py` +2 EvalTask (~70 行):
+  - `GITHUB_OCTOCAT_COMMITS_FIRST`: click "Commits" 链接 + extract 第 1 commit title
+    (predicate "Spaceghost" 10 char user name 抗 GitHub UI 改版)
+  - `WIKIPEDIA_QFT_SCROLL_HISTORY`: scroll 到 #History section + extract 首句
+    (predicate "theoretical physicists" 22 char; goal 文案显式禁 toc click 强 scroll 路径)
+  - `CAPABILITY_REAL_WORLD_PREDICATES` 加 2 SubstringPredicate
+- `eval/corpus/__init__.py` +3 行 import + 2 ALL_TASKS append
+- `tests/test_eval_runner.py`: `test_corpus_has_18_tasks` → 20; `test_v035_wikipedia_search_task_loaded` 改 `test_v035_capability_real_world_tasks_loaded` 验 3 task + 各 actuator-{search,click-nav,scroll} 子轴 tag 全; predicates_dict_isolated 改 len=3
+- `tests/test_eval_smoke.py`: `test_select_tasks_all` 18→20; `test_select_tasks_real_world_axis` 6→8
+- `pyproject.toml` / `__init__.py` 0.35.0 → **0.35.2** (跳 0.35.1 deferred)
+- `uv.lock` 同步
+
+### Verify
+
+- `uv run pytest` → **777 passed, 25 skipped** (count 同 V0.35.0, fast 测改期望 + 加新 task 无新 测)
+- `uv run ruff check` → all clean
+- `uv run mypy` → Success no issues in 50 src files
+
+### V0.35 系列进度
+
+| ver | 状态 | scope | autonomous |
+|-----|------|-------|------------|
+| V0.35.0 | ✅ | actuator type+click (wikipedia search) | ✅ |
+| V0.35.1 | **skip** (deferred) | maintainer 真录 cassette (~$0.05-0.10 token) | 🛑 红线 |
+| **V0.35.2** | ✅ 本提交 | actuator click-nav (github commits) + actuator scroll (wiki QFT) | ✅ |
+| V0.35.3 | 待 | 系列收尾 retrospective + virtual axis filter (`--corpus capability-real-world`) | ✅ |
+
+V0.35 系列 corpus 矩阵 (3 task ✕ 3 actuator 子轴):
+
+| actuator 子轴 | task | predicate |
+|--------------|------|-----------|
+| type + submit | v035-wikipedia-search-quantum-field-theory | "Quantum field theory" |
+| click + multi-page nav | v035-github-octocat-commits-first | "Spaceghost" |
+| scroll-to-section | v035-wikipedia-qft-scroll-history-section | "theoretical physicists" |
+
 ## [0.35.0] - 2026-05-11
 
 ### Feat (V0.35 A 真站点 eval 双轴扩开篇 1/N — capability × real-world 加 actuator 真站点轴)

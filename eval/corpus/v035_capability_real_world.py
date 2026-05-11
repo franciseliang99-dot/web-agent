@@ -49,6 +49,61 @@ WIKIPEDIA_SEARCH_QUANTUM_FIELD_THEORY = EvalTask(
     requires_real_net=True,
     flaky_repeat=3,
 )
+# V0.35.2: actuator click + multi-step navigation 真站点轴.
+# octocat/Hello-World 招牌账户 3 commits freezed since 2014, 第 1 commit title
+# "Merge pull request #6 from Spaceghost/patch-1" 永稳. predicate "Spaceghost" 用户名 10+ char
+# 在 commit message 主体不依赖 GitHub UI 改版.
+GITHUB_OCTOCAT_COMMITS_FIRST = EvalTask(
+    task_id="v035-github-octocat-commits-first",
+    goal=(
+        "去 https://github.com/octocat/Hello-World 页面, 点击 'Commits' 链接 (repo 文件列表上方"
+        "'3 Commits' 按钮或 history 图标), 跳到 commits 列表页, 提取最上方 (最新) 那条 commit "
+        "的 title 文本, done(result=完整 commit title)."
+    ),
+    fixture_url="https://github.com/octocat/Hello-World",
+    capability_axis="real-world",
+    expected_step_range=(4, 10),
+    max_steps=12,
+    max_wallclock_s=180.0,
+    description=(
+        "V0.35.2 actuator click navigation 真站点轴. octocat 招牌账户 + 3 commits freezed 2014, "
+        "第 1 commit 'Merge pull request #6 from Spaceghost/patch-1' 永不变. predicate 'Spaceghost' "
+        "user name 在 commit message 主体, 抗任何 GitHub UI 改版."
+    ),
+    tags=("v035", "a-real-world", "actuator-click-nav", "github"),
+    requires_real_net=True,
+    flaky_repeat=3,
+)
+
+# V0.35.2: actuator scroll 真站点轴.
+# QFT 长 article 含 id="History" anchor 5+ 年稳, History section 首句含 "theoretical physicists"
+# (1920s QED 历史叙述不会改). goal 文案强约束 "不要 click toc, 用 scroll" 防 LLM 走 toc 锚点
+# 绕过 scroll 路径 (V0.35.2 plan A 风险 mitigation).
+WIKIPEDIA_QFT_SCROLL_HISTORY = EvalTask(
+    task_id="v035-wikipedia-qft-scroll-history-section",
+    goal=(
+        "去 https://en.wikipedia.org/wiki/Quantum_field_theory 页面, 找到名为 'History' 的 section "
+        "标题 (h2 heading, page 较深位置 #History anchor). **不要 click toc 锚链接**, 直接 scroll "
+        "page 把 History section 滚到 viewport 内, 提取 History section 第一句, "
+        "done(result=完整第一句)."
+    ),
+    fixture_url="https://en.wikipedia.org/wiki/Quantum_field_theory",
+    capability_axis="real-world",
+    expected_step_range=(3, 10),
+    max_steps=12,
+    max_wallclock_s=120.0,
+    description=(
+        "V0.35.2 actuator scroll 真站点轴. QFT 长 article 'History' section 首句含 'theoretical "
+        "physicists' (1920s QED 历史叙述 5+ 年不动). goal 显式禁 toc click, 强 actuator scroll "
+        "路径 (LLM 选 click toc 绕 scroll 风险 mitigation)."
+    ),
+    tags=("v035", "a-real-world", "actuator-scroll", "wikipedia"),
+    requires_real_net=True,
+    flaky_repeat=3,
+)
+
 CAPABILITY_REAL_WORLD_PREDICATES: dict[str, Predicate] = {
     WIKIPEDIA_SEARCH_QUANTUM_FIELD_THEORY.task_id: SubstringPredicate(substring="Quantum field theory"),
+    GITHUB_OCTOCAT_COMMITS_FIRST.task_id: SubstringPredicate(substring="Spaceghost"),
+    WIKIPEDIA_QFT_SCROLL_HISTORY.task_id: SubstringPredicate(substring="theoretical physicists"),
 }
