@@ -3,7 +3,7 @@
 [![CI](https://github.com/franciseliang99-dot/web-agent/actions/workflows/ci.yml/badge.svg)](https://github.com/franciseliang99-dot/web-agent/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 [![Python 3.12+](https://img.shields.io/badge/python-3.12+-blue.svg)](pyproject.toml)
-[![tests](https://img.shields.io/badge/tests-769_passed-green.svg)](tests/)
+[![tests](https://img.shields.io/badge/tests-751_passed-green.svg)](tests/)
 [![mypy strict](https://img.shields.io/badge/mypy-strict_0_errors-blue.svg)](pyproject.toml)
 [![CHANGELOG](https://img.shields.io/badge/CHANGELOG-V0.34.0-orange.svg)](CHANGELOG.md)
 
@@ -37,13 +37,13 @@
 
 📊 **可观测**：每步截图 + 思考 + 行动 → SQLite 持久化 → 单文件 HTML replay 面板；跨 session 长期记忆 (domain ↔ past goals/results, V0.13.0+)。
 
-🛡 **三层 release gate**：ruff 0 + mypy strict 0 + pytest 769 passed + 18 skipped 全绿 + GitHub Actions CI (V0.16.13)。
+🛡 **三层 release gate**：ruff 0 + mypy strict 0 + pytest 751 passed + 18 skipped 全绿 + GitHub Actions CI (V0.16.13)。
 
 🤝 **MCP server (V0.16.0-9 + V0.18 elicit + V0.29.2 chain)**：4 tools (`web_agent_run` / `_get_replay` / `_query_memory` / `_run_chain`) + 2 resources + progress 心跳 + asyncio.Lock 串行 + 9222 健康检查 + V0.18.0 `ctx.elicit()` 人在回路 safety 批准。Claude Desktop 加 2 行 config 即用。
 
 ## 当前状态
 
-**V0.34.0** (2026-05-11) — 189 commits, **769 tests passed + 18 skips** (含 chromium slow smoke 15/15 全过), 3 层 release gate 全绿, GitHub Actions CI 自动跑.
+**V0.34.0** (2026-05-11) — 189 commits, **751 tests passed + 18 skips** (含 chromium slow smoke 15/15 全过), 3 层 release gate 全绿, GitHub Actions CI 自动跑.
 
 **W milestone 进度**:
 - W1 ✅ Wikipedia 搜词条 + 提取首段 (骨架 + 多 LLM 支持)
@@ -364,7 +364,7 @@ demos/
   gmail_compose.py       # W3-C (write, safety 拦 Send 默认 abort)
 scripts/
   start_chrome.sh  # 启动 9222 调试端口的独立 Chrome (auto/xvfb/headed/headless)
-tests/             # 769 passed + 18 skipped, 46 文件 (含 audit gap 6/6 + W5-D + W5-C + W5-C.2 spike + V0.17 Action / V0.19 actuator / V0.21 multi-tab / V0.22 iframe / V0.23 drag-upload / V0.24 dialog / V0.25 smart_retry / V0.26 eval / V0.27 vault / V0.28 reflect / V0.29 chain / V0.30 stealth_plus / V0.31 keyring / V0.33 token_baseline / V0.34 perceive_bench + Anthropic/Kimi/GPT 三骨架)
+tests/             # 751 passed + 18 skipped, 46 文件 (含 audit gap 6/6 + W5-D + W5-C + W5-C.2 spike + V0.17 Action / V0.19 actuator / V0.21 multi-tab / V0.22 iframe / V0.23 drag-upload / V0.24 dialog / V0.25 smart_retry / V0.26 eval / V0.27 vault / V0.28 reflect / V0.29 chain / V0.30 stealth_plus / V0.31 keyring / V0.33 token_baseline / V0.34 perceive_bench + Anthropic/Kimi/GPT 三骨架)
   conftest.py      # vcr_config 锁 cassette filter (V0.15.3)
   cassettes/       # vcrpy yaml (V0.15.3, .bak gitignored, 主 yaml 进 commit)
 docs/

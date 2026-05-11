@@ -16,7 +16,7 @@ cp .env.example .env
 ## 跑测试 (3 层 release gate)
 
 ```bash
-uv run pytest         # 255 passed + 2 skipped 应全绿
+uv run pytest         # 751 passed + 18 skipped 应全绿 (V0.34.0)
 uv run ruff check     # 0 errors
 uv run mypy           # 0 errors (strict, files=src/web_agent)
 ```
