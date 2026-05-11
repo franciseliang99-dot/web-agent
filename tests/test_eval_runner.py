@@ -8,6 +8,7 @@ V0.26.1 加真 chromium fixture eval task 后会有 opt-in slow smoke.
 
 from __future__ import annotations
 
+from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
@@ -378,3 +379,137 @@ def test_chain_corpus_task_loaded_with_chain_spec():
     assert CHAIN_REVEAL_2NODE.chain_spec.nodes[1].depends_on == ("a",)
     # predicate 绑入 ALL_PREDICATES
     assert CHAIN_REVEAL_2NODE.task_id in ALL_PREDICATES
+
+
+# ---------- V0.30.1 D real-world: vcr config + flaky_repeat + EvalTask field ----------
+
+
+def test_eval_task_requires_real_net_field_default_false():
+    """V0.30.1: EvalTask requires_real_net 默 False (老 task 兼容)."""
+    from eval.types import EvalTask
+
+    t = EvalTask(
+        task_id="t", goal="g", fixture_url="data:text/html,<h1>x</h1>",
+        capability_axis="baseline", expected_step_range=(1, 3),
+    )
+    assert t.requires_real_net is False
+    assert t.flaky_repeat == 1
+
+
+def test_get_eval_vcr_config_filters_llm_keys():
+    """V0.30.1: _get_eval_vcr_config 含 11 项 LLM key redact (跟 conftest vcr_config 对齐)."""
+    from eval.runner import _get_eval_vcr_config
+
+    cfg = _get_eval_vcr_config()
+    assert "filter_headers" in cfg
+    headers_filtered = {h[0] for h in cfg["filter_headers"]}
+    assert "authorization" in headers_filtered
+    assert "x-api-key" in headers_filtered
+    assert "anthropic-version" in headers_filtered
+    assert "openai-organization" in headers_filtered
+    # stainless metadata
+    assert any("stainless" in h for h in headers_filtered)
+    # query param
+    assert ("api_key", "REDACTED") in cfg["filter_query_parameters"]
+    assert cfg["record_mode"] == "once"
+
+
+def test_filter_requires_real_net_skips_when_no_live_net_env(monkeypatch):
+    """V0.30.1: WEB_AGENT_EVAL_LIVE_NET 未设 → requires_real_net=True task 默跳."""
+    from eval.cli import _filter_requires_real_net
+    from eval.types import EvalTask
+
+    monkeypatch.delenv("WEB_AGENT_EVAL_LIVE_NET", raising=False)
+    tasks = [
+        EvalTask(task_id="t1", goal="g", fixture_url="d:,",
+                 capability_axis="baseline", expected_step_range=(1, 3),
+                 requires_real_net=False),
+        EvalTask(task_id="t2", goal="g", fixture_url="d:,",
+                 capability_axis="real-world", expected_step_range=(1, 3),
+                 requires_real_net=True),
+    ]
+    out = _filter_requires_real_net(tasks)
+    assert len(out) == 1
+    assert out[0].task_id == "t1"
+
+
+def test_filter_requires_real_net_passes_when_live_net_env_set(monkeypatch):
+    """V0.30.1: WEB_AGENT_EVAL_LIVE_NET=1 → requires_real_net=True task 放行不滤."""
+    from eval.cli import _filter_requires_real_net
+    from eval.types import EvalTask
+
+    monkeypatch.setenv("WEB_AGENT_EVAL_LIVE_NET", "1")
+    tasks = [
+        EvalTask(task_id="t2", goal="g", fixture_url="d:,",
+                 capability_axis="real-world", expected_step_range=(1, 3),
+                 requires_real_net=True),
+    ]
+    out = _filter_requires_real_net(tasks)
+    assert len(out) == 1
+    assert out[0].task_id == "t2"
+
+
+def test_metric_to_dict_includes_flaky_repeat_idx():
+    """V0.30.1: metric_to_dict 加 flaky_repeat_idx 字段 (默 0)."""
+    from eval.predicates import PredicateResult
+    from eval.runner import TaskMetric, metric_to_dict
+
+    m = TaskMetric(
+        task_id="t", provider="anthropic", run_id="r",
+        pass_=True, failure_bucket="OK", steps=1, wallclock_s=1.0,
+        web_agent_task_id="x", final_result="r",
+        predicate_result=PredicateResult(matched=True, reason="r", name="N"),
+        flaky_repeat_idx=2,
+    )
+    assert metric_to_dict(m)["flaky_repeat_idx"] == 2
+    # default
+    m2 = TaskMetric(
+        task_id="t", provider="a", run_id="r",
+        pass_=True, failure_bucket="OK", steps=1, wallclock_s=1.0,
+        web_agent_task_id="x", final_result="r",
+        predicate_result=PredicateResult(matched=True, reason="r", name="N"),
+    )
+    assert metric_to_dict(m2)["flaky_repeat_idx"] == 0
+
+
+async def test_run_corpus_flaky_reflect_mutex_assert():
+    """V0.30.1: flaky_repeat>1 + reflect=True 互斥, 早 RuntimeError 不跑 (subagent D 决)."""
+    from unittest.mock import MagicMock
+    from eval.runner import run_corpus
+    from eval.types import EvalTask
+
+    task = EvalTask(
+        task_id="t-flaky", goal="g", fixture_url="d:,",
+        capability_axis="baseline", expected_step_range=(1, 3),
+        flaky_repeat=3,
+    )
+    fake_chromium = MagicMock()
+    with pytest.raises(RuntimeError, match="flaky_repeat=3 跟 reflect=True 互斥"):
+        await run_corpus(
+            [task], [], {},
+            db_path=Path("/tmp/dummy.db"), screenshots_dir=Path("/tmp/dummy"),
+            chromium_launcher=fake_chromium,
+            reflect=True, memory_db_path=Path("/tmp/dummy_mem.db"),
+        )
+
+
+async def test_run_corpus_chain_flaky_repeat_mutex_assert():
+    """V0.30.1: chain task + flaky_repeat>1 互斥 (chain 内 node-level retry 已存外层冗余)."""
+    from unittest.mock import MagicMock
+    from eval.runner import run_corpus
+    from eval.types import EvalTask
+    from web_agent.chain import ChainNode, ChainSpec
+
+    task = EvalTask(
+        task_id="t-chain-flaky", goal="g", fixture_url="d:,",
+        capability_axis="baseline", expected_step_range=(1, 3),
+        chain_spec=ChainSpec(nodes=(ChainNode(id="a", goal="g"),)),
+        flaky_repeat=2,
+    )
+    fake_chromium = MagicMock()
+    with pytest.raises(RuntimeError, match=r"chain task.*flaky_repeat=2.*禁用"):
+        await run_corpus(
+            [task], [], {},
+            db_path=Path("/tmp/dummy.db"), screenshots_dir=Path("/tmp/dummy"),
+            chromium_launcher=fake_chromium,
+        )

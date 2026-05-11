@@ -49,3 +49,10 @@ class EvalTask:
     # V0.29.4 W6-C 收尾验证: chain task 字段. None = 单 task 老路径; ChainSpec → eval/runner.run_one
     # 走 run_chain 分支. fixture_url 是 chain 起点 (page.goto 一次), 跨 node 接力 cdp 当前 tab.
     chain_spec: "ChainSpec | None" = None
+    # V0.30.1 D real-world: True 时 task 需真访外网 (cassette 回放或 EVAL_LIVE_NET=1). 默 False
+    # 让老 task 兼容. cli filter 未设 LIVE_NET → 滤掉 requires_real_net=True task 不跑.
+    requires_real_net: bool = False
+    # V0.30.1 D real-world: task-level retry N 次 (median pass), 默 1 单跑. flaky 真外网 task 用,
+    # 跟 V0.28.3 reflect 2-pass 互斥 (不一起跑, runner 早 assert). chain task 也禁 flaky_repeat>1
+    # (chain 内 node-level retry 已存在外层冗余).
+    flaky_repeat: int = 1

@@ -6,6 +6,7 @@ run_react_loop pattern, 但走完整 ReAct loop (含真 LLM 调用 — vcr 录�
 
 from __future__ import annotations
 
+import dataclasses
 import json
 import sqlite3
 import time
@@ -50,6 +51,8 @@ class TaskMetric:
     inject_reflections: bool = False
     # V0.29.4 W6-C 收尾: chain task 时 = completed_nodes/total_nodes (默 None = 非 chain task)
     chain_node_pass_rate: float | None = None
+    # V0.30.1 D real-world: flaky_repeat>1 时区分第 N 次重跑 (默 0 = 单跑或第 1 次), JSON dump 用
+    flaky_repeat_idx: int = 0
 
 
 # V0.26.0: failure_bucket 复用 memory.py FAILURE_MARKERS + 加 4 类 eval 专属
@@ -250,6 +253,35 @@ class CorpusReport:
     metrics: list[TaskMetric]
 
 
+def _get_eval_vcr_config() -> dict[str, Any]:
+    """V0.30.1 D real-world: vcr config — filter LLM key 防泄漏 + record_mode once.
+
+    跟 tests/conftest.py vcr_config 同 11 项 redact (Authorization / x-api-key / anthropic-version /
+    openai-organization / user-agent / 6 项 stainless metadata). cassette dir 由 caller 传, runner
+    用 vcr.use_cassette(path, **config) 包 LLM call 段防 chromium WebSocket.
+
+    record_mode "once": 已有 cassette 重放, 否则录制后写盘 (跟 conftest 一致). EVAL_REAL=1
+    + EVAL_LIVE_NET=1 真录, 默回放 (cassette 不在则 raise — caller 决定 fallback).
+    """
+    return {
+        "filter_headers": [
+            ("authorization", "REDACTED"),
+            ("x-api-key", "REDACTED"),
+            ("anthropic-version", "REDACTED"),
+            ("openai-organization", "REDACTED"),
+            ("user-agent", "REDACTED"),
+            ("x-stainless-arch", "REDACTED"),
+            ("x-stainless-os", "REDACTED"),
+            ("x-stainless-runtime", "REDACTED"),
+            ("x-stainless-runtime-version", "REDACTED"),
+            ("x-stainless-lang", "REDACTED"),
+            ("x-stainless-package-version", "REDACTED"),
+        ],
+        "filter_query_parameters": [("api_key", "REDACTED")],
+        "record_mode": "once",
+    }
+
+
 async def run_corpus(
     tasks: list[EvalTask],
     clients: list[LLMClient],
@@ -275,6 +307,19 @@ async def run_corpus(
     started_at = time.time()
     metrics: list[TaskMetric] = []
     for task in tasks:
+        # V0.30.1 D real-world: flaky_repeat × reflect 互斥早 assert (subagent D 决, 配对算法
+        # 假设单配对, V0.30.4 收尾再决合并语义)
+        if reflect and task.flaky_repeat > 1:
+            raise RuntimeError(
+                f"V0.30.1: task {task.task_id!r} flaky_repeat={task.flaky_repeat} 跟 reflect=True "
+                "互斥 (V0.28.3 by_pair 算法假设单配对). V0.30.4 收尾再决合并语义."
+            )
+        # V0.30.1: chain task 禁 flaky_repeat>1 (chain 内 node-level retry 已存外层冗余)
+        if task.chain_spec is not None and task.flaky_repeat > 1:
+            raise RuntimeError(
+                f"V0.30.1: chain task {task.task_id!r} flaky_repeat={task.flaky_repeat} 禁用 "
+                "(chain 内 node-level retry 已存)."
+            )
         pred = predicates.get(task.task_id)
         if pred is None:
             continue  # 缺 predicate 的 task 跳过 (lint_corpus_tokens 会拦)
@@ -302,12 +347,16 @@ async def run_corpus(
                 )
                 metrics.append(m2)
             else:
-                m = await run_one(
-                    task, client, pred,
-                    db_path=db_path, screenshots_dir=screenshots_dir,
-                    chromium_launcher=chromium_launcher,
-                )
-                metrics.append(m)
+                # V0.30.1 D real-world: flaky_repeat 内 loop, metric 各 run_id 独立 + flaky_repeat_idx 区分
+                for repeat_idx in range(task.flaky_repeat):
+                    m = await run_one(
+                        task, client, pred,
+                        db_path=db_path, screenshots_dir=screenshots_dir,
+                        chromium_launcher=chromium_launcher,
+                    )
+                    if task.flaky_repeat > 1:
+                        m = dataclasses.replace(m, flaky_repeat_idx=repeat_idx)
+                    metrics.append(m)
     return CorpusReport(
         run_id=run_id, started_at=started_at, ended_at=time.time(), metrics=metrics,
     )
@@ -382,4 +431,6 @@ def metric_to_dict(m: TaskMetric) -> dict[str, Any]:
         "inject_reflections": m.inject_reflections,
         # V0.29.4 W6-C 收尾: chain task 时 = completed_nodes/total_nodes, 非 chain → null
         "chain_node_pass_rate": m.chain_node_pass_rate,
+        # V0.30.1 D real-world: flaky_repeat>1 时区分第 N 次重跑, 默 0
+        "flaky_repeat_idx": m.flaky_repeat_idx,
     }

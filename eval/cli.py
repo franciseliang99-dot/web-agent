@@ -25,6 +25,8 @@ import os
 import sys
 from pathlib import Path
 
+from eval.types import EvalTask
+
 logger = logging.getLogger(__name__)
 
 
@@ -51,6 +53,27 @@ def _check_opt_in_env() -> None:
             "用法: WEB_AGENT_RUN_EVAL=1 web-agent-eval --corpus all\n"
         )
         sys.exit(1)
+
+
+def _filter_requires_real_net(tasks: list[EvalTask]) -> list[EvalTask]:
+    """V0.30.1 D real-world: requires_real_net=True task 默跳, EVAL_LIVE_NET=1 才放行.
+
+    三级 env 模型 (subagent C 决):
+    - WEB_AGENT_RUN_EVAL=1 (必): eval 启用
+    - WEB_AGENT_EVAL_REAL=1 (可): 真调 LLM (默 cassette 回放)
+    - WEB_AGENT_EVAL_LIVE_NET=1 (可): 真访外网 (默跳 requires_real_net=True task)
+
+    LIVE_NET 跟 EVAL_REAL 正交 — LIVE_NET 是网络 axis (外网请求), REAL 是 LLM axis (token 烧).
+    """
+    if os.environ.get("WEB_AGENT_EVAL_LIVE_NET", "") == "1":
+        return tasks
+    skipped = [t for t in tasks if t.requires_real_net]
+    if skipped:
+        logger.info(
+            "V0.30.1: 跳过 %d task requires_real_net=True (set WEB_AGENT_EVAL_LIVE_NET=1 启用): %s",
+            len(skipped), [t.task_id for t in skipped],
+        )
+    return [t for t in tasks if not t.requires_real_net]
 
 
 def _check_real_eval_or_cassette(cassette_dir: Path) -> bool:
@@ -91,6 +114,8 @@ async def _run_async(args: argparse.Namespace) -> int:
     load_dotenv()
 
     tasks = _select_tasks(args.corpus)
+    # V0.30.1 D real-world: filter requires_real_net=True 默跳 (LIVE_NET=1 才放行)
+    tasks = _filter_requires_real_net(tasks)
     if not tasks:
         sys.stderr.write(f"ERROR: corpus filter {args.corpus!r} 无匹配 task\n")
         return 1

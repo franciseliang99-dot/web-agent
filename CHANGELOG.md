@@ -2,6 +2,82 @@
 
 All notable changes to web-agent. 版本号遵循 SemVer 简化形式（V<major>.<minor>.<patch>）。
 
+## [0.30.1] - 2026-05-10
+
+### Add (V0.30 系列 commit 2/5 — vcr config helper + EvalTask requires_real_net/flaky_repeat + LIVE_NET filter)
+
+V0.30.0 G stealth 加固之后, 加 D pipeline 框架: EvalTask +2 字段 + flaky_repeat 重跑 loop +
+reflect/flaky 互斥 assert + chain/flaky 互斥 + LIVE_NET 三级 env filter + vcr config helper +
+cassette dir 占位.
+
+### subagent 揭 V0.26.x silent bug
+
+eval/runner 实际**没真接 vcr.use_cassette** (V0.26.4 baseline 全真烧 token, vcr_replay 字段总
+是 False). V0.30.1 加 `_get_eval_vcr_config()` helper 暴露 vcr config (跟 tests/conftest.py
+vcr_config 同 11 项 LLM key redact), V0.30.2 wikipedia task 落地时真接 `vcr.use_cassette`
+包 LLM call 段 (subagent 揭 + 留 V0.30.2 修).
+
+### Plan subagent 6 决策点全采纳
+
+- **A** vcr filter_headers helper (复制 conftest.py 11 项 redact + record_mode "once") +
+  V0.30.2 真接 use_cassette
+- **B** EvalTask `requires_real_net: bool = False` + `flaky_repeat: int = 1` 默兼容
+- **C** 三级 env (LIVE_NET 守 requires_real_net task) + cli `_filter_requires_real_net` helper
+- **D** flaky_repeat × reflect 互斥 (V0.30.1 早 RuntimeError, V0.30.4 收尾再决合并语义) +
+  chain × flaky 互斥 (chain 内已有 node-level retry)
+- **E** sannysoft probe 推 V0.30.2 (跟真 wikipedia task 一起验 stealth 真生效)
+- **F** flaky_repeat runner 加 inner loop + TaskMetric `flaky_repeat_idx` 区分 (默 0)
+
+### Changed (~150 LOC src + ~150 LOC test)
+
+- `eval/types.py` +5 行: EvalTask 加 `requires_real_net` + `flaky_repeat` 字段 (frozen+slots backward-compat)
+- `eval/runner.py` +60 行:
+  - TaskMetric 加 `flaky_repeat_idx: int = 0` 字段
+  - `_get_eval_vcr_config()` helper (11 项 header redact + filter_query_parameters + record_mode "once")
+  - run_corpus 加 reflect × flaky_repeat 互斥 assert (RuntimeError 早断)
+  - run_corpus 加 chain × flaky_repeat 互斥 assert
+  - run_corpus 内 client loop 后加 `for repeat_idx in range(task.flaky_repeat)` inner loop
+    + dataclasses.replace 设 flaky_repeat_idx
+  - metric_to_dict 加 flaky_repeat_idx 字段
+- `eval/cli.py` +25 行: `_filter_requires_real_net(tasks) -> list[EvalTask]` helper +
+  `tasks = _filter_requires_real_net(tasks)` after _select_tasks + EvalTask import + Path import 整理
+- `eval/cassettes/real_world/.gitkeep` **新建**: 防空目录被 git 忽略 (V0.30.2+ wikipedia cassette 入此 dir)
+- `tests/test_eval_runner.py` +7 测:
+  - EvalTask field default (requires_real_net=False / flaky_repeat=1)
+  - _get_eval_vcr_config 含 11 项 LLM key redact
+  - filter_requires_real_net (LIVE_NET 未设跳 / 设放行)
+  - metric_to_dict 含 flaky_repeat_idx (默 0 / 显式 2)
+  - run_corpus flaky × reflect 互斥 RuntimeError
+  - run_corpus chain × flaky 互斥 RuntimeError
+
+### V0.30 系列进度 (2/5)
+
+| ver | 状态 | 节点 |
+|-----|------|------|
+| V0.30.0 | ✅ | apply_stealth_plus init script (6 测) |
+| V0.30.1 | ✅ | 本提交 — vcr helper + EvalTask field + flaky/LIVE_NET filter (7 测) |
+| V0.30.2 | 待 | 1 wikipedia static task + sannysoft probe + run_one 真接 vcr.use_cassette (修 V0.26.x silent bug) |
+| V0.30.3 | 待 | +2 tasks (wikipedia + GitHub README) |
+| V0.30.4 | 待 | --corpus real-world axis filter + report + docs 收尾 |
+
+### V0.27+V0.28+V0.29+V0.30 累计 subagent 真发现 = **11 处** (本 commit +1)
+
+| # | 提出 | 内容 |
+|---|------|------|
+| 1-10 | (上轮已列) | |
+| **11** | **V0.30.1 Plan** | **V0.26.x silent bug — eval/runner 没真接 vcr.use_cassette (V0.26.4 baseline 全真烧 token), V0.30.1 helper 暴露 + V0.30.2 真接修** |
+
+### Compatibility
+
+- 老 caller 0 改 (EvalTask 默 requires_real_net=False/flaky_repeat=1; TaskMetric 默 flaky_repeat_idx=0)
+- mypy strict 0 (44 src); ruff 0; pytest **647 + 17 skip** (V0.30.0 640+17 → +7)
+- 真 chromium 15/15 全过 (无新)
+
+### Why patch (V0.30.1) 不 minor
+
+- V0.30 主题 minor bump 已发生在 V0.30.0; V0.30.1+ patch 累加 framework + corpus + 收尾
+- 跟 V0.21.x/V0.27.x/V0.28.x/V0.29.x 系列 patch 风格一致
+
 ## [0.30.0] - 2026-05-10
 
 ### Add (V0.30 D real-world corpus + G stealth 联动系列开篇 1/5 — apply_stealth_plus 加固)
