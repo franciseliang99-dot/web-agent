@@ -216,10 +216,10 @@ def test_trace_obs_contains_not_matched_hints_v024_helper():
 # --- V0.26.1 corpus 完整性 + token-specific lint ---
 
 
-def test_corpus_has_17_tasks_covering_v021_v032():
-    """V0.32.2: corpus 共 17 task (10 + 2 chain + 3 V0.30 real-world + 2 V0.32 chain real-world)."""
+def test_corpus_has_18_tasks_covering_v021_v035():
+    """V0.35.0: corpus 共 18 task (17 V0.32 + 1 V0.35 A capability×real-world actuator search)."""
     from eval.corpus import ALL_TASKS
-    assert len(ALL_TASKS) == 17
+    assert len(ALL_TASKS) == 18
     axes = {t.capability_axis for t in ALL_TASKS}
     expected = {
         "baseline", "multi-tab", "iframe", "drag", "upload",
@@ -231,9 +231,61 @@ def test_corpus_has_17_tasks_covering_v021_v032():
     # V0.29.4+V0.29.5 W6-C: 至少 2 chain task (CHAIN_REVEAL_2NODE + CHAIN_REFLECT_TRIGGER)
     chain_tasks = [t for t in ALL_TASKS if t.chain_spec is not None]
     assert len(chain_tasks) >= 2, "V0.29.4+V0.29.5 加 2 chain task"
-    # V0.30.2+V0.30.4 D real-world: ≥ 3 task (requires_real_net=True) — 1 V0.30.2 wiki + 2 V0.30.4 (wiki Apple_Inc + github octocat)
+    # V0.30.2+V0.30.4+V0.32+V0.35.0 D real-world: ≥ 6 task (requires_real_net=True)
     real_net_tasks = [t for t in ALL_TASKS if t.requires_real_net]
-    assert len(real_net_tasks) >= 3, "V0.30.2+V0.30.4 加 3 real-net task"
+    assert len(real_net_tasks) >= 6, "V0.30+V0.32+V0.35 加 ≥ 6 real-net task"
+
+
+# ---------- V0.35.0 A 真站点 eval 双轴扩 fast 测 ----------
+
+
+def test_v035_wikipedia_search_task_loaded():
+    """V0.35.0: A 真站点 eval task 在 ALL_TASKS 内, tags 含 'a-real-world' + 'actuator-search'."""
+    from eval.corpus import ALL_TASKS
+    v035_tasks = [t for t in ALL_TASKS if "v035" in t.tags]
+    assert len(v035_tasks) == 1, f"V0.35.0 加 1 task, got {len(v035_tasks)}"
+    t = v035_tasks[0]
+    assert t.task_id == "v035-wikipedia-search-quantum-field-theory"
+    assert "a-real-world" in t.tags
+    assert "actuator-search" in t.tags
+    assert t.requires_real_net is True
+    assert t.flaky_repeat == 3
+
+
+def test_v035_wikipedia_search_axis_real_world():
+    """V0.35.0: capability_axis='real-world' (跟 V0.30/V0.32 真站点 task 同 axis, V0.35 用 tags 区分)."""
+    from eval.corpus import ALL_TASKS
+    v035_task = next(t for t in ALL_TASKS if t.task_id == "v035-wikipedia-search-quantum-field-theory")
+    assert v035_task.capability_axis == "real-world"
+    assert v035_task.fixture_url == "https://en.wikipedia.org/wiki/Main_Page"
+
+
+def test_v035_wikipedia_search_predicate_token_specific():
+    """V0.35.0: predicate 'Quantum field theory' 19 char ≥ 8, 不在 generic, lint pass."""
+    from eval.corpus import ALL_PREDICATES, ALL_TASKS, lint_corpus_tokens
+    v035_tasks = [t for t in ALL_TASKS if "v035" in t.tags]
+    v035_preds = {t.task_id: ALL_PREDICATES[t.task_id] for t in v035_tasks}
+    violations = lint_corpus_tokens(v035_tasks, v035_preds)
+    assert violations == [], f"V0.35.0 lint failed: {violations}"
+
+
+def test_v035_wikipedia_search_predicate_matches_first_para():
+    """V0.35.0: predicate 真测 wikipedia QFT 首段第一句典型形式."""
+    from eval.corpus import ALL_PREDICATES
+    pred = ALL_PREDICATES["v035-wikipedia-search-quantum-field-theory"]
+    # 真 wikipedia QFT 首段第一句典型形式 (5+ 年稳)
+    sample = "Quantum field theory is the result of the combination of classical field theory."
+    result = pred.evaluate(final_result=sample, trace_steps=[])
+    assert result.matched
+
+
+def test_v035_wikipedia_search_capability_real_world_predicates_dict_isolated():
+    """V0.35.0: CAPABILITY_REAL_WORLD_PREDICATES 独立 dict, 与 V0.30 REAL_WORLD_PREDICATES 不冲突."""
+    from eval.corpus.v030_real_world import REAL_WORLD_PREDICATES
+    from eval.corpus.v035_capability_real_world import CAPABILITY_REAL_WORLD_PREDICATES
+    overlap = set(REAL_WORLD_PREDICATES) & set(CAPABILITY_REAL_WORLD_PREDICATES)
+    assert not overlap, f"V0.35.0 task_id 与 V0.30 重 ({overlap})"
+    assert len(CAPABILITY_REAL_WORLD_PREDICATES) == 1
 
 
 def test_all_tasks_have_predicate_binding():

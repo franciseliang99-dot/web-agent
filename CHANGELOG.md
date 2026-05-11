@@ -2,6 +2,83 @@
 
 All notable changes to web-agent. 版本号遵循 SemVer 简化形式（V<major>.<minor>.<patch>）。
 
+## [0.35.0] - 2026-05-11
+
+### Feat (V0.35 A 真站点 eval 双轴扩开篇 1/N — capability × real-world 加 actuator 真站点轴)
+
+V0.34.5 系列收尾 user 选 A 主题. V0.26 eval framework 现有 capability axis (multi-tab/iframe/
+drag/upload/download/dialog/keyboard-nav/failure-recovery) 全 synthetic data:text/html fixture;
+V0.30 real-world 3 task + V0.32 chain real-world 2 task 全是 perceiver 静态 first-page extract.
+**actuator 真站点动作轴** (type / click / scroll 真站点交互) 在 corpus 缺.
+
+V0.35.0 开篇 1 task: wikipedia 搜索框 actuator type + 提交 + 落地页 extract. 真站点 actuator
+axis 起点, 跟 V0.30/V0.32 静态 perceiver extract 区分.
+
+### V0.34 教训应用: 实施前 micro experiment 验 fixture 稳
+
+V0.34 系列教训: 没 baseline 任何 plan 都是猜 (#17). V0.35.0 之前先 curl probe:
+
+```bash
+# probe 1: W3C 提议 fixture iframe 验
+curl -s https://www.w3.org/Style/Examples/007/figures.en.html | grep -c "<iframe"
+# → 0 (Plan agent 提议 fixture 无 iframe, 推翻!) ← V0.34 教训生效
+
+# probe 2: wikipedia Main_Page 搜索框 + QFT article predicate
+curl -s https://en.wikipedia.org/wiki/Main_Page | grep 'id="searchInput"'
+# → name="search" id="searchInput" name="search" ✓ 搜索框存在
+
+curl -s https://en.wikipedia.org/wiki/Quantum_field_theory | grep "Quantum field theory is"
+# → "Quantum field theory is the result of the combination of" ✓ 首段稳
+```
+
+Plan agent 第一提议 fixture (W3C iframe) 真测推翻, reframe 为 wikipedia 搜索. 这是 V0.34 教训
+"实施前 micro experiment 验 fixture / ROI 假设" 制度化应用 — 一次省了 80+ LOC 实现后才发现
+fixture 错的成本.
+
+### Changed (~50 src LOC + ~80 test LOC)
+
+- `eval/corpus/v035_capability_real_world.py` **新** ~50 行:
+  - `WIKIPEDIA_SEARCH_QUANTUM_FIELD_THEORY` EvalTask: fixture_url=Main_Page, goal 搜 "quantum
+    field theory" + extract 首段第一句, capability_axis="real-world", tags=("v035",
+    "a-real-world", "actuator-search", "wikipedia"), requires_real_net=True, flaky_repeat=3
+  - `CAPABILITY_REAL_WORLD_PREDICATES` dict: SubstringPredicate("Quantum field theory")
+- `eval/corpus/__init__.py` +5 行: import + ALL_TASKS append + ALL_PREDICATES.update
+- `tests/test_eval_runner.py` +5 fast 测 (loaded / axis / token lint / predicate match / dict isolated)
+  + 改 `test_corpus_has_17_tasks` → 18 task (+V0.35.0)
+- `tests/test_eval_smoke.py` 改 2 测: `test_select_tasks_all_returns_full_corpus` 17→18;
+  `test_select_tasks_real_world_axis_returns_5_real_net_tasks` → 6 (V0.35.0 +1)
+- `pyproject.toml` / `__init__.py` 0.34.5 → **0.35.0** (major-minor bump, V0.35 系列开篇)
+- `uv.lock` 同步
+
+### Verify
+
+- `uv run pytest` → **777 passed, 25 skipped** (+5 V0.35.0 fast 测, 0 现测破)
+- `uv run ruff check` → all clean
+- `uv run mypy` → Success no issues in 49 src files
+- 0 真 chromium / 真 LLM 调用 (autonomous OK, 跑 Claude bash sandbox)
+
+### V0.35 系列 plan (subagent 商议后)
+
+| ver | 状态 | scope | autonomous |
+|-----|------|-------|------------|
+| **V0.35.0** | ✅ 本提交 | A 双轴扩开篇: wikipedia 搜索 actuator type+click 真站点 task | ✅ OK |
+| V0.35.1 | 待 | maintainer 真录 cassette (~$0.05-0.10 token + 60-120s wallclock) | **STOP** — 红线 ANTHROPIC_API_KEY + 真烧 token |
+| V0.35.2 | 待 | +2 task 横向扩 (actuator scroll / multi-step click 真站点) | ✅ OK |
+| V0.35.3 | 待 | 系列收尾 retrospective + virtual axis filter (`--corpus capability-real-world`) | ✅ OK |
+
+autonomous mode 跳数字模式 (跟 V0.32.1 deferred 同 SemVer pattern): V0.35.0 → V0.35.2 → V0.35.3
+3 commit 全 autonomous, V0.35.1 跳 (文档明记 maintainer when ready 跑).
+
+### 系列动机 (跟 V0.32 chain × real-world 对照)
+
+| 系列 | scope | 真站点 corpus 行数 (新加) |
+|------|-------|---------------------------|
+| V0.30 D real-world (5 commit) | perceiver 静态 extract 真站点起点 | 3 task (wikipedia/octocat) |
+| V0.32 D' chain × real-world (3 commit) | chain × real-world 双轴 | 2 task (GitHub topic / wiki cross-ref) |
+| **V0.35 A capability × real-world (本系列)** | **capability axis × real-world (actuator 真站点轴)** | **1+ task (V0.35.0 开篇, 后续 V0.35.2 扩)** |
+
+V0.35 补 perceiver / actuator 真站点轴 — V0.30 全 perceiver 静态读, V0.35 加 actuator 动作.
+
 ## [0.34.5] - 2026-05-11
 
 ### Doc (V0.34 F sub-route 优化系列收尾 6/6 — 系列总结 + 3 真发现复盘 + chromium architecture 沉淀)

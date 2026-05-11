@@ -50,6 +50,10 @@ from eval.corpus.v032_chain_real_world import (
     GITHUB_TOPIC_PYTHON_FIRST_README,
     WIKIPEDIA_APPLE_TO_CUPERTINO_CHAIN,
 )
+from eval.corpus.v035_capability_real_world import (
+    CAPABILITY_REAL_WORLD_PREDICATES,
+    WIKIPEDIA_SEARCH_QUANTUM_FIELD_THEORY,
+)
 from eval.predicates import Predicate, SubstringPredicate
 from eval.types import EvalTask
 
@@ -94,6 +98,7 @@ ALL_TASKS: list[EvalTask] = [
     GITHUB_OCTOCAT_README,  # V0.30.4 D real-world: GitHub web UI description (跨 source baseline)
     GITHUB_TOPIC_PYTHON_FIRST_README,  # V0.32.0 D' chain × real-world (GitHub topic search → README)
     WIKIPEDIA_APPLE_TO_CUPERTINO_CHAIN,  # V0.32.2 D' chain × real-world (wiki cross-ref Apple→Cupertino)
+    WIKIPEDIA_SEARCH_QUANTUM_FIELD_THEORY,  # V0.35.0 A capability × real-world (actuator type+click)
 ]
 
 # 合并所有 predicate 到单 dict (runner 反查用). 各子 dict value 类型 mypy 默认推断为
@@ -110,6 +115,7 @@ for _sub_dict in (
     CHAIN_PREDICATES,  # V0.29.4 W6-C
     REAL_WORLD_PREDICATES,  # V0.30.2 D real-world
     CHAIN_REAL_WORLD_PREDICATES,  # V0.32.0 D' chain × real-world
+    CAPABILITY_REAL_WORLD_PREDICATES,  # V0.35.0 A capability × real-world
 ):
     ALL_PREDICATES.update(_sub_dict)
 
