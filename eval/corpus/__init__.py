@@ -48,6 +48,7 @@ from eval.corpus.v030_real_world import (
 from eval.corpus.v032_chain_real_world import (
     CHAIN_REAL_WORLD_PREDICATES,
     GITHUB_TOPIC_PYTHON_FIRST_README,
+    WIKIPEDIA_APPLE_TO_CUPERTINO_CHAIN,
 )
 from eval.predicates import Predicate, SubstringPredicate
 from eval.types import EvalTask
@@ -92,6 +93,7 @@ ALL_TASKS: list[EvalTask] = [
     WIKIPEDIA_APPLE_INC,  # V0.30.4 D real-world: 第 2 wikipedia (公司 page 跨 academic baseline)
     GITHUB_OCTOCAT_README,  # V0.30.4 D real-world: GitHub web UI description (跨 source baseline)
     GITHUB_TOPIC_PYTHON_FIRST_README,  # V0.32.0 D' chain × real-world (GitHub topic search → README)
+    WIKIPEDIA_APPLE_TO_CUPERTINO_CHAIN,  # V0.32.2 D' chain × real-world (wiki cross-ref Apple→Cupertino)
 ]
 
 # 合并所有 predicate 到单 dict (runner 反查用). 各子 dict value 类型 mypy 默认推断为

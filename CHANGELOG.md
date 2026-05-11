@@ -2,6 +2,70 @@
 
 All notable changes to web-agent. 版本号遵循 SemVer 简化形式（V<major>.<minor>.<patch>）。
 
+## [0.32.2] - 2026-05-10
+
+### Add (V0.32 系列 commit 3/4 — Wikipedia cross-ref chain real-world 验非 GitHub 域)
+
+V0.32.0 GitHub topic→README chain real-world 之上, 加第 2 chain real-world task — Wikipedia
+cross-ref (Apple_Inc → Cupertino link → Cupertino page) 验非 GitHub 域 chain runner. SemVer
+跳 0.32.1 (V0.32.1 真录 cassette deferred 到 maintainer 跑, 跟 V0.27.0 跳 minor 同模式).
+
+### Plan subagent A-D 4 决策点全采纳
+
+- A fixture 复用 V0.30.4 WIKIPEDIA_APPLE_INC URL (https://en.wikipedia.org/wiki/Apple_Inc.) +
+  chain 跨 page (a click Cupertino link → 跳 Cupertino page → b extract on Cupertino page)
+- B predicate "Santa Clara County" (18 char + county 行政信息 5+ 年不变, 比 "California" 通用度
+  低不假阳性, 比 "Cupertino" 不撞 page H1 自我断言)
+- C flaky_repeat=1 + max_steps=10 (wiki 比 GitHub 轻无 banner/JS) + max_wallclock_s=120 (静态 HTML)
+- D 3 测 (loaded + axis filter + predicate)
+
+### subagent 提关键 mitigation
+
+node a goal 必须**明指**"首段中文字为 'Cupertino' 的 wikilink" (而非 "第一个 wikilink") —
+Apple_Inc 首段含多个 wikilink (Cupertino/California/Steve Jobs/Cook), 误点 California 跳错 page →
+node b extract 失败. node a goal 显式指明 "不要点 California" 防 LLM 误判.
+
+### Changed (~100 LOC)
+
+- `eval/corpus/v032_chain_real_world.py` +60 行: WIKIPEDIA_APPLE_TO_CUPERTINO_CHAIN EvalTask
+  (chain_spec 2 node a click Cupertino wikilink / b extract Cupertino page 首段, max_steps=10
+  / max_wallclock=120) + CHAIN_REAL_WORLD_PREDICATES SubstringPredicate("Santa Clara County")
+- `eval/corpus/__init__.py` +5 行: import + ALL_TASKS append
+- `tests/test_eval_runner.py` +3 测 (loaded 双标 + axis filter 含 2 chain real-world + predicate)
+  + 改 1 测 (corpus 16→17)
+- `tests/test_eval_smoke.py` 改 1 测 (--corpus all 17 / real-world 5 含 V0.32.2)
+
+### V0.32 系列进度 (2/4 实做 + 1 deferred)
+
+| ver | 状态 | 节点 |
+|-----|------|------|
+| V0.32.0 | ✅ | 1 chain real-world task (GitHub topic→README) |
+| V0.32.1 | ⏸ deferred | maintainer 真录 cassette (烧 token + user-gated, ~$0.05-0.10) — SemVer 跳 0.32.1 patch 数字 |
+| V0.32.2 | ✅ | 本提交 — +1 chain real-world (Wikipedia cross-ref Apple_Inc→Cupertino) 验非 GitHub 域 |
+| V0.32.3 | 待 | cli --corpus chain-real-world 复合 axis filter + 收尾 |
+
+### 隐藏风险 (subagent 已识别)
+
+1. **Cupertino link 在 Apple_Inc page 位置漂**: 多个 wikilink (Cupertino/California/Steve Jobs/Cook),
+   node a goal 明指 "文字为 Cupertino" + "不要点 California" 防 LLM 误判
+2. **Cupertino page 首段改写漂**: "Santa Clara County" 行政信息 5+ 年未变, 比 V0.30.2 quantum
+   "phenomenon" 更稳
+3. **chain ctx 跨 page 状态**: V0.29.4 _run_chain_branch 跨 node 复用 ctx (含 browser page),
+   node a click 后 ctx page 已 navigate 到 Cupertino, node b 直接 perceive 当前 page 即可
+
+### V0.27+V0.28+V0.29+V0.30+V0.31+V0.32 累计 subagent 真发现 = **12 处** (V0.32.2 0 新)
+
+### Compatibility
+
+- 老 caller 0 改 (复用 V0.29.4 chain_spec + V0.30.1 requires_real_net + V0.30.4 fixture URL)
+- mypy strict 0 (46 src); ruff 0; pytest **696 + 18 skip** (V0.32.0 693+18 → +3 V0.32.2 测)
+- 真 chromium 15/15 全过 (无新; cassette 真录 V0.32.1 maintainer 跑)
+
+### Why patch (V0.32.2) 不 minor
+
+- V0.32 主题 minor bump 已发生在 V0.32.0; V0.32.1+ patch 累加 (V0.32.1 跳数字 deferred maintainer)
+- 跟 V0.21.x/V0.27.x/V0.28.x/V0.29.x/V0.30.x/V0.31.x patch 风格一致
+
 ## [0.32.0] - 2026-05-10
 
 ### Add (V0.32 D' chain × real-world 交叉系列开篇 1/4 — GitHub topic → README chain task)

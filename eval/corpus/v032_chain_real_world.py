@@ -74,3 +74,55 @@ GITHUB_TOPIC_PYTHON_FIRST_README = EvalTask(
 CHAIN_REAL_WORLD_PREDICATES: dict[str, Predicate] = {
     GITHUB_TOPIC_PYTHON_FIRST_README.task_id: SubstringPredicate(substring="programming language"),
 }
+
+
+# V0.32.2 第 2 chain real-world task: Wikipedia cross-ref (验非 GitHub 域 + 跨 wiki 内链 navigation).
+# fixture 复用 V0.30.4 WIKIPEDIA_APPLE_INC 同 URL (Apple_Inc page), 但 chain 跨 page (a click
+# Cupertino link → 跳 Cupertino page → b extract on Cupertino page).
+#
+# subagent A 决: node a goal 必须明指"首段中文字为 'Cupertino' 的 wikilink" 防 LLM click 错
+# (Apple_Inc 首段含多个 wikilink: Cupertino/California/Steve Jobs/Cook, 误点 California 跳错 page).
+WIKIPEDIA_APPLE_TO_CUPERTINO_CHAIN = EvalTask(
+    task_id="v032-wikipedia-apple-to-cupertino-chain",
+    goal=(
+        "本 task 走 chain 路径 (V0.32 D' real-world chain × axis 交叉, 非 GitHub 域验证): "
+        "node a 在 https://en.wikipedia.org/wiki/Apple_Inc. 找首段中文字为 'Cupertino' 的"
+        "wikilink (蓝色超链接), click 跳到 Cupertino wiki page; "
+        "node b 在跳转后的 Cupertino page extract 首段含县名信息, done(result=完整首段)."
+    ),
+    fixture_url="https://en.wikipedia.org/wiki/Apple_Inc.",  # 复用 V0.30.4 fixture URL
+    capability_axis="real-world",  # chain × real-world 双标 (跟 V0.32.0 GitHub task 同 axis)
+    expected_step_range=(3, 10),  # chain 2 node × 2-5 step (find link + click + perceive + extract)
+    max_steps=10,  # wiki 比 GitHub 轻 (无 banner/JS), 比 V0.32.0 的 12 少 2 合理
+    max_wallclock_s=120.0,  # wiki 静态 HTML 120s 比 V0.32.0 的 180 少 60 合理
+    description=(
+        "V0.32.2 D' chain × real-world (非 GitHub 域): Wikipedia cross-ref Apple_Inc → Cupertino "
+        "via 首段 wikilink. predicate 'Santa Clara County' 18 char 抗 wiki city page 行政信息漂 "
+        "(county 归属 5+ 年不变, 比 'California' 通用度低不假阳性)."
+    ),
+    tags=("v032", "d-prime", "chain", "real-world", "wikipedia"),
+    requires_real_net=True,
+    flaky_repeat=1,
+    chain_spec=ChainSpec(nodes=(
+        ChainNode(
+            id="a",
+            goal=(
+                "在 Apple_Inc 页面首段 (lead paragraph) 中找文字为 'Cupertino' 的 wikilink "
+                "(蓝色超链接, 通常出现在 'headquartered in Cupertino' 类句子里), click 它. "
+                "**注意区分**: 不要点 'California' 或其他 wikilink, 必须文字为 'Cupertino'. "
+                "click 后 done(result='clicked Cupertino link')."
+            ),
+        ),
+        ChainNode(
+            id="b",
+            goal=(
+                "当前 page 是 Cupertino wiki (跳转后), extract 首段内容含县名/州名行政信息, "
+                "done(result=完整首段文本)."
+            ),
+            depends_on=("a",),
+        ),
+    )),
+)
+CHAIN_REAL_WORLD_PREDICATES[WIKIPEDIA_APPLE_TO_CUPERTINO_CHAIN.task_id] = SubstringPredicate(
+    substring="Santa Clara County",
+)

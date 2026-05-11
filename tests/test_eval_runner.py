@@ -216,10 +216,10 @@ def test_trace_obs_contains_not_matched_hints_v024_helper():
 # --- V0.26.1 corpus 完整性 + token-specific lint ---
 
 
-def test_corpus_has_16_tasks_covering_v021_v032():
-    """V0.32.0: corpus 共 16 task (10 + 2 chain + 1 wiki + 2 (wiki+github) + 1 V0.32.0 chain real-world)."""
+def test_corpus_has_17_tasks_covering_v021_v032():
+    """V0.32.2: corpus 共 17 task (10 + 2 chain + 3 V0.30 real-world + 2 V0.32 chain real-world)."""
     from eval.corpus import ALL_TASKS
-    assert len(ALL_TASKS) == 16
+    assert len(ALL_TASKS) == 17
     axes = {t.capability_axis for t in ALL_TASKS}
     expected = {
         "baseline", "multi-tab", "iframe", "drag", "upload",
@@ -758,3 +758,48 @@ def test_v032_chain_real_world_predicate_lenient_substring():
     pred = ALL_PREDICATES["v032-github-topic-python-first-readme"]
     assert isinstance(pred, SubstringPredicate)
     assert pred.substring == "programming language"
+
+
+# ---------- V0.32.2 D' chain × real-world (Wikipedia cross-ref 非 GitHub 域) ----------
+
+
+def test_v032_wikipedia_apple_to_cupertino_chain_loaded():
+    """V0.32.2: WIKIPEDIA_APPLE_TO_CUPERTINO_CHAIN 双标 task loaded (real-world axis + chain_spec)."""
+    from eval.corpus import ALL_PREDICATES
+    from eval.corpus.v032_chain_real_world import WIKIPEDIA_APPLE_TO_CUPERTINO_CHAIN
+
+    t = WIKIPEDIA_APPLE_TO_CUPERTINO_CHAIN
+    assert t.requires_real_net is True
+    assert t.flaky_repeat == 1
+    assert t.capability_axis == "real-world"
+    assert t.chain_spec is not None
+    assert len(t.chain_spec.nodes) == 2
+    assert t.chain_spec.nodes[1].depends_on == ("a",)
+    assert "Apple_Inc" in t.fixture_url  # 复用 V0.30.4 WIKIPEDIA_APPLE_INC fixture URL
+    assert t.task_id in ALL_PREDICATES
+    # wiki 比 GitHub 轻: max_steps=10 < V0.32.0 12, max_wallclock=120 < V0.32.0 180
+    assert t.max_steps == 10
+    assert t.max_wallclock_s == 120.0
+
+
+def test_v032_wikipedia_chain_axis_filter_includes_two_chain_real_world():
+    """V0.32.2: --corpus real-world 含 V0.32.0 GitHub + V0.32.2 wiki cross-ref 共 2 chain real-world."""
+    from eval.cli import _select_tasks
+
+    real_world = _select_tasks("real-world")
+    chain_real_world = [t for t in real_world if t.chain_spec is not None]
+    chain_ids = {t.task_id for t in chain_real_world}
+    assert "v032-github-topic-python-first-readme" in chain_ids
+    assert "v032-wikipedia-apple-to-cupertino-chain" in chain_ids
+    assert len(chain_real_world) == 2  # V0.32.0 + V0.32.2
+
+
+def test_v032_wikipedia_chain_predicate_santa_clara_county():
+    """V0.32.2: predicate 'Santa Clara County' 18 char (subagent B 决: 抗 wiki 城市 page 行政信息漂,
+    比 'California' 通用度低不假阳性, 比 'Cupertino' 不撞 page H1 自我断言)."""
+    from eval.corpus import ALL_PREDICATES
+    from eval.predicates import SubstringPredicate
+
+    pred = ALL_PREDICATES["v032-wikipedia-apple-to-cupertino-chain"]
+    assert isinstance(pred, SubstringPredicate)
+    assert pred.substring == "Santa Clara County"
