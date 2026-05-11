@@ -253,31 +253,41 @@ class CorpusReport:
     metrics: list[TaskMetric]
 
 
+# V0.30.1 D real-world / V0.30.1 simplify: 11 项 LLM secret + 机器画像 redact 列表 — eval runner +
+# tests/conftest.py vcr_config 共享单一来源 (V0.30.1 commit 自承认 helper 复制 conftest, 已抽).
+# tests/conftest.py 是测试 fixture, eval/ 是 production code; 单源放 production 侧, conftest import
+# 反向 (production 永不 import tests/). 加新 redact header 改本元组即可两侧同步.
+_VCR_FILTER_HEADERS: tuple[tuple[str, str], ...] = (
+    ("authorization", "REDACTED"),
+    ("x-api-key", "REDACTED"),
+    ("anthropic-version", "REDACTED"),
+    ("openai-organization", "REDACTED"),
+    ("user-agent", "REDACTED"),
+    ("x-stainless-arch", "REDACTED"),
+    ("x-stainless-os", "REDACTED"),
+    ("x-stainless-runtime", "REDACTED"),
+    ("x-stainless-runtime-version", "REDACTED"),
+    ("x-stainless-lang", "REDACTED"),
+    ("x-stainless-package-version", "REDACTED"),
+)
+_VCR_FILTER_QUERY_PARAMETERS: tuple[tuple[str, str], ...] = (
+    ("api_key", "REDACTED"),
+)
+
+
 def _get_eval_vcr_config() -> dict[str, Any]:
     """V0.30.1 D real-world: vcr config — filter LLM key 防泄漏 + record_mode once.
 
-    跟 tests/conftest.py vcr_config 同 11 项 redact (Authorization / x-api-key / anthropic-version /
-    openai-organization / user-agent / 6 项 stainless metadata). cassette dir 由 caller 传, runner
-    用 vcr.use_cassette(path, **config) 包 LLM call 段防 chromium WebSocket.
+    11 项 redact 共享 _VCR_FILTER_HEADERS (tests/conftest.py vcr_config 也 import 此元组单源).
+    cassette dir 由 caller 传, runner 用 vcr.use_cassette(path, **config) 包 LLM call 段
+    防 chromium WebSocket.
 
     record_mode "once": 已有 cassette 重放, 否则录制后写盘 (跟 conftest 一致). EVAL_REAL=1
     + EVAL_LIVE_NET=1 真录, 默回放 (cassette 不在则 raise — caller 决定 fallback).
     """
     return {
-        "filter_headers": [
-            ("authorization", "REDACTED"),
-            ("x-api-key", "REDACTED"),
-            ("anthropic-version", "REDACTED"),
-            ("openai-organization", "REDACTED"),
-            ("user-agent", "REDACTED"),
-            ("x-stainless-arch", "REDACTED"),
-            ("x-stainless-os", "REDACTED"),
-            ("x-stainless-runtime", "REDACTED"),
-            ("x-stainless-runtime-version", "REDACTED"),
-            ("x-stainless-lang", "REDACTED"),
-            ("x-stainless-package-version", "REDACTED"),
-        ],
-        "filter_query_parameters": [("api_key", "REDACTED")],
+        "filter_headers": list(_VCR_FILTER_HEADERS),
+        "filter_query_parameters": list(_VCR_FILTER_QUERY_PARAMETERS),
         "record_mode": "once",
     }
 

@@ -24,22 +24,14 @@ def vcr_config():
 
     filter_headers 用元组形式 (name, replacement) 保留 header 但脱敏, 便于 cassette diff;
     单字符串形式 (e.g. "authorization") 会整 header 删, replay 时若 SDK 必须读会出错。
+
+    V0.30.1 simplify: 11 项 redact 共享 eval/runner._VCR_FILTER_HEADERS (单源, 加新 header 改 1 处).
     """
+    from eval.runner import _VCR_FILTER_HEADERS, _VCR_FILTER_QUERY_PARAMETERS
+
     return {
-        "filter_headers": [
-            ("authorization", "REDACTED"),
-            ("x-api-key", "REDACTED"),
-            ("anthropic-version", "REDACTED"),
-            ("openai-organization", "REDACTED"),
-            ("user-agent", "REDACTED"),
-            ("x-stainless-arch", "REDACTED"),
-            ("x-stainless-os", "REDACTED"),
-            ("x-stainless-runtime", "REDACTED"),
-            ("x-stainless-runtime-version", "REDACTED"),
-            ("x-stainless-lang", "REDACTED"),
-            ("x-stainless-package-version", "REDACTED"),
-        ],
-        "filter_query_parameters": [("api_key", "REDACTED")],
+        "filter_headers": list(_VCR_FILTER_HEADERS),
+        "filter_query_parameters": list(_VCR_FILTER_QUERY_PARAMETERS),
         # 默认 once: 已有 cassette 重放, 否则录制后写盘. CLI --record-mode=none 可强 replay-only
         "record_mode": "once",
     }
