@@ -44,6 +44,15 @@ from web_agent.memory import (
     recall_by_domain,
 )
 from web_agent.replay import render_to_file as replay_render_to_file
+from web_agent.chain import (
+    ChainCycleError,
+    ChainNodeResult,
+    ChainResult,
+    ChainSpecError,
+    ChainVarError,
+    parse_chain_spec,
+    run_chain,
+)
 from web_agent.vault import InMemorySecretStore, MissingSecretError
 
 
@@ -194,6 +203,131 @@ async def web_agent_run(
                 safety_approval_cb=safety_approval_cb,
                 secret_store=store,
             )
+
+
+@mcp.tool()
+async def web_agent_run_chain(
+    spec: dict[str, Any],
+    max_total_wallclock_s: float | None = None,
+    capability_hint: str | None = None,
+    ctx: Context[Any, Any] | None = None,
+) -> dict[str, Any]:
+    """V0.29.2 W6-C: 跑 chain (多 task 编排器) 替代真人多步任务.
+
+    Args:
+        spec: chain spec dict (跟 chain.parse_chain_spec 接收同 schema):
+            {"nodes": [{"id": str, "goal": str, "depends_on": [str,...]?,
+                        "on_failure": "abort"|"continue"?, "inputs": dict?}]}
+            最简: {"nodes": [{"id": "a", "goal": "..."}]}
+            含 var: {"nodes": [{"id":"a","goal":"X"}, {"id":"b","goal":"based on ${a.result}, do Y","depends_on":["a"]}]}
+        max_total_wallclock_s: chain 整体 wallclock cap (默 1800s = 30min)
+        capability_hint: V0.27.5 routing axis hint (multi-tab/iframe/...) — 选 baseline 强项 provider
+
+    Returns: {"chain_id": str, "completed": bool, "node_results": [...], "started_at": float, "ended_at": float}
+        node_results 元素: {"node_id", "result" (LLM 输出 / abort marker), "success", "wallclock_s"}
+
+    Raises:
+        RuntimeError: spec 校验失败 (ChainSpecError/ChainCycleError) / chain spec var 错 (ChainVarError) /
+            Chrome 9222 不可达.
+
+    V0.29.2 限制 (subagent 决, V0.30 改进):
+    - 不复用 V0.27.4 elicit retry: 任 node 缺 API key → 节点 result 含 CHAIN_NODE_EXCEPTION:MissingSecretError
+      marker, success=False, chain 按 on_failure 处理 (默 abort 整 chain). V0.30 加 pre-flight 真 abort.
+    - 不双层 progress: 仅 chain-level (node X/N), 无 node-level (loop step). V0.30 加 (idx*100+step, total*100).
+    - chain 期间 _RUN_LOCK 持有 (跟 web_agent_run 互斥, Chrome 单 tab 契约), 长 chain 阻塞其他 tool call.
+    """
+    cdp_url = os.environ.get("WEB_AGENT_CDP_URL", "http://127.0.0.1:9222")
+    await asyncio.to_thread(_check_chrome_alive, cdp_url)
+
+    # V0.27.5: routing — 提供 hint 走 select_provider, 否则 cli_run_task 默 env/anthropic
+    provider: str | None = None
+    if capability_hint:
+        from web_agent.routing import select_provider
+        provider = select_provider(capability_hint)  # type: ignore[arg-type]
+
+    # V0.18.0 _elicit_safety closure (跟 web_agent_run 同模式; subagent 决: V0.29.2 不抽 helper
+    # 减 web_agent_run churn, V0.29.4 simplify pass 再做)
+    safety_approval_cb: SafetyApprovalCallback | None = None
+    if ctx is not None:
+        async def _elicit_safety(rule: str, reason: str) -> bool:
+            msg = (
+                f"web-agent (chain) 检测到敏感动作 (rule={rule}): {reason}\n"
+                f"是否放行本次动作? 拒绝将 abort 当前 node task."
+            )
+            try:
+                result = await ctx.elicit(message=msg, schema=SafetyApproval)
+            except Exception as e:
+                logger.warning("ctx.elicit 失败 (%r) → 视作 decline", e)
+                return False
+            if isinstance(result, AcceptedElicitation):
+                return bool(result.data.approve)
+            return False
+        safety_approval_cb = _elicit_safety
+
+    # spec 校验 — ChainSpecError/ChainCycleError reraise 为 RuntimeError 让 client 看 isError + 友好 msg
+    try:
+        chain_spec = parse_chain_spec(spec)
+    except (ChainSpecError, ChainCycleError) as e:
+        raise RuntimeError(f"chain spec 错: {e}") from e
+
+    # closure 包 cli_run_task: chain runner 只传 goal + max_wallclock_s; provider/safety_cb 已 bind
+    async def _chain_run_task_fn(*, goal: str, max_wallclock_s: float | None = None, **_: object) -> str:
+        return await cli_run_task(
+            goal=goal,
+            start_url=None,  # V0.29.2: chain 内每 node 不带 url, 跑 Chrome 当前 tab (跨 node 接力)
+            max_steps=20,
+            max_wallclock_s=max_wallclock_s,
+            provider=provider,
+            safety_approval_cb=safety_approval_cb,
+        )
+
+    # chain-level progress: ctx.report_progress(node_idx, total_nodes, msg)
+    total_nodes = len(chain_spec.nodes)
+    completed_count = 0
+
+    async def _on_node_done(nr: ChainNodeResult) -> None:
+        nonlocal completed_count
+        completed_count += 1
+        if ctx is not None:
+            try:
+                await ctx.report_progress(
+                    completed_count, total_nodes,
+                    f"node {nr.node_id} {'OK' if nr.success else 'FAIL'} ({nr.wallclock_s:.1f}s)",
+                )
+            except Exception as e:
+                logger.warning("ctx.report_progress 失败 (%r), 不阻塞 chain", e)
+
+    async with _RUN_LOCK:
+        try:
+            chain_result = await run_chain(
+                chain_spec, _chain_run_task_fn,
+                on_node_done_cb=_on_node_done,
+                max_total_wallclock_s=max_total_wallclock_s or 1800.0,
+            )
+        except ChainVarError as e:
+            raise RuntimeError(f"chain spec var 错: {e}") from e
+
+    return _chain_result_to_dict(chain_result)
+
+
+def _chain_result_to_dict(r: ChainResult) -> dict[str, Any]:
+    """V0.29.2: ChainResult → JSON-safe dict (FastMCP nested dataclass 序列化不稳, 手动 asdict)."""
+    return {
+        "chain_id": r.chain_id,
+        "completed": r.completed,
+        "started_at": round(r.started_at, 2),
+        "ended_at": round(r.ended_at, 2),
+        "node_results": [
+            {
+                "node_id": nr.node_id,
+                "result": nr.result[:500],
+                "success": nr.success,
+                "wallclock_s": round(nr.wallclock_s, 2),
+                "web_agent_task_id": nr.web_agent_task_id,
+            }
+            for nr in r.node_results
+        ],
+    }
 
 
 def _render_replay(task_id: str) -> dict[str, Any]:

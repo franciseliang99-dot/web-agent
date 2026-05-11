@@ -69,11 +69,15 @@ def _patch_replay_render(monkeypatch, *, returns: dict | None = None, raises: Ba
 
 # ---------- Case 1: list_tools ----------
 
-async def test_list_tools_returns_three(reset_run_lock):
+async def test_list_tools_returns_four(reset_run_lock):
+    """V0.29.2: 加 web_agent_run_chain → 4 个 tool (V0.16.1 3 个 + V0.29.2 1 个)."""
     async with create_connected_server_and_client_session(mcp) as session:
         resp = await session.list_tools()
         names = {t.name for t in resp.tools}
-        assert names == {"web_agent_run", "web_agent_get_replay", "web_agent_query_memory"}
+        assert names == {
+            "web_agent_run", "web_agent_run_chain",
+            "web_agent_get_replay", "web_agent_query_memory",
+        }
 
 
 # ---------- Case 2: web_agent_run forwards args ----------
@@ -458,3 +462,136 @@ def test_main_configures_logging_stderr(monkeypatch):
     stream_handlers = [h for h in root_handlers if isinstance(h, logging.StreamHandler)]
     assert any(h.stream is sys.stderr for h in stream_handlers), \
         f"main() 应配 stderr handler, got {[h.stream for h in stream_handlers]}"
+
+
+# ---------- V0.29.2 W6-C: web_agent_run_chain mcp tool ----------
+
+
+async def test_web_agent_run_chain_runs_all_nodes_with_var_substitution(
+    monkeypatch, reset_run_lock, fake_chrome_alive,
+):
+    """V0.29.2: 2 node chain + ${a.result} var 传递 + 返 dict 含 chain_id/completed/node_results."""
+    captured_goals: list[str] = []
+
+    async def fake_run_task(goal, **kw):
+        captured_goals.append(goal)
+        return f"result: {goal[:30]}"
+
+    monkeypatch.setattr("web_agent.mcp_server.cli_run_task", fake_run_task)
+
+    spec = {"nodes": [
+        {"id": "a", "goal": "first node goal"},
+        {"id": "b", "goal": "second uses ${a.result}", "depends_on": ["a"]},
+    ]}
+
+    result = await mcp_mod.web_agent_run_chain(spec=spec, ctx=None)
+
+    assert isinstance(result, dict)
+    assert result["completed"] is True
+    assert len(result["node_results"]) == 2
+    assert result["node_results"][0]["node_id"] == "a"
+    assert result["node_results"][1]["node_id"] == "b"
+    # var 真传递: b 的 goal 含 a 的 result
+    assert "result: first node" in captured_goals[1]
+    assert len(result["chain_id"]) == 12  # uuid 12 字符
+
+
+async def test_web_agent_run_chain_passes_safety_cb_to_each_node(
+    monkeypatch, reset_run_lock, fake_chrome_alive,
+):
+    """V0.29.2: 每 node cli_run_task 收到同 safety_approval_cb closure (ctx 闭包共享)."""
+    from unittest.mock import AsyncMock, MagicMock
+
+    captured_cbs: list[object] = []
+
+    async def fake_run_task(goal, **kw):
+        captured_cbs.append(kw.get("safety_approval_cb"))
+        return "ok"
+
+    monkeypatch.setattr("web_agent.mcp_server.cli_run_task", fake_run_task)
+
+    ctx = MagicMock()
+    ctx.report_progress = AsyncMock()
+    ctx.elicit = AsyncMock()
+
+    spec = {"nodes": [{"id": "a", "goal": "g1"}, {"id": "b", "goal": "g2"}]}
+    await mcp_mod.web_agent_run_chain(spec=spec, ctx=ctx)
+
+    assert len(captured_cbs) == 2
+    assert captured_cbs[0] is not None
+    assert callable(captured_cbs[0])
+    assert captured_cbs[0] is captured_cbs[1], "chain 内 safety_cb 必须同一闭包共享 (ctx 闭包)"
+
+
+async def test_web_agent_run_chain_chain_level_progress_cb(
+    monkeypatch, reset_run_lock, fake_chrome_alive,
+):
+    """V0.29.2: ctx.report_progress chain-level (node_idx, total_nodes, msg) 每 node 一次."""
+    from unittest.mock import AsyncMock, MagicMock
+
+    async def fake_run_task(goal, **kw):
+        return "ok"
+
+    monkeypatch.setattr("web_agent.mcp_server.cli_run_task", fake_run_task)
+
+    ctx = MagicMock()
+    ctx.report_progress = AsyncMock()
+
+    spec = {"nodes": [{"id": "a", "goal": "g"}, {"id": "b", "goal": "g"}]}
+    await mcp_mod.web_agent_run_chain(spec=spec, ctx=ctx)
+
+    assert ctx.report_progress.call_count == 2
+    # 第 1 次: (1, 2, msg containing "node a OK")
+    args1, _ = ctx.report_progress.call_args_list[0]
+    assert args1[0] == 1 and args1[1] == 2
+    assert "node a" in args1[2] and "OK" in args1[2]
+    # 第 2 次: (2, 2, msg containing "node b")
+    args2, _ = ctx.report_progress.call_args_list[1]
+    assert args2[0] == 2 and args2[1] == 2
+
+
+async def test_web_agent_run_chain_invalid_spec_raises_runtimeerror(
+    monkeypatch, reset_run_lock, fake_chrome_alive,
+):
+    """V0.29.2: spec 缺 nodes / cycle → reraise RuntimeError 含 'chain spec 错' (subagent E 决)."""
+    import pytest as _pytest
+
+    # case 1: empty nodes
+    with _pytest.raises(RuntimeError, match="chain spec 错"):
+        await mcp_mod.web_agent_run_chain(spec={"nodes": []}, ctx=None)
+
+    # case 2: cycle (a→b, b→a). 注意 parse_chain_spec 不查环 (只查 unknown dep), 但 a→b 已有 b 才能引,
+    # 所以构 cycle 必须用 ChainSpec 直传; 走 parse 路径只能拼"未知 dep" 错. 这里用 unknown dep:
+    bad_spec = {"nodes": [{"id": "a", "goal": "g", "depends_on": ["nonexistent"]}]}
+    with _pytest.raises(RuntimeError, match="chain spec 错.*depends_on"):
+        await mcp_mod.web_agent_run_chain(spec=bad_spec, ctx=None)
+
+
+async def test_web_agent_run_chain_missing_secret_becomes_node_exception_marker(
+    monkeypatch, reset_run_lock, fake_chrome_alive,
+):
+    """V0.29.2 hidden #1 (subagent 揭): MissingSecretError 被 run_chain blanket except 吞 → 节点
+    result 含 CHAIN_NODE_EXCEPTION:MissingSecretError marker, success=False, 默 abort 整 chain.
+    本测验当前 V0.29.2 行为 (V0.30 加 pre-flight 真 abort + raise 时改本测)."""
+    from web_agent.vault import MissingSecretError
+
+    async def fake_run_task(goal, **kw):
+        raise MissingSecretError("ANTHROPIC_API_KEY")
+
+    monkeypatch.setattr("web_agent.mcp_server.cli_run_task", fake_run_task)
+
+    spec = {"nodes": [
+        {"id": "a", "goal": "g1"},  # 默 on_failure=abort
+        {"id": "b", "goal": "g2", "depends_on": ["a"]},
+    ]}
+
+    result = await mcp_mod.web_agent_run_chain(spec=spec, ctx=None)
+
+    # chain abort (a fail + on_failure=abort default)
+    assert result["completed"] is False
+    assert len(result["node_results"]) == 1  # b 不跑
+    nr_a = result["node_results"][0]
+    assert nr_a["success"] is False
+    assert "CHAIN_NODE_EXCEPTION" in nr_a["result"]
+    assert "MissingSecretError" in nr_a["result"]
+    assert "ANTHROPIC_API_KEY" in nr_a["result"]

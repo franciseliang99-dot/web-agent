@@ -2,6 +2,87 @@
 
 All notable changes to web-agent. 版本号遵循 SemVer 简化形式（V<major>.<minor>.<patch>）。
 
+## [0.29.2] - 2026-05-10
+
+### Add (V0.29 W6-C 系列 commit 3/4 — mcp tool web_agent_run_chain 接 spec dict inline)
+
+V0.29.0 chain.py 纯函数 + V0.29.1 async run_chain + cli web-agent-chain 之上, 加 mcp tool 让
+Claude Desktop 端跨进程调 chain (spec dict inline 不接文件路径, mcp client 不共享 fs).
+
+### Plan subagent 6 决策点全采纳
+
+- **A elicit retry**: V0.29.2 不复用 V0.27.4 retry — 任 node 缺 API key → 节点 result 含
+  `CHAIN_NODE_EXCEPTION:MissingSecretError` marker (run_chain blanket except 吞), success=False,
+  按 on_failure 处理 (默 abort 整 chain). V0.30 加 chain pre-flight 真 abort + reraise.
+- **B safety_approval_cb**: closure bind 在 `_chain_run_task_fn` 内 (跟 V0.18.0 _elicit_safety
+  同模式, ctx 闭包共享给 chain 内所有 node). 不破 V0.29.1 RunTaskFn Protocol.
+- **C progress_cb**: V0.29.2 仅 chain-level (`on_node_done_cb` 包 ctx.report_progress(idx, total, msg)),
+  不双层. V0.30 加 (idx*100+step, total*100) 虚拟 scale.
+- **D input schema**: spec dict + max_total_wallclock_s + capability_hint. **拒** start_url
+  (每 node 独立 goal — Chrome 当前 tab 接力是 chain 契约).
+- **E spec validation**: ChainSpecError/ChainCycleError → reraise as RuntimeError("chain spec 错: ...")
+  让 client 看 isError + 友好 msg (不暴 ValueError 子类).
+- **F 测试**: 5 测 + 1 bonus hidden #1 回归 (CHAIN_NODE_EXCEPTION marker 行为锁)
+
+### subagent 揭关键 hidden #1
+
+`MissingSecretError` 被 `run_chain` chain.py:296 blanket `except Exception` 吞 → 转
+`CHAIN_NODE_EXCEPTION:MissingSecretError:ANTHROPIC_API_KEY 未设置 ...` 字符串. Decision A 期望
+abort + reraise 但实际不会 — 节点 result 标 fail, chain 按 on_failure (默 abort) 处理.
+**V0.29.2 选 document-and-accept 路径** (subagent 推, V0.29.2 简单), 加测验当前行为给 V0.30
+pre-flight 真 abort 改时回归保护.
+
+### Changed
+
+- `src/web_agent/mcp_server.py` +90 行:
+  - imports 加 chain (ChainResult/ChainNodeResult/3 Exception/parse_chain_spec/run_chain)
+  - `web_agent_run_chain(spec: dict, max_total_wallclock_s, capability_hint, ctx) -> dict`:
+    `_check_chrome_alive` → routing select_provider (capability_hint) → V0.18.0 _elicit_safety
+    closure → parse_chain_spec (catch ChainSpecError/Cycle reraise RuntimeError) → closure
+    `_chain_run_task_fn` 包 cli_run_task (provider/safety_cb bind) → `_on_node_done` 包
+    ctx.report_progress chain-level → `async with _RUN_LOCK: run_chain(...)` → `_chain_result_to_dict`
+  - `_chain_result_to_dict(r: ChainResult) -> dict` JSON-safe 手动 asdict 防 FastMCP nested
+    dataclass 序列化不稳
+- `tests/test_mcp_server.py` 改 1 + 加 5:
+  - `test_list_tools_returns_three` → `test_list_tools_returns_four` (扩 expected set 加 web_agent_run_chain)
+  - `test_web_agent_run_chain_runs_all_nodes_with_var_substitution` 集成 (var 传递 + 返 dict 格式)
+  - `test_web_agent_run_chain_passes_safety_cb_to_each_node` (chain 内 safety_cb 同闭包共享)
+  - `test_web_agent_run_chain_chain_level_progress_cb` (ctx.report_progress 每 node 一次 + 参数)
+  - `test_web_agent_run_chain_invalid_spec_raises_runtimeerror` (empty + unknown dep)
+  - **bonus** `test_web_agent_run_chain_missing_secret_becomes_node_exception_marker` 锁 hidden #1 行为
+
+### V0.29 W6-C 系列进度 (3/4)
+
+| ver | 状态 | 节点 |
+|-----|------|------|
+| V0.29.0 | ✅ | chain.py 纯函数 + 22 测 |
+| V0.29.1 | ✅ | async run_chain + cli wire web-agent-chain (8 测) |
+| V0.29.2 | ✅ | 本提交 — mcp tool web_agent_run_chain (6 测) |
+| V0.29.3 | 待 | eval --chain + 2-3 chain corpus + chain_completion_rate (验 reflection 跨 node 污染最大未知) |
+
+### 5 隐藏风险 (subagent 提前识别)
+
+1. **MissingSecretError swallow** (本 commit handled): document-and-accept, V0.30 pre-flight 真 abort
+2. **spec validation 同步阻塞 event loop**: parse_chain_spec 是 dict walk, 1000 node 几 ms 可接受;
+   V0.29 软 cap 限 linear, 文档化
+3. **ctx.elicit 跑慢吞 wallclock**: chain.max_total_wallclock_s 含 elicit 等待时间 — V0.29.2 不修,
+   docstring 警示
+4. **_RUN_LOCK 长 chain 阻塞**: chain 期 _RUN_LOCK 持有 30 min 阻塞其他 web_agent_run, intentional
+   (Chrome 单 tab 契约), 跟 V0.16.1 同语义
+5. **ChainResult JSON 序列化**: FastMCP nested dataclass schema gen 不稳 → 手动 `_chain_result_to_dict`
+
+### Compatibility
+
+- 老 caller 0 改 — 新 mcp tool + 新公共 helper, 不改老 API
+- mypy strict 0 (43 src); ruff 0; pytest **627 + 17 skip** (V0.29.1 622+17 → +5 V0.29.2 测;
+  注 list_tools 测原 1 改 1 net 0, 加 5 新 = 净 +5)
+- 真 chromium 15/15 全过 (无新)
+
+### Why patch (V0.29.2) 不 minor
+
+- V0.29 主题 minor bump 已发生在 V0.29.0; V0.29.1+ patch 累加 runner / mcp / eval
+- 跟 V0.21.x/V0.27.x/V0.28.x 系列 patch 风格一致
+
 ## [0.29.1] - 2026-05-10
 
 ### Add (V0.29 W6-C 系列 commit 2/4 — chain runner async + cli wire web-agent-chain entry)
