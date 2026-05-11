@@ -19,6 +19,10 @@ class Step:
     action_type: str  # click / type / scroll / extract / done
     action_args: dict[str, Any]
     observation: str = ""
+    # V0.33.1: per-step token cost (修 V0.26.2 silent bug #14 — last_usage × len(steps) 高估,
+    # prompt cache 命中后第 2+ step input_tokens 大降, 改 per-step 真累加从 client.last_usage 读).
+    input_tokens: int = 0
+    output_tokens: int = 0
 
     def for_llm(self) -> dict[str, Any]:
         """给 LLM 看的精简版（不带截图、observation 截断）。"""
@@ -57,10 +61,19 @@ def init_db(db_path: Path) -> sqlite3.Connection:
             action_args TEXT,
             screenshot_path TEXT,
             observation TEXT,
+            input_tokens INTEGER DEFAULT 0,
+            output_tokens INTEGER DEFAULT 0,
             PRIMARY KEY (task_id, step)
         )
         """
     )
+    # V0.33.1: ALTER 兼容老 db (V0.33.0 之前 schema 缺 token 列). sqlite ADD COLUMN 幂等性靠
+    # try/except (重复 ALTER raise OperationalError "duplicate column").
+    for col in ("input_tokens", "output_tokens"):
+        try:
+            conn.execute(f"ALTER TABLE steps ADD COLUMN {col} INTEGER DEFAULT 0")
+        except sqlite3.OperationalError:
+            pass  # column 已存 (新 db CREATE 时已加 / 老 db 之前 ALTER 过)
     conn.execute(
         """
         CREATE TABLE IF NOT EXISTS tasks (
@@ -82,8 +95,12 @@ def write_step(
     s: Step,
     screenshot_path: str = "",
 ) -> None:
+    # V0.33.1: 加 input_tokens/output_tokens 列 INSERT (per-step token 累加修 silent bug #14)
     conn.execute(
-        "INSERT OR REPLACE INTO steps VALUES (?,?,?,?,?,?,?,?)",
+        "INSERT OR REPLACE INTO steps "
+        "(task_id, step, ts, thought, action_type, action_args, screenshot_path, "
+        "observation, input_tokens, output_tokens) "
+        "VALUES (?,?,?,?,?,?,?,?,?,?)",
         (
             task_id,
             s.step,
@@ -93,6 +110,8 @@ def write_step(
             json.dumps(s.action_args, ensure_ascii=False),
             screenshot_path,
             s.observation,
+            s.input_tokens,
+            s.output_tokens,
         ),
     )
     conn.commit()

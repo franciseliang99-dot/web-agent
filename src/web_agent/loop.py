@@ -569,6 +569,9 @@ async def run_react_loop(
             transient_retries = 0
             action: Action | None = None
             last_error: Exception | None = None
+            # V0.33.1: 捕 plan() 后 last_usage 给 Step 用 (per-step 真累加, 修 V0.26.2 silent bug #14)
+            step_input_tokens = 0
+            step_output_tokens = 0
             for attempt in range(retry_max + 1):  # 第 0 次是首发, 1..retry_max 是 retry
                 try:
                     action = await client.plan(
@@ -576,6 +579,12 @@ async def run_react_loop(
                         tabs=tabs, current_idx=active_idx,
                         cross_origin_hosts=cross_origin_hosts,
                     )
+                    # V0.33.1: capture 本次 plan call 的 token usage (含 retry — 第 N 次成功的为准).
+                    # last_usage None 时 (mock client / 老 client 不支持) 保持 0.
+                    _usage = getattr(client, "last_usage", None)
+                    if _usage is not None:
+                        step_input_tokens = getattr(_usage, "input_tokens", 0)
+                        step_output_tokens = getattr(_usage, "output_tokens", 0)
                     break  # 成功跳出 retry loop
                 except Exception as e:
                     last_error = e
@@ -849,6 +858,9 @@ async def run_react_loop(
                 action_type=action.type,
                 action_args=action_args,
                 observation=obs,
+                # V0.33.1: per-step token 真累加 (修 V0.26.2 silent bug #14 — last_usage × N 高估).
+                input_tokens=step_input_tokens,
+                output_tokens=step_output_tokens,
             )
             trace.append(step)
             write_step(conn, task_id, step, str(shot_path))

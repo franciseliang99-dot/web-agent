@@ -2,6 +2,76 @@
 
 All notable changes to web-agent. 版本号遵循 SemVer 简化形式（V<major>.<minor>.<patch>）。
 
+## [0.33.1] - 2026-05-11
+
+### Fix (V0.33 E 性能优化系列 2/5 — per-step token accumulator 修 V0.26.2 silent bug #14)
+
+V0.33.0 token baseline framework 铺底后, 本提交真改 trace + loop + runner 把
+`last_usage × len(steps)` 估算法换成 per-step `sum(step.input_tokens)` 真累加.
+
+### Bug 复盘: V0.26.2 silent bug #14 (4 commit 后才被 Plan subagent 揭)
+
+**症状**: `eval/runner.py` 算 token cost 用 `last_usage.input_tokens × len(trace_steps)` —
+末次 plan() 调用的 `input_tokens` × step 数. 假设每 step token 恒定.
+
+**真因**: Anthropic prompt cache (ephemeral 5min) 命中后第 2+ step `input_tokens` 大降 (~70%).
+`last_usage` 是末次 call (通常 cache hit 后稳态), × N → **高估**首 step cache miss 大头 +
+**漏算** cache miss 阶段方差. baseline 数据失真, A/B compare 误判.
+
+**为什么 4 commit (V0.26.2 → V0.30.5) 才发现**: V0.26.2 自评注释 "精度 ~80%" 写死, 后续
+没有谁回头审; V0.30.3 修 vcr (silent bug #11) 时只看了 cassette 真接, 没顺便审 token 算法;
+V0.33 Plan subagent 系统性审 V0.26-V0.32 整链时才挖出.
+
+**修法 (V0.33.1)**:
+
+| 层 | 改动 | 行 |
+|----|------|----|
+| `trace.Step` | `input_tokens / output_tokens` 字段 (default 0, frozen-compat) | +5 |
+| `trace.init_db` | schema 加 2 列 + ALTER 兼容老 db (try/except OperationalError) | +9 |
+| `trace.write_step` | INSERT 8→10 列, 显式列名防 schema drift | +5 |
+| `loop.run_react_loop` | plan() 成功后 capture client.last_usage → 进 Step | +12 |
+| `eval.runner._read_trace_steps` | SELECT 加 token 列 + COALESCE(NULL→0) | +5 |
+| `eval.runner.run_one` | `last_usage × N` → `sum(s.input_tokens for s in trace_steps)` | -8/+8 |
+| `tests/test_token_per_step.py` **新** | 4 测 (per-step / legacy 对比 / ALTER 兼容 / no last_usage) | +220 |
+| 总计 | | ~270 LOC |
+
+### Changed
+
+- `src/web_agent/trace.py`:
+  - `Step` dataclass `+input_tokens: int = 0, +output_tokens: int = 0` (向下兼容老 caller)
+  - `init_db`: schema CREATE 加列, 老 db 走 ALTER 兼容 (sqlite ADD COLUMN 幂等靠 try/except)
+  - `write_step`: INSERT 显式列名 (10 位 placeholder), 落盘 token 字段
+- `src/web_agent/loop.py`:
+  - `run_react_loop` plan() 调用前后加 `step_input_tokens / step_output_tokens` local var
+  - retry loop 内 plan() 成功后 `getattr(client, "last_usage", None)` capture (含 retry)
+  - 主 step Step(...) 构造传 `input_tokens / output_tokens=` (Step L845 success path)
+  - LLM_FAILED step (L598) 默 0 (本次 plan() raise 没产生有效 usage, 合理)
+- `eval/runner.py`:
+  - `_read_trace_steps` SELECT 加 `COALESCE(input_tokens, 0), COALESCE(output_tokens, 0)`
+  - `run_one` 算 token: `in_tok = sum(s.get("input_tokens", 0) for s in trace_steps)` 替 legacy
+  - V0.26.2 注释更新: "estimate" → "真累加 (修 silent bug #14)"
+- `tests/test_token_per_step.py` **新** 4 测:
+  - `test_per_step_tokens_written_to_trace_db` — 模 cache-hit 阶梯 (10000/2000/1500), 验 sqlite 各 step 真值
+  - `test_legacy_estimate_overstates_vs_real_sum` — 真 sum 13500 vs legacy 公式 4500, 不等
+  - `test_legacy_db_alter_compat` — 手建老 schema → init_db ALTER → 老行 COALESCE 0 + 新 INSERT 落盘
+  - `test_step_default_tokens_zero_when_no_last_usage` — client 无 last_usage 不 raise, Step 默 0
+
+### Verify
+
+- `uv run pytest -x` → **713 passed, 18 skipped** (含新 4 测)
+- `uv run ruff check` → all clean (一开始 unused `import json` 删完通过)
+- `uv run mypy src/web_agent/trace.py src/web_agent/loop.py eval/runner.py` → no issues
+
+### V0.33 系列进度
+
+| ver | 状态 | scope |
+|-----|------|-------|
+| V0.33.0 | ✅ | token baseline framework + CLI subcommand |
+| **V0.33.1** | ✅ 本提交 | per-step token accumulator 修 V0.26.2 silent bug #14 |
+| V0.33.2 | 待 | SoM 字段 lean mode opt-in (WEB_AGENT_SOM_FIELDS=lean) |
+| V0.33.3 | 待 | screenshot WebP opt-in (WEB_AGENT_SCREENSHOT_FORMAT=webp) |
+| V0.33.4 | 待 | real_world baseline 双跑 + 系列总结 |
+
 ## [0.33.0] - 2026-05-11
 
 ### Add (V0.33 E 性能优化系列开篇 1/5 — token baseline framework + console_script + #13/#14)

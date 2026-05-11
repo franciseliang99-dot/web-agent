@@ -97,9 +97,11 @@ async def run_one(
     db_path / screenshots_dir 跟 cli.py 同 default 但 caller 应该传 task-isolated 路径
     (eval/data/<run_id>/) 防 baseline run 之间 trace 互相覆盖.
 
-    V0.26.2: 跑前 reset client.last_usage = None (mutable state cross-task 残留风险);
-    跑后从 trace 拿 step 数 + 假设每 step 1 plan call → step × last_usage 估总 token.
-    精确累加需要在 loop 每 step 后读 last_usage 累加 (V0.26.2 简化: 末次 last_usage × step 数).
+    V0.26.2: 跑前 reset client.last_usage = None (mutable state cross-task 残留风险).
+
+    V0.33.1: token 累加从 last_usage × N 估算改为 sum(step.input_tokens for step in trace_steps)
+    真累加 (修 V0.26.2 silent bug #14 — Anthropic prompt cache 命中后第 2+ step input_tokens 大降,
+    末次 × N 高估真实成本). last_usage 仍 reset (legacy 兼容 mock client / 老 client).
     """
     run_id = uuid.uuid4().hex[:8]
     t_start = time.time()
@@ -193,15 +195,15 @@ async def run_one(
 
     trace_steps = _read_trace_steps(db_path, web_agent_task_id)
     pred_result = predicate.evaluate(final_result, trace_steps)
-    # V0.26.2: token cost 估算 — last_usage 是末次 call 用量, × step 数估总用量 (假设
-    # cache hit 后 N step 用量近似). V0.26.3 cassette 路径会从 cassette 累加精确值取代估算.
-    last_usage = getattr(client, "last_usage", None)
-    if last_usage is not None and len(trace_steps) > 0:
-        in_tok = last_usage.input_tokens * len(trace_steps)
-        out_tok = last_usage.output_tokens * len(trace_steps)
+    # V0.33.1: per-step token 真累加 (修 V0.26.2 silent bug #14 — last_usage × N 估算高估;
+    # Anthropic prompt cache 命中后第 2+ step input_tokens 大降, 末次 × N 高估真实成本).
+    # _read_trace_steps 返 dict 已含 input/output_tokens 列 (trace.py V0.33.1 加 + ALTER 兼容老 db).
+    # 老 db 行 (V0.33.0 之前) 全 0, 真累加偏低 — 重跑 baseline 后正常.
+    in_tok = sum(s.get("input_tokens", 0) for s in trace_steps)
+    out_tok = sum(s.get("output_tokens", 0) for s in trace_steps)
+    if in_tok > 0 or out_tok > 0:
         in_cost, out_cost = cost_usd(client.model, in_tok, out_tok)
     else:
-        in_tok = out_tok = 0
         in_cost = out_cost = 0.0
     return TaskMetric(
         task_id=task.task_id,
@@ -445,14 +447,19 @@ def _last_task_id(db_path: Path) -> str:
 
 
 def _read_trace_steps(db_path: Path, web_agent_task_id: str) -> list[dict[str, Any]]:
-    """V0.26.0: 拿指定 task_id 的 trace.steps list[dict] 让 predicate evaluate 时可看 step 历史."""
+    """V0.26.0: 拿指定 task_id 的 trace.steps list[dict] 让 predicate evaluate 时可看 step 历史.
+
+    V0.33.1: SELECT 加 input_tokens/output_tokens (per-step token 真累加修 silent bug #14).
+    COALESCE 兼容老 db 行 (V0.33.0 之前 INSERT 没传 token, 列 NULL → 转 0).
+    """
     if not db_path.exists() or not web_agent_task_id:
         return []
     conn = sqlite3.connect(db_path)
     try:
         rows = conn.execute(
-            "SELECT step, action_type, action_args, observation FROM steps "
-            "WHERE task_id=? ORDER BY step",
+            "SELECT step, action_type, action_args, observation, "
+            "COALESCE(input_tokens, 0), COALESCE(output_tokens, 0) "
+            "FROM steps WHERE task_id=? ORDER BY step",
             (web_agent_task_id,),
         ).fetchall()
     except sqlite3.OperationalError:
@@ -461,7 +468,7 @@ def _read_trace_steps(db_path: Path, web_agent_task_id: str) -> list[dict[str, A
         conn.close()
     return [
         {"step": r[0], "action_type": r[1], "action_args": json.loads(r[2]) if r[2] else {},
-         "observation": r[3] or ""}
+         "observation": r[3] or "", "input_tokens": r[4], "output_tokens": r[5]}
         for r in rows
     ]
 
