@@ -2,6 +2,148 @@
 
 All notable changes to web-agent. 版本号遵循 SemVer 简化形式（V<major>.<minor>.<patch>）。
 
+## [0.48.2] - 2026-05-11
+
+### Feat (V0.48 动态 fingerprint pool 系列收尾 3/3 — cassette 真测 sink + 真发现 #26 + V0.49 inventory)
+
+用户授权 V0.48.2 真跑 (跟 V0.39 stealth probe / V0.47.x.1 cassette 同模式 maintainer 授权).
+3 站 cassette 真跑完, escalated() 自动判**全 False → sink pool 决策**. V0.48 plan reframe 真测
+推翻 V0.47.4 隐式假设 "reuse 检测在 V0.30 之上仍真问题".
+
+### Changed (~3 cassette JSON + ~150 doc LOC, 0 src 改)
+
+- 3 cassette JSON 提交 (autonomous 跑出 ~10 min real chromium 真访 3 站 × 10 visit):
+  - `data/stealth_probes/v0.48-reuse-cassette-sannysoft_com_*.json`
+  - `data/stealth_probes/v0.48-reuse-cassette-cloudflare_com_*.json`
+  - `data/stealth_probes/v0.48-reuse-cassette-akamai_com_*.json`
+- `CHANGELOG.md` V0.48.2 entry (本)
+- `pyproject.toml` / `__init__.py` 0.48.1 → 0.48.2
+- `uv.lock` 同步
+
+### 真测结果 (3 站 × 10 visit cassette)
+
+| 站 | visit 0 baseline | visit 9 终态 | escalated()? | 决策 |
+|----|------------------|-------------|--------------|------|
+| sannysoft.com | medium (`server: cloudflare`, 200) | medium (200, server cloudflare) | **False** | stable |
+| cloudflare.com | medium (`server: cloudflare`, 200) | medium (200, server cloudflare) | **False** | stable |
+| akamai.com | **high (status 403)** | high (403) | **False** (但 baseline 已 403) | stable + IP-level baseline 拦 |
+
+→ **3 站全 stable → escalated() 全 False → SINK pool 决策** (按 V0.48.0 门槛 "3 站全 stable → sink").
+
+### 真发现 #26 — fingerprint pool 不是 V0.30 之上 ROI 路径; IP-level baseline 拦才是
+
+**Pattern**: V0.47.4 推荐 "V0.48 先做 cassette 真测证 reuse 检测在 V0.30 之上仍真问题, 再 V0.48.x
+实施 pool". V0.48.2 真测**双端推翻这个隐式假设**:
+- ✗ **reuse 检测不是真问题**: V0.30.0 sannysoft 96.8% baseline 之上, 复访 10 次不 escalate (3 站
+  全 stable). cloudflare/sannysoft 营销首页对 headless chromium baseline 不拦, akamai 直接
+  baseline 403 (不依赖 reuse).
+- ✓ **真实问题 = IP-level baseline 拦**: sandbox / datacenter IP footprint 已让 akamai 直接 403.
+  这是 fingerprint pool **不能解决的** — 因 fingerprint pool 解决"同 fingerprint 复访被关联"问题,
+  但 akamai 不需 fingerprint 关联, 单看 IP 段就拦. 解决路径 = **代理层 (V0.49 候选, maintainer 红线)**.
+
+**与 V0.47.4 推荐对照** (诚实 catch):
+- V0.47.4 写 "V0.48 先 cassette 真测证 ROI 再 pool, fixture 不出真问题就跳过转 V0.49"
+- V0.48.2 真测验证 V0.47.4 "fixture 不出真问题" 路径成真 → **fingerprint pool sink + V0.49 别主题**
+- conservative 顺序 (V0.48.0 plan) 在 V0.48.2 验证有效, 避免了 V0.48.3-4 烧 LOC + 测时间 in
+  hypothetical ROI
+
+**与 V0.46 模式比较** (反向):
+- V0.46 plan 推保守 (拒 type-only detector), V0.46.1 真测发现保守不够扩 scope
+- **V0.48 plan 推 implementation, V0.48.2 真测发现 ROI 零反向 sink**
+- 共同点: **plan 假设必须真测验证, 任一方向 (激进 / 保守 / implementation) 都不能凭假设**
+
+(累计真发现至 V0.48: 26 个; V0.48 系列 +1: #26 fingerprint pool ROI 零 + 真实问题 IP-level.)
+
+### V0.48 系列回顾 (3 commit autonomous, sink 路径)
+
+| ver | scope | LOC | 状态 |
+|-----|-------|-----|------|
+| V0.48.0 | audit doc + plan + decision 门槛 (conservative 顺序) | ~180 doc | ✅ |
+| V0.48.1 | cassette test infra + escalated() decision 纯函数 + 12 fast unit | ~270 test | ✅ |
+| **V0.48.2** | 真跑 cassette + escalated 自动判 + sink + 真发现 #26 + 系列收尾 | ~150 doc + 3 cassette JSON | ✅ 本 |
+
+V0.48 fingerprint pool 系列闭环 (3 commit, sink 路径, 跟 V0.43 R / V0.45 节奏一致). conservative
+顺序 (V0.48.0 plan) 成功避免烧 LOC implementing hypothetical pool.
+
+### V0.34 教训累计应用至 V0.48 (18 系列贯彻)
+
+| 系列 | commit | 教训应用 | 真发现 |
+|------|--------|---------|--------|
+| V0.34 F1 | 6 | 真测被动 catch | #15 #16 #17 |
+| V0.35 A | 4 | fixture micro experiment | 0 |
+| V0.36 I | 4 | 现状叙事推翻 | #18 |
+| V0.37 B' | 4 | infra 准备 | 0 (deferred) |
+| V0.38 F2 | 4 | retrospective 预测 | #19 |
+| V0.39 G | 2 | baseline 即时 withdraw | #20 |
+| V0.40 A' | 3 | 每 fixture probe | 0 (deferred) |
+| V0.41 C | 3 | 真测 db schema → reframe | #21 |
+| V0.42 D | 4 | 真测 SDK + image cache miss → reframe | 0 (待 maintainer) |
+| V0.43 R | 3 | audit ARCHITECTURE 先于 cleanup + per-fixture 双向数据 | #22 + #23 |
+| V0.44 W6-A | 4 | 历史 plan subagent 假设 audit + 真测双端推翻 | #24 + #25 |
+| V0.45 | 3 | 数据驱动 conservative fix scope, 拒 subagent 激进 plan | 0 (#24 fix) |
+| V0.46 | 3 | plan 假设双向真测 (V0.45 拒激进, V0.46 真测发现保守不够) | 0 (#25 sub fix) |
+| V0.47 | 5 | 第三方付费 / API key 类武器在 autonomous scope 边界停手 | 0 (新能力实现) |
+| **V0.48** | **3** | **plan 推 implementation, 真测发现 ROI 零反向 sink** (跟 V0.34 F1 67-74% 真测 ~3% 同模式) | **#26** |
+
+**V0.48 教训应用新维度**: **plan agent 推 implementation, 真测先于 implementation 验证 ROI** —
+跟 V0.34 F1 同模式, 防 implementation 烧 LOC + 测时间 in hypothetical ROI. V0.48.0 conservative
+顺序 (先 cassette 真测) 成功避免了 V0.48.3-4 实施 pool (~150 src + ~100 test estimate). 真测
+代价 ~10 min (3 cassette real chromium), 沉淀真发现 #26 + 节省 ~250 LOC 假设实施.
+
+### 真发现 sink 累计 (V0.34 → V0.48, 26 个)
+
+模式分类更新:
+- 真测推翻 plan agent perf / ROI 估算 (6): #13 #17 #18 #19 #23 **#26** (V0.48 + 1)
+- 真测发现 syntax/security 边界 (2): #15 #16
+- 文档 stale / agent 偷懒 (3): #20 #22 #24
+- 生产 schema vs 设计层 drift (1): #21
+- 历史 plan subagent 假设推翻 (1): #25
+
+V0.48 后 fix 状态:
+- #17 catch only (chromium 物理限永久 NO-GO 加固)
+- #21 ✅ V0.44.2 / #24 ✅ V0.45.1 / #25 ✅ V0.46.1
+- **#26 ✅ sink pool** (真测推翻假设, 不实施)
+- 其他: 部分 fix / mitigation / NO-GO
+
+### V0.49 主题候选 (V0.48 完后 surface, **代理层 highlighted**)
+
+V0.48.2 真发现 #26 直接催生 V0.49 高 ROI 候选:
+- **数据中心代理 / 住宅代理接入** (env `WEB_AGENT_PROXY` + chromium `--proxy-server` flag +
+  烧 $ + 测 akamai 类 baseline 403 站接代理是否绕过) **首选** — V0.48.2 真发现 #26 直接证: IP-level
+  baseline 拦才是 V0.30 之上真问题, fingerprint pool 不是
+- **Captcha Solver API** (2Captcha 等, captcha.py V0.16 立场反向)
+- **指纹浏览器 CDP launch** (Multilogin / AdsPower, 但 V0.48.2 已 sink pool, 指纹浏览器 ROI 同
+  fingerprint pool 边际 — 真问题在 IP 不在 fingerprint, 转弱候选)
+- V0.46.2 inventory: delete/remove rule cleanup / send amount co-signal / type-only anti_loop /
+  A'' V0.40 corpus 再扩 / V0.42 housekeeping / 其他
+
+**已闭环主题** (V0.48 后):
+- F sub-route (F1+F2 ROI 推翻; V0.43 R 加固 #17 物理限)
+- G stealth (96.8% 接近 ceil; V0.47 加 network 侧 protection sense 互补)
+- A/A' real-world corpus (13 task)
+- C 长期记忆 cross-task 学习
+- D LLM cache 优化 (4 维矩阵)
+- R re-investigation (V0.43, spp 真测 sink #23)
+- W6-A reflect path audit (V0.44, #24/#25 双向真发现 + #21 真 fix)
+- safety predicate fix (V0.45, #24 真 fix)
+- anti_loop detector signal 扩 (V0.46, #25 sub-finding 真 fix)
+- 防护识别 + 学习记忆 (V0.47, autonomous L1+L2+L3 + Router 学习)
+- **动态 fingerprint pool (V0.48, cassette 真测 sink pool + 真发现 #26 IP-level baseline 才是真问题)**
+
+**未推** (deferred maintainer):
+- V0.37.4 / V0.40.x.1 / V0.41.x.1 / V0.42.x.1 / V0.44.x.1 / V0.46.x.1 / V0.47.x.1: 真录 cassette
+  + 真测验证 (ANTHROPIC_API_KEY 红线 / chromium 真跑)
+- V0.36.2 / V0.41 C5: housekeeping retention 决策红线
+- **V0.49 代理接入** (用户授权 + 烧 $)
+
+(不带 ROI 估算 — V0.34 教训第 18 次应用: 项目方向 ROI 假设需 user 输入而非 Claude 自决.)
+
+### Verify
+
+- `uv run pytest` → **951 passed, 28 skipped** (V0.48.1 状态; V0.48.2 跑 3 real probe 写 cassette
+  但不改 fast unit count)
+- 0 src 改 → 0 ruff/mypy 重检需求
+
 ## [0.48.1] - 2026-05-11
 
 ### Feat (V0.48 动态 fingerprint pool 2/N — cassette test infra + escalated() decision 纯函数)

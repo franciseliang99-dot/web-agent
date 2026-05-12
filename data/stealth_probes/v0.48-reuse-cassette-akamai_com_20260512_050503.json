@@ -1,0 +1,116 @@
+{
+  "domain": "akamai.com",
+  "visits": [
+    {
+      "visit_idx": 0,
+      "level": "high",
+      "signal": {
+        "server": "",
+        "status": 403,
+        "cookies": [],
+        "cf_ray": "",
+        "captcha_vendor": ""
+      }
+    },
+    {
+      "visit_idx": 1,
+      "level": "high",
+      "signal": {
+        "server": "",
+        "status": 403,
+        "cookies": [],
+        "cf_ray": "",
+        "captcha_vendor": ""
+      }
+    },
+    {
+      "visit_idx": 2,
+      "level": "high",
+      "signal": {
+        "server": "",
+        "status": 403,
+        "cookies": [],
+        "cf_ray": "",
+        "captcha_vendor": ""
+      }
+    },
+    {
+      "visit_idx": 3,
+      "level": "high",
+      "signal": {
+        "server": "",
+        "status": 403,
+        "cookies": [],
+        "cf_ray": "",
+        "captcha_vendor": ""
+      }
+    },
+    {
+      "visit_idx": 4,
+      "level": "high",
+      "signal": {
+        "server": "",
+        "status": 403,
+        "cookies": [],
+        "cf_ray": "",
+        "captcha_vendor": ""
+      }
+    },
+    {
+      "visit_idx": 5,
+      "level": "high",
+      "signal": {
+        "server": "",
+        "status": 403,
+        "cookies": [],
+        "cf_ray": "",
+        "captcha_vendor": ""
+      }
+    },
+    {
+      "visit_idx": 6,
+      "level": "high",
+      "signal": {
+        "server": "",
+        "status": 403,
+        "cookies": [],
+        "cf_ray": "",
+        "captcha_vendor": ""
+      }
+    },
+    {
+      "visit_idx": 7,
+      "level": "high",
+      "signal": {
+        "server": "",
+        "status": 403,
+        "cookies": [],
+        "cf_ray": "",
+        "captcha_vendor": ""
+      }
+    },
+    {
+      "visit_idx": 8,
+      "level": "high",
+      "signal": {
+        "server": "",
+        "status": 403,
+        "cookies": [],
+        "cf_ray": "",
+        "captcha_vendor": ""
+      }
+    },
+    {
+      "visit_idx": 9,
+      "level": "high",
+      "signal": {
+        "server": "",
+        "status": 403,
+        "cookies": [],
+        "cf_ray": "",
+        "captcha_vendor": ""
+      }
+    }
+  ],
+  "ts": "20260512_050503"
+}

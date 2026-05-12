@@ -1,0 +1,116 @@
+{
+  "domain": "cloudflare.com",
+  "visits": [
+    {
+      "visit_idx": 0,
+      "level": "medium",
+      "signal": {
+        "server": "cloudflare",
+        "status": 200,
+        "cookies": [],
+        "cf_ray": "9fa6e16dbea93753-YVR",
+        "captcha_vendor": ""
+      }
+    },
+    {
+      "visit_idx": 1,
+      "level": "medium",
+      "signal": {
+        "server": "cloudflare",
+        "status": 200,
+        "cookies": [],
+        "cf_ray": "9fa6e17f6cecdc39-YVR",
+        "captcha_vendor": ""
+      }
+    },
+    {
+      "visit_idx": 2,
+      "level": "medium",
+      "signal": {
+        "server": "cloudflare",
+        "status": 200,
+        "cookies": [],
+        "cf_ray": "9fa6e190eefadc39-YVR",
+        "captcha_vendor": ""
+      }
+    },
+    {
+      "visit_idx": 3,
+      "level": "medium",
+      "signal": {
+        "server": "cloudflare",
+        "status": 200,
+        "cookies": [],
+        "cf_ray": "9fa6e1a25b69dc39-YVR",
+        "captcha_vendor": ""
+      }
+    },
+    {
+      "visit_idx": 4,
+      "level": "medium",
+      "signal": {
+        "server": "cloudflare",
+        "status": 200,
+        "cookies": [],
+        "cf_ray": "9fa6e1b0f83adc39-YVR",
+        "captcha_vendor": ""
+      }
+    },
+    {
+      "visit_idx": 5,
+      "level": "medium",
+      "signal": {
+        "server": "cloudflare",
+        "status": 200,
+        "cookies": [],
+        "cf_ray": "9fa6e1c27f99dc39-YVR",
+        "captcha_vendor": ""
+      }
+    },
+    {
+      "visit_idx": 6,
+      "level": "medium",
+      "signal": {
+        "server": "cloudflare",
+        "status": 200,
+        "cookies": [],
+        "cf_ray": "9fa6e1d15c6adc39-YVR",
+        "captcha_vendor": ""
+      }
+    },
+    {
+      "visit_idx": 7,
+      "level": "medium",
+      "signal": {
+        "server": "cloudflare",
+        "status": 200,
+        "cookies": [],
+        "cf_ray": "9fa6e1e03a69dc39-YVR",
+        "captcha_vendor": ""
+      }
+    },
+    {
+      "visit_idx": 8,
+      "level": "medium",
+      "signal": {
+        "server": "cloudflare",
+        "status": 200,
+        "cookies": [],
+        "cf_ray": "9fa6e1ef3b1edc39-YVR",
+        "captcha_vendor": ""
+      }
+    },
+    {
+      "visit_idx": 9,
+      "level": "medium",
+      "signal": {
+        "server": "cloudflare",
+        "status": 200,
+        "cookies": [],
+        "cf_ray": "9fa6e1fe097adc39-YVR",
+        "captcha_vendor": ""
+      }
+    }
+  ],
+  "ts": "20260512_050430"
+}
