@@ -2,6 +2,108 @@
 
 All notable changes to web-agent. 版本号遵循 SemVer 简化形式（V<major>.<minor>.<patch>）。
 
+## [0.44.3] - 2026-05-11
+
+### Doc (V0.44 W6-A reflect path audit 系列收尾 4/4 — V0.34 教训 14 系列累计 + 25 真发现 + V0.45 inventory)
+
+V0.44.0 audit + V0.44.1 cosmetic + V0.44.2 真 fix 已落 (3 commit autonomous). 本提交收尾:
+系列总结 + V0.34 教训 14 系列累计 + V0.45 主题 inventory. 跟 V0.33.4 → V0.43.2 系列收尾同骨架.
+
+### V0.44 系列回顾 (4 commit autonomous)
+
+| ver | scope | LOC | 状态 |
+|-----|-------|-----|------|
+| V0.44.0 | audit doc + 真发现 #24/#25 + plan reframe | ~200 doc | ✅ |
+| V0.44.1 | startup init_reflections_db cosmetic + auditability fix | ~10 src + ~15 test + ~70 doc | ✅ |
+| V0.44.2 | 扩 should_reflect + wire WALLCLOCK + family-aware prompt (#21 真 fix) | ~25 src + ~30 test + ~80 doc | ✅ |
+| **V0.44.3** | 系列收尾 retrospective + V0.45 inventory | ~80 doc | ✅ 本提交 |
+
+V0.44 W6-A reflect path audit 闭环 (4 commit). 比 plan subagent 原推 5 commit 短 1 (SAFETY
+prompt family 不实施 + 真测合并到 V0.44.2 + V0.44.3, 因 SAFETY 真发现 #24 推翻 plan subagent 推).
+
+### V0.44 双向真发现 (#24 + #25)
+
+| # | catch 模式 | 内容 |
+|---|----------|------|
+| **#24** | V0.44.0 trace audit | SAFETY_BLOCK 8 tasks **全是 safety:send-or-pay predicate 假阳性** ('Publish'/'Submit'/'Submit order' 误判). V0.28 subagent A "SAFETY 外因" 推翻 — 实际是 predicate 错, 修 predicate (V0.45) 而非加 reflect |
+| **#25** | V0.44.0 trace audit | WALLCLOCK 1 task **LLM extract loop 死循环** (11 step 同 query 微变化 anti_loop miss). V0.28 subagent A "WALLCLOCK 外因" 推翻 — 实际 plan 缺陷, reflect 有 ROI (V0.44.2 wire) |
+
+V0.44 = 2 真发现 / 4 commit (V0.43 R = 2/3, V0.41 C = 1/3, V0.39 G = 1/2). 高密度系列.
+
+### V0.34 教训累计应用至 V0.44 (14 系列贯彻)
+
+| 系列 | commit | 教训应用 | 真发现 |
+|------|--------|---------|--------|
+| V0.34 F1 | 6 | 真测被动 catch | #15 #16 #17 |
+| V0.35 A | 4 | fixture micro experiment | 0 |
+| V0.36 I | 4 | 现状叙事推翻 | #18 |
+| V0.37 B' | 4 | infra 准备 | 0 (deferred) |
+| V0.38 F2 | 4 | retrospective 预测 | #19 |
+| V0.39 G | 2 | baseline 即时 withdraw | #20 |
+| V0.40 A' | 3 | 每 fixture probe | 0 (deferred) |
+| V0.41 C | 3 | 真测 db schema → reframe | #21 |
+| V0.42 D | 4 | 真测 SDK + image cache miss → reframe | 0 (待 maintainer) |
+| V0.43 R | 3 | audit ARCHITECTURE 先于 cleanup + per-fixture 双向数据 | #22 + #23 |
+| **V0.44 W6-A** | **4** | **历史 plan subagent 假设 audit + 真测双端推翻** | **#24 + #25** |
+
+**V0.44 教训应用新维度**: **N 年前 plan subagent 假设也会 stale, 也需 audit + 真测验证**. V0.28
+subagent A 当时未数据驱动 (V0.28 时还没生产 trace.db). V0.43.0 audit trace.db 87 tasks 后,
+SAFETY 外因 + WALLCLOCK 外因 双端假设推翻. 跟 V0.39 #20 README "72%" 24-month-stale 同模式 —
+**历史 plan subagent 假设是文档, 文档会 stale, agent 偷懒不审 → 错误继承**.
+
+### 真发现 sink 累计 (V0.34 → V0.44, 25 个)
+
+模式分类:
+- 真测推翻 plan agent perf 估算 (5): #13 #17 #18 #19 #23
+- 真测发现 syntax/security 边界 (2): #15 #16
+- 文档 stale / agent 偷懒 (3): #20 #22 #24
+- 生产 schema vs 设计层 drift (1): #21
+- 历史 plan subagent 假设推翻 (1): **#25** (新模式 in V0.44)
+- V0.34 以前历史 (#1-#14): 见 CHANGELOG 早期 entries
+
+### V0.45 主题候选 (V0.44 完后 surface)
+
+V0.44 audit 直接催生 V0.45 高 ROI 候选:
+- **#24 follow-up: safety:send-or-pay predicate 假阳性修复** (高 ROI, 真实生产 8/8 SAFETY 都是
+  假阳性 — V0.44.0 audit 数据驱动 fix, 排除 'Publish'/'Submit'/'Submit order' 等 generic submit
+  文本, 仅拦真 'send'/'pay'/'购买'/'下单' 类) **首选**
+- **#26 候选: anti_loop detector signal 扩** (V0.44.0 #25 WALLCLOCK extract loop catch miss
+  原因: signature 仅比 action_type+raw args, query 字符串轻微变化让 signature 漂移. 应 normalize
+  query/args 文本 noise)
+- A'' V0.40 corpus 再扩 (drag/dialog/upload anti-abuse fixture)
+- V0.42 housekeeping (V0.36.2 + V0.41 C5 deferred 合并)
+- V0.42 后真测 cassette (maintainer 红线)
+- V0.44.x.1: maintainer 真测 1 个 WALLCLOCK task 后 reflections 表行数 ≥ 1 (verify V0.44.2 wire,
+  ANTHROPIC_API_KEY 红线)
+- 其他用户提的方向
+
+**已闭环主题** (V0.44 后):
+- F sub-route (F1+F2 ROI 推翻; V0.43 R 加固 #17 物理限)
+- G stealth (96.8% 接近 ceil)
+- A/A' real-world corpus (13 task)
+- C 长期记忆 cross-task 学习
+- D LLM cache 优化 (4 维矩阵)
+- R re-investigation (V0.43, spp 真测 sink #23)
+- **W6-A reflect path audit (V0.44, #24/#25 双向真发现 + #21 真 fix)**
+
+**未推** (deferred maintainer):
+- V0.37.4 / V0.40.x.1 / V0.41.x.1 / V0.42.x.1 / V0.44.x.1: 真测 cassette / token / reflections
+  写入 (ANTHROPIC_API_KEY + ~$1-2)
+- V0.36.2 / V0.41 C5: housekeeping retention 决策红线
+
+(不带 ROI 估算 — V0.34 教训第 14 次应用: 项目方向 ROI 假设需 user 输入而非 Claude 自决.)
+
+### Changed (~0 src LOC, ~80 doc LOC)
+
+- `CHANGELOG.md` V0.44.3 retrospective entry (本)
+- `pyproject.toml` / `__init__.py` 0.44.2 → 0.44.3
+- `uv.lock` 同步
+
+### Verify
+
+- `uv run pytest` → **854 passed, 25 skipped** (V0.44.2 状态 0 src 改 → 0 测变)
+- 0 src 改 → 0 ruff/mypy 重检需求
+
 ## [0.44.2] - 2026-05-11
 
 ### Feat (V0.44 W6-A reflect path audit 3/4 — 扩 should_reflect 加 WALLCLOCK_EXCEEDED + wire + family-aware prompt)
