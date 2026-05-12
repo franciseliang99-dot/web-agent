@@ -2,6 +2,67 @@
 
 All notable changes to web-agent. 版本号遵循 SemVer 简化形式（V<major>.<minor>.<patch>）。
 
+## [0.45.1] - 2026-05-11
+
+### Feat (V0.45 safety:send-or-pay predicate 假阳性修复 2/3 — regex fix + regression test V0.44 audit 8/8 case)
+
+V0.45.0 plan 落定 conservative scope (删 generic submit|publish|post|order standalone +
+中文 发布|提交). 本提交完整闭环: safety.py regex 改 + test_safety.py 更新 + 新建
+test_safety_v044_regression.py 覆盖 V0.44 audit 真实 8/8 false-pos + 真支付 fixture.
+
+### Changed (~10 src LOC + ~100 test LOC)
+
+- `src/web_agent/safety.py` `_DANGER_BUTTON_PATTERNS` (~10 LOC):
+  - 英文 [0] regex 删 `submit|publish|post` + standalone `order` (保留 `place[ -]order|confirm[ -]?(payment|order)`)
+  - 中文 [1] regex 删 `发布|提交` (保留 `下单|结算|确认订单|确认下单|立即(支付|购买|提现|结算)` 等 specific)
+  - 注释加 V0.45.1 + 真发现 #24 上下文
+- `tests/test_safety.py` parametrize 更新:
+  - L137 `("Submit", True)` → `("Submit", False)` (V0.45.1 释放 over-block 化石断言)
+  - 新加 `("Publish", False)` + `("Post", False)` 防回归
+- `tests/test_safety_v044_regression.py` (新建, ~100 LOC, 24 fast tests):
+  - **False-pos releases** (7 case): Publish / Submit order / Submit / Post / Publish Article / Order History / Sort Order
+  - **True-pos english blocks** (8 case): Pay Now / Confirm Payment / Place Order / Withdraw $500 / Checkout / Buy Now / Authorize Payment / Approve Transfer
+  - **True-pos chinese blocks** (6 case): 立即支付 / 下单 / 确认订单 / 转账 / 立即购买 / 确认支付
+  - **Chinese generic verbs release** (3 case): 发布 / 提交 / 发布文章
+- `pyproject.toml` / `__init__.py` 0.45.0 → 0.45.1
+- `uv.lock` 同步
+- `CHANGELOG.md` V0.45.1 entry (本)
+
+### Decision 门槛验证
+
+| 指标 | V0.45.0 target | V0.45.1 真测结果 |
+|------|----------------|----------------|
+| False-pos (V0.44 audit 8 case) | 0% | **0%** ✅ (7 case 含 V0.44 audit 3 distinct text + 4 防回归全 allow=True) |
+| False-pos (中文 mirror) | 0% | **0%** ✅ (3 case 发布/提交/发布文章全 allow=True) |
+| False-neg (真支付 fixture) | 0% | **0%** ✅ (英文 8 + 中文 6 case 全 allow=False + rule 匹配) |
+
+V0.45.0 plan 写 decision 门槛 (V0.34 教训"先写防 rationalize") 全 honored: false-pos 100% → 0%,
+false-neg 0% 保留.
+
+### V0.45.1 真发现 #24 fix 链路验证
+
+| 阶段 | safety:send-or-pay 真实生产假阳性率 |
+|------|----------------------------------|
+| V0.44.0 catch | 8/8 = 100% (trace.db 87 tasks 中 SAFETY_BLOCK 全 false-pos) |
+| V0.45.0 plan | (无代码改动, plan 准备) |
+| **V0.45.1 真 fix** | **0%** (V0.44 真实 button text + 防回归扩展全 allow=True via 24 regression tests) |
+
+V0.45 R follow-up #24 闭环, V0.45.2 系列收尾.
+
+### Verify
+
+- `uv run pytest tests/test_safety_v044_regression.py -v` → 24 passed (V0.45.1 全)
+- `uv run pytest tests/test_safety.py -v` → 90 passed (含 V0.45.1 加 Submit/Publish/Post 3 new)
+- `uv run pytest` → **880 passed, 25 skipped** (854 + 26 V0.45.1)
+- `uv run ruff check` → clean
+- `uv run mypy` → 0 issues in 52 src files
+
+### V0.45 commit 节奏
+
+- V0.45.0 ✅ audit doc + plan + decision 门槛
+- **V0.45.1** ✅ 本: regex fix + regression test (#24 真 fix)
+- V0.45.2 (next) 系列收尾 retrospective + V0.34 教训 15 累计 + V0.46 inventory
+
 ## [0.45.0] - 2026-05-11
 
 ### Doc (V0.45 safety:send-or-pay predicate 假阳性修复系列开篇 1/3 — #24 follow-up audit + plan)

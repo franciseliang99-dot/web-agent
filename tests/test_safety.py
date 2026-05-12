@@ -134,7 +134,11 @@ def test_upload_auto_approve_wildcard(monkeypatch):
     ("Search", False),
     ("Sender Name", False),  # word boundary 防 "sender" 误撞 "send"
     ("Login", False),
-    ("Submit", True),
+    # V0.45.1: 真发现 #24 fix — 'Submit' generic 动词不再 over-block (V0.44.0 audit 8/8
+    # SAFETY_BLOCK 全是 generic 'Submit'/'Publish'/'Submit order' 假阳性).
+    ("Submit", False),
+    ("Publish", False),  # V0.45.1: demo 'Publish' button 不再误拦
+    ("Post", False),  # V0.45.1: forum/blog post 按钮释放
 ])
 def test_click_button_text_english(text, should_block, monkeypatch):
     monkeypatch.delenv("WEB_AGENT_AUTO_APPROVE", raising=False)

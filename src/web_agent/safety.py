@@ -32,12 +32,18 @@ class SafetyDecision:
 
 # (compiled_regex, rule_name) — 用 \b word boundary 避免 "sender" 误撞 "send"
 # 模块加载时 compile 一次，后续 check() 调用零 compile/cache-lookup 开销
+#
+# V0.45.1: 删 generic 动词 submit|publish|post|order (standalone) 修真发现 #24 假阳性 (V0.44.0
+# audit 8/8 SAFETY_BLOCK 全是这些 generic 动词 over-block — 'Publish' demo button / 'Submit'
+# search / 'Submit order' httpbin pizza form). 保留 place[ -]order / confirm[ -]?order specific
+# 短语. 中文删 发布|提交 同模式. send / 发送 保守保留 (V0.44 audit 无 evidence, V0.46+ scope 如
+# 未来发现 false-pos).
 _DANGER_BUTTON_PATTERNS: list[tuple[re.Pattern[str], str]] = [
     # 英文：发送 / 付款 / 删除 / 转账 / 二次确认 / 授权 / 取消订阅
     (
         re.compile(
-            r"\b(send|submit|publish|post|pay|paypal|checkout|delete|remove|withdraw|transfer|"
-            r"wire|buy|order|purchase|place[ -]order|confirm[ -]?(payment|order)|authorize|"
+            r"\b(send|pay|paypal|checkout|delete|remove|withdraw|transfer|"
+            r"wire|buy|purchase|place[ -]order|confirm[ -]?(payment|order)|authorize|"
             r"approve|agree[ -]and[ -]continue|accept[ -]and[ -]continue)\b",
             re.IGNORECASE,
         ),
@@ -46,7 +52,7 @@ _DANGER_BUTTON_PATTERNS: list[tuple[re.Pattern[str], str]] = [
     # 中文：发送 / 支付 / 删除 / 转账 / 确认订单 / 立即支付 / 授权
     (
         re.compile(
-            r"(发送|发布|提交|支付|付款|删除|确认订单|下单|结算|转账|提款|授权|"
+            r"(发送|支付|付款|删除|确认订单|下单|结算|转账|提款|授权|"
             r"同意.{0,3}继续|立即(支付|购买|提现|结算)|确认支付|确认下单)",
         ),
         "zh-send-or-pay",
