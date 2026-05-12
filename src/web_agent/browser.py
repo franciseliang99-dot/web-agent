@@ -246,6 +246,11 @@ async def connect(
     ctx = browser.contexts[0]
     _attach_popup_listener(ctx)
     _attach_download_listeners(ctx)  # V0.23.2: 跟 popup 同模式 (跨 entry 一次性)
+    # V0.47.1: 装 main-frame response listener 抓防护信号 (cloudflare/akamai/datadome headers +
+    # challenge cookies + 403/429/503 status). 跟 popup/download 同 entry 一次性, V0.47.2 持久化
+    # to memory.db, V0.47.3 inject planner 让 LLM 上下文看到 "本 domain 上次保护等级".
+    from web_agent.protection import attach_protection_listener
+    attach_protection_listener(ctx)
     page = ctx.pages[0] if ctx.pages else await ctx.new_page()
     return browser, ctx, page
 

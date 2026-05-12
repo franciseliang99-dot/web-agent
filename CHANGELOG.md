@@ -2,6 +2,75 @@
 
 All notable changes to web-agent. 版本号遵循 SemVer 简化形式（V<major>.<minor>.<patch>）。
 
+## [0.47.1] - 2026-05-11
+
+### Feat (V0.47 防护识别 + 学习记忆 2/5 — protection.py 新模块 + ctx.on("response") listener + classify 纯函数)
+
+V0.47.0 plan 落定 autonomous scope (L1+L2+L3 分类 + Router 学习). 本提交 = 第一层 implementation:
+`src/web_agent/protection.py` 新模块 + browser.py connect 接 listener. 互补 captcha.py (页面侧 JS
+probe) — 本模块 = network 侧 response listener.
+
+### Changed (~110 src LOC + ~150 test LOC, 全 autonomous, 0 第三方)
+
+- **新建 `src/web_agent/protection.py`** (~140 LOC):
+  - `ProtectionLevel = Literal["low", "medium", "high", "unknown"]`
+  - `ProtectionSignal` frozen + slots dataclass: `server / status / cookies / cf_ray / captcha_vendor`
+  - `_HIGH_PROTECTION_SERVERS` frozenset: cloudflare / akamaighost / akamai / datadome / incapsula
+  - `_HIGH_PROTECTION_COOKIES` frozenset: cf_clearance / datadome / __cfduid / incap_ses / visid_incap / akamai_bot / ak_bmsc
+  - `classify(signal) -> ProtectionLevel` 纯函数: 优先级 status 403/503 → captcha_vendor → cookies → 429 → server → low
+  - `attach_protection_listener(ctx)`: 装 `ctx.on("response")` async handler, 仅 main-frame document, 累积 signal 到 `ctx._web_agent_protection_signals`. 幂等 (跟 popup/download 同 monkey-patch flag 模式)
+- **`src/web_agent/browser.py:connect`** 加 `attach_protection_listener(ctx)` 调用 (跟
+  `_attach_popup_listener` / `_attach_download_listeners` 同 entry 一次性)
+- **新建 `tests/test_protection.py`** (~140 LOC, 27 fast tests):
+  - 2 dataclass tests (frozen+slots / defaults → unknown)
+  - 20 `classify` parametrize matrix (unknown / 5 high status+vendor+cookie / 5 medium 429+server / 4 low)
+  - 2 priority + substring match (cookie/captcha/403 hard signal 优先 / `incap_ses_*` prefix match)
+  - 3 `attach_protection_listener` (init signals / idempotent / preserve existing)
+- **`tests/test_browser.py`** 2 tests 更新:
+  - `test_connect_attaches_popup_listener_on_page_event` 期望 2 → 3 (V0.47.1 加 protection)
+  - `test_connect_popup_listener_idempotent_across_multiple_connects` 同
+- `pyproject.toml` / `__init__.py` 0.47.0 → 0.47.1
+- `uv.lock` 同步
+- `CHANGELOG.md` V0.47.1 entry (本)
+
+### Decision 门槛 (V0.47.0 先写) 验证
+
+| 指标 | V0.47.0 target | V0.47.1 真测结果 |
+|------|----------------|----------------|
+| classify matrix accuracy | unknown / low / medium / high 各等级正确分类 | **100%** ✅ (20 parametrize 全 pass, 含 CF / Akamai / DataDome / Incapsula 高防 server + 7 challenge cookie prefix) |
+| listener idempotent | 同 ctx 多次 attach 仅装 1 次 | **✅** (test_idempotent + test_preserves_existing 全 pass) |
+| pytest | ≥ 898 (V0.46.2 baseline) | **925** ✅ (+27 V0.47.1) |
+| mypy / ruff | clean | **clean** (53 src files, 0 issues) |
+| LOC | < 200 src | ~110 src ✅ (留余地 V0.47.2-3) |
+
+### 真测 fixture 覆盖 (高防 server / cookie / vendor 矩阵)
+
+V0.47.1 fixture 数据来自:
+- **CF**: `server: cloudflare` / cookie `cf_clearance` + `__cfduid` / vendor `cloudflare-turnstile` (captcha.py V0.16 已有 probe)
+- **Akamai**: `server: AkamaiGHost` / cookie `akamai_bot` + `ak_bmsc`
+- **DataDome**: `server: datadome` / cookie `datadome`
+- **Imperva**: `server: incapsula` / cookie `incap_ses_xxxx` (prefix match 测)
+- **Low**: `server: nginx/apache` 不在高防 set, 200/301 status
+
+10 真站 cassette 真测留 **V0.47.x.1 maintainer 红线** (cassette 录制需真 chromium + 真网络, 不烧
+LLM token 但需 maintainer 真跑).
+
+### V0.47 commit 节奏
+
+- V0.47.0 ✅ audit doc + plan + decision 门槛
+- **V0.47.1** ✅ 本: protection.py + listener + 27 fast tests
+- V0.47.2 (next) memory.py `protection_observations` 表 + record/recall
+- V0.47.3 build_inject_string prepend protection level
+- V0.47.4 系列收尾 + V0.48 maintainer inventory
+
+### Verify
+
+- `uv run pytest tests/test_protection.py -v` → 27 passed
+- `uv run pytest tests/test_browser.py -v` → 26 passed (2 V0.47.1 update + 24 既有)
+- `uv run pytest` → **925 passed, 25 skipped** (898 + 27 V0.47.1)
+- `uv run ruff check` → clean
+- `uv run mypy` → 0 issues in **53 src files** (+1 protection.py)
+
 ## [0.47.0] - 2026-05-11
 
 ### Doc (V0.47 防护识别 + 学习记忆系列开篇 1/5 — 文章 3 层能力 audit + autonomous scope 划界 + plan)

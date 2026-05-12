@@ -76,7 +76,8 @@ async def test_connect_no_pages_creates_new_page():
 
 async def test_connect_attaches_popup_listener_on_page_event():
     """V0.21.3: connect 装 ctx.on('page', _popup_notice_handler).
-    V0.23.2: connect 也装 download listener (第 2 个 ctx.on('page')) — 总共 2 个 ctx.on call.
+    V0.23.2: connect 也装 download listener (第 2 个 ctx.on('page')).
+    V0.47.1: connect 也装 protection listener (ctx.on('response')) — 总共 3 个 ctx.on call.
     """
     import inspect
     from web_agent.browser import _popup_notice_handler
@@ -86,15 +87,19 @@ async def test_connect_attaches_popup_listener_on_page_event():
         connect_over_cdp=AsyncMock(return_value=fake_browser),
     ))
     await connect(p, cdp_url="http://x:1")
-    # V0.23.2: popup listener (1) + download listener 用 ctx.on('page') 装新 page handler (1) = 2
-    assert len(fake_ctx._on_calls) == 2, f"应装 2 个 ctx listener (popup + download), got {fake_ctx._on_calls}"
+    # V0.47.1: popup (page, 1) + download (page, 1) + protection (response, 1) = 3
+    assert len(fake_ctx._on_calls) == 3, (
+        f"应装 3 个 ctx listener (popup + download + protection), got {fake_ctx._on_calls}"
+    )
     events = [e for e, _ in fake_ctx._on_calls]
-    assert events == ["page", "page"]
+    assert events == ["page", "page", "response"]
     assert fake_ctx._on_calls[0][1] is _popup_notice_handler
     assert inspect.iscoroutinefunction(_popup_notice_handler), "popup handler 必须 async"
     # 幂等 flag 已落
     assert getattr(fake_ctx, "_web_agent_popup_listener", False) is True
     assert getattr(fake_ctx, "_web_agent_download_listener", False) is True
+    assert getattr(fake_ctx, "_web_agent_protection_listener", False) is True
+    assert fake_ctx._web_agent_protection_signals == []
 
 
 async def test_connect_popup_listener_idempotent_across_multiple_connects():
@@ -107,8 +112,8 @@ async def test_connect_popup_listener_idempotent_across_multiple_connects():
     await connect(p)
     await connect(p)
     await connect(p)
-    # V0.23.2: 仍是 popup + download 各 1 次共 2 个 ctx.on call
-    assert len(fake_ctx._on_calls) == 2, "幂等 flag 应防多次叠装"
+    # V0.47.1: popup + download + protection 各 1 次共 3 个 ctx.on call (幂等防叠装)
+    assert len(fake_ctx._on_calls) == 3, "幂等 flag 应防多次叠装"
 
 
 # --- V0.24.0 dialog auto-handle ---
