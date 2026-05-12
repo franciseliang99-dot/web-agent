@@ -392,6 +392,82 @@ async def test_v042_per_step_cache_tokens_written(monkeypatch, tmp_path, patch_l
     assert rows == expected, f"V0.42.0 cache 字段落盘失败: {rows} vs {expected}"
 
 
+async def test_v042_2_token_budget_disabled_default(monkeypatch, tmp_path, patch_loop_internals):
+    """V0.42.2: 默 WEB_AGENT_TOKEN_BUDGET_USD 未设 → token_budget_usd=0 disable, 不触发 abort."""
+    monkeypatch.delenv("WEB_AGENT_AUTO_APPROVE", raising=False)
+    monkeypatch.delenv("WEB_AGENT_TOKEN_BUDGET_USD", raising=False)
+
+    actions = [
+        ScrollAction(thought="x", dy=100),
+        DoneAction(thought="x", result="ok"),
+    ]
+    usages = [
+        _FakeUsage(input_tokens=10_000_000, output_tokens=10_000_000),  # 巨大 cost ~$180
+        _FakeUsage(input_tokens=100, output_tokens=50),
+    ]
+    client = FakeLLMClientWithUsage(actions, usages)
+
+    db = tmp_path / "trace.db"
+    shots = tmp_path / "shots"
+    result = await run_react_loop(
+        _FakeContext(), client, goal="V0.42.2 disabled budget",
+        max_steps=3, db_path=db, screenshots_dir=shots,
+    )
+    # 即使 step 0 cost 巨大, budget=0 disable → 走完 step 1 (Done) 不触发 abort
+    assert result == "ok"
+
+
+async def test_v042_2_token_budget_exceeded_aborts(monkeypatch, tmp_path, patch_loop_internals):
+    """V0.42.2: budget=$0.05, step 0 cost ~$0.165 (10K input × 0.003 + 10K output × 0.015) 累超
+    → step 1 顶 check 触发 TOKEN_BUDGET_EXCEEDED graceful abort."""
+    monkeypatch.delenv("WEB_AGENT_AUTO_APPROVE", raising=False)
+    monkeypatch.setenv("WEB_AGENT_TOKEN_BUDGET_USD", "0.05")
+
+    actions = [
+        ScrollAction(thought="x", dy=100),
+        ScrollAction(thought="x", dy=200),
+        DoneAction(thought="x", result="ok-not-reached"),
+    ]
+    usages = [
+        # step 0 真 cost = 10K × 0.003/1K + 10K × 0.015/1K = $0.03 + $0.15 = $0.18 > $0.05
+        _FakeUsage(input_tokens=10_000, output_tokens=10_000),
+        _FakeUsage(input_tokens=100, output_tokens=50),
+        _FakeUsage(input_tokens=100, output_tokens=50),
+    ]
+    client = FakeLLMClientWithUsage(actions, usages)
+
+    db = tmp_path / "trace.db"
+    shots = tmp_path / "shots"
+    result = await run_react_loop(
+        _FakeContext(), client, goal="V0.42.2 budget exceed",
+        max_steps=5, db_path=db, screenshots_dir=shots,
+    )
+    # step 1 顶检测到累计 cost > budget → graceful abort
+    assert "TOKEN_BUDGET_EXCEEDED" in result
+    assert "$0.05" in result  # budget 数值进 result message
+    # 验只跑到 step 0 (后续 step 不再调 plan)
+    assert client._i == 1, f"V0.42.2 触发 abort 后不再调 plan: 真调 {client._i} 次"
+
+
+async def test_v042_2_token_budget_invalid_env_fallback_zero(monkeypatch, tmp_path, patch_loop_internals):
+    """V0.42.2: env 非数值 (e.g. 'abc') → fallback 0 disable, 不 raise."""
+    monkeypatch.delenv("WEB_AGENT_AUTO_APPROVE", raising=False)
+    monkeypatch.setenv("WEB_AGENT_TOKEN_BUDGET_USD", "abc-not-number")
+
+    actions = [DoneAction(thought="x", result="ok")]
+    usages = [_FakeUsage(input_tokens=100, output_tokens=50)]
+    client = FakeLLMClientWithUsage(actions, usages)
+
+    db = tmp_path / "trace.db"
+    shots = tmp_path / "shots"
+    result = await run_react_loop(
+        _FakeContext(), client, goal="V0.42.2 invalid env",
+        max_steps=2, db_path=db, screenshots_dir=shots,
+    )
+    # 非数值 env → fallback 0, 不 raise ValueError, 不触发 abort
+    assert result == "ok"
+
+
 async def test_v042_db_alter_compat_cache_columns(tmp_path):
     """V0.42.0: ALTER 兼容 V0.33.1 db (V0.42.0 之前 schema 缺 cache 列), COALESCE 0."""
     from web_agent.trace import Step, init_db, write_step

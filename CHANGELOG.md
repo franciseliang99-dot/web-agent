@@ -2,6 +2,60 @@
 
 All notable changes to web-agent. 版本号遵循 SemVer 简化形式（V<major>.<minor>.<patch>）。
 
+## [0.42.2] - 2026-05-11
+
+### Feat (V0.42 D LLM cache 3/N — token budget guard, runaway loop 防御)
+
+V0.42.0 telemetry + V0.42.1 tools cache_control 已落. V0.42.2 加 token budget guard:
+loop.py 累加 step cost (Anthropic Sonnet 4 上界估 ~$0.003/1K input + $0.015/1K output),
+超 `WEB_AGENT_TOKEN_BUDGET_USD` 阈值 → TOKEN_BUDGET_EXCEEDED graceful abort. 跟 V0.24.2
+max_wallclock_s 同守护模式 (V0.24.2 时间维度, V0.42.2 token 维度).
+
+### Changed (~40 src LOC + ~80 测 LOC)
+
+- `src/web_agent/loop.py`:
+  - run_react_loop 初始化 token_budget_usd from `WEB_AGENT_TOKEN_BUDGET_USD` env (默 0 disable;
+    非数值 fallback 0; 跟 V0.30.1 D opt-in pattern 同)
+  - step 顶 check `cumulative_cost_usd > token_budget_usd` → "TOKEN_BUDGET_EXCEEDED at step N"
+    graceful abort (跟 WALLCLOCK_EXCEEDED 同 message 形 + end_task + return)
+  - capture `step_input_tokens` / `step_output_tokens` 后累加 `cumulative_cost_usd` (简化 pricing:
+    Anthropic Sonnet 4 上界估 ~$0.003/1K input + $0.015/1K output, 不算 cache 折扣 — 保守 budget
+    优先精度)
+- `tests/test_token_per_step.py` +3 V0.42.2 fast 测:
+  - `test_v042_2_token_budget_disabled_default`: 默 env 未设 → budget=0 disable, 即使 step 0
+    cost ~$180 也不触发 abort
+  - `test_v042_2_token_budget_exceeded_aborts`: budget=$0.05 + step 0 cost $0.18 → step 1 顶
+    check 触发 "TOKEN_BUDGET_EXCEEDED" + 验 plan 不再被调
+  - `test_v042_2_token_budget_invalid_env_fallback_zero`: env 非数值 'abc' → fallback 0 disable,
+    不 raise ValueError
+- `pyproject.toml` / `__init__.py` 0.42.1 → 0.42.2
+- `uv.lock` 同步
+
+### 解耦审查
+
+- 加 budget guard 跟 V0.24.2 max_wallclock_s 同模式: step 顶 check + graceful abort + end_task,
+  不污染主 loop 主控流
+- Pricing 简化: hardcode Anthropic Sonnet 4 上界估算 inline 在 loop.py, 不引入 eval/pricing.py
+  跨层依赖 (eval/pricing.py 是 eval 层, src/web_agent/loop.py 是主控层, 解耦方向: eval → web_agent)
+- V0.42.0 telemetry 自动 capture cumulative_cost (cache_read 折扣 V0.42.x.1 maintainer 真测时
+  在 pricing.py 端算)
+
+### Verify
+
+- `uv run pytest` → **848 passed, 25 skipped** (+3 V0.42.2 fast 测, 0 现测破)
+- `uv run ruff check` → all clean
+- `uv run mypy` → Success no issues in 52 src files
+
+### V0.42 系列进度
+
+| ver | 状态 | scope |
+|-----|------|-------|
+| V0.42.0 | ✅ | cache hit-rate audit telemetry |
+| V0.42.1 | ✅ | tools schema cache_control (reframe 仅 tools 不 image/text) |
+| **V0.42.2** | ✅ 本提交 | token budget guard (runaway loop 防御, 跟 V0.24.2 wallclock 同模式) |
+| V0.42.3 | 待 | 系列收尾 retrospective + V0.43 inventory |
+| V0.42.x.1 (skip) | maintainer 真测 V0.40 5 task corpus | 🛑 红线 |
+
 ## [0.42.1] - 2026-05-11
 
 ### Feat (V0.42 D LLM cache 2/N — tools schema cache_control extension)

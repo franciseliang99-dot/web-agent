@@ -495,6 +495,16 @@ async def run_react_loop(
     active_idx: int = initial_active_idx  # V0.21.1: 当前 active tab 索引
     result = "(no result)"
     t_start = time.time()
+    # V0.42.2 D: token budget guard (跟 V0.24.2 max_wallclock_s 同守护模式).
+    # env WEB_AGENT_TOKEN_BUDGET_USD 累计 cost > 阈值 → TOKEN_BUDGET_EXCEEDED graceful abort.
+    # 默 0 disable (跟 V0.30.1 D opt-in pattern 同, 主流 cli 不强制 budget).
+    # 简化 pricing: Anthropic Sonnet 4 上界估 (~$0.003/1K input + $0.015/1K output, 不算 cache 折扣).
+    _budget_env = os.environ.get("WEB_AGENT_TOKEN_BUDGET_USD", "0").strip()
+    try:
+        token_budget_usd = float(_budget_env) if _budget_env else 0.0
+    except ValueError:
+        token_budget_usd = 0.0
+    cumulative_cost_usd = 0.0
 
     # W5-D.2 长期记忆 inject: 主循环前 prepend 一个 synthetic step,
     # LLM 通过 Trace.for_llm() 看到跨 session 历史. 不写 sqlite (与 W5-A reflect hint 同档:
@@ -520,6 +530,18 @@ async def run_react_loop(
                     f"常见原因：perceive/网络卡顿、LLM 响应慢、SDK retry 累积。"
                 )
                 logger.warning("wallclock %s", result)
+                end_task(conn, task_id, result)
+                return result
+            # V0.42.2 D: token budget guard 在 step 顶 check, 累计 cost > 阈值 graceful abort.
+            # budget=0 disable 不 check (默, 跟 V0.30.1 D opt-in 同).
+            if token_budget_usd > 0 and cumulative_cost_usd > token_budget_usd:
+                result = (
+                    f"TOKEN_BUDGET_EXCEEDED at step {step_i}: 累计 ${cumulative_cost_usd:.4f} 超过 "
+                    f"WEB_AGENT_TOKEN_BUDGET_USD=${token_budget_usd:.4f}. "
+                    f"常见原因: runaway loop / 长 task / pageload 反复 retry. "
+                    f"调高 budget 或拆 task 重跑."
+                )
+                logger.warning("token-budget %s", result)
                 end_task(conn, task_id, result)
                 return result
 
@@ -596,6 +618,12 @@ async def run_react_loop(
                         # V0.42.0 D: cache 字段 (default 0 兼容老 FakeLLMClientWithUsage)
                         step_cache_creation_tokens = getattr(_usage, "cache_creation_input_tokens", 0)
                         step_cache_read_tokens = getattr(_usage, "cache_read_input_tokens", 0)
+                        # V0.42.2 D: 累加 step cost (Anthropic Sonnet 4 上界估算, 不算 cache 折扣 — 保守安全).
+                        # $0.003/1K input + $0.015/1K output. budget 触发优先于真实 cost 计算精度.
+                        cumulative_cost_usd += (
+                            step_input_tokens * 0.003 / 1000.0
+                            + step_output_tokens * 0.015 / 1000.0
+                        )
                     break  # 成功跳出 retry loop
                 except Exception as e:
                     last_error = e
