@@ -215,6 +215,87 @@ def recall_reflections_by_domain(
     ]
 
 
+@dataclass(frozen=True, slots=True)
+class DomainStats:
+    """V0.41.0 C 主题: cross-task 学习 — domain-level success rate 聚合.
+
+    跟 MemoryEntry 平行, 但 aggregate (sum/count) 而非 raw row. recent_days 锁查询窗口,
+    pass_rate 是 success/total (float 0..1). last_ts 是该 domain 最近一次 task 时间戳.
+
+    用例: planner 看到 'wikipedia.org 历史 6 task 67% pass (last 2026-05-08)' 后, 在 wikipedia
+    上的 task 探索/退避策略可以基于 cross-task 历史而非纯当 task LLM 直觉.
+    """
+
+    total: int
+    success: int
+    pass_rate: float
+    recent_n_days: int
+    last_ts: float
+
+
+def aggregate_domain_stats(
+    db_path: Path,
+    domain: str,
+    *,
+    recent_days: int = 30,
+    min_total: int = 3,
+) -> DomainStats | None:
+    """V0.41.0 C 主题: 聚合 domain 历史 task pass rate.
+
+    返 None 条件 (V0.34 教训应用 — 不 inject noise):
+    - db_path 不存在 (silent, 跟 recall_by_domain 同 pattern)
+    - domain 为空字符串 (V0.41.0 真发现 #21+: 生产 memory.db 含 625 行 domain='' 测试污染, 聚合等于污染 cross-task 学习)
+    - total < min_total (信号不足, 默 3 task — 1-2 task 算不出可靠 pass rate)
+
+    db_path: data/memory.db Path
+    domain: extract_domain(start_url) 输出
+    recent_days: 查询窗口 (默 30 天, 防 90 天前老数据稀释 recent signal)
+    min_total: 信号阈值 (默 3, 低于此返 None 不 inject)
+
+    Returns:
+        DomainStats(total, success, pass_rate, recent_n_days, last_ts) 或 None
+    """
+    if not db_path.exists() or not domain.strip():
+        return None
+    cutoff_ts = time.time() - recent_days * 86400
+    conn = sqlite3.connect(db_path)
+    try:
+        row = conn.execute(
+            "SELECT COUNT(*), COALESCE(SUM(success), 0), COALESCE(MAX(ts), 0) "
+            "FROM memories WHERE domain = ? AND ts >= ?",
+            (domain, cutoff_ts),
+        ).fetchone()
+    finally:
+        conn.close()
+    if not row or row[0] < min_total:
+        return None
+    total = int(row[0])
+    success = int(row[1])
+    return DomainStats(
+        total=total,
+        success=success,
+        pass_rate=success / total,
+        recent_n_days=recent_days,
+        last_ts=float(row[2]),
+    )
+
+
+def format_domain_stats_for_trace(stats: DomainStats | None) -> str:
+    """V0.41.0 C 主题: 渲染 DomainStats 为 LLM 可读 1 行字符串 (跟 format_memories_for_trace 平行).
+
+    格式: '本 domain 最近 N 天历史 X task, P% pass rate (last seen YYYY-MM-DD)'
+    None / 空 stats 返 ''. token-budget 友好 ~100 char, 跟 memories 5 条 + reflections 3 条
+    相加仍在 loop.py:508 [:2000] 截断内.
+    """
+    if stats is None:
+        return ""
+    last_date = datetime.fromtimestamp(stats.last_ts).strftime("%Y-%m-%d")
+    return (
+        f"本 domain 最近 {stats.recent_n_days} 天历史 {stats.total} task, "
+        f"{stats.pass_rate * 100:.0f}% pass rate (last seen {last_date})"
+    )
+
+
 def recall_by_domain(
     db_path: Path,
     domain: str,
@@ -266,6 +347,15 @@ def build_inject_string(
     """
     parts: list[str] = []
     if include_memories:
+        # V0.41.0 C 主题: prepend domain success rate aggregate (1 行 cross-task signal 让
+        # planner 先看 high-level pass rate, 再看 raw 5 条 task). aggregate 失败 silent skip.
+        try:
+            stats = aggregate_domain_stats(db_path, domain)
+            stats_str = format_domain_stats_for_trace(stats)
+            if stats_str:
+                parts.append(stats_str)
+        except Exception:
+            pass
         try:
             mem_entries = recall_by_domain(db_path, domain, limit=memories_limit)
             mem_str = format_memories_for_trace(mem_entries)

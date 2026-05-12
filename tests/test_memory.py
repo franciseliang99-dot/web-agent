@@ -413,3 +413,122 @@ def test_clear_reflections_db_missing_silent(tmp_path):
 
     db = tmp_path / "nonexistent.db"
     clear_reflections(db)  # 不抛
+
+
+# ---------- V0.41.0 C 主题: domain success-rate aggregator ----------
+
+
+def test_v041_aggregate_domain_stats_basic(tmp_path):
+    """V0.41.0: 5 task 3 success → pass_rate=0.6, total=5."""
+    from web_agent.memory import aggregate_domain_stats
+
+    db = tmp_path / "memory.db"
+    record_task(db, "wiki.test", "g1", "r1", True)
+    record_task(db, "wiki.test", "g2", "r2", True)
+    record_task(db, "wiki.test", "g3", "r3", True)
+    record_task(db, "wiki.test", "g4", "r4", False)
+    record_task(db, "wiki.test", "g5", "r5", False)
+    stats = aggregate_domain_stats(db, "wiki.test")
+    assert stats is not None
+    assert stats.total == 5
+    assert stats.success == 3
+    assert stats.pass_rate == 0.6
+    assert stats.recent_n_days == 30
+    assert stats.last_ts > 0
+
+
+def test_v041_aggregate_domain_stats_below_threshold_returns_none(tmp_path):
+    """V0.41.0: total < 3 → None (信号不足不 inject, 防 1-2 task 算不出可靠 pass rate)."""
+    from web_agent.memory import aggregate_domain_stats
+
+    db = tmp_path / "memory.db"
+    record_task(db, "wiki.test", "g1", "r1", True)
+    record_task(db, "wiki.test", "g2", "r2", True)
+    assert aggregate_domain_stats(db, "wiki.test") is None
+
+
+def test_v041_aggregate_domain_stats_db_not_exist_returns_none(tmp_path):
+    """V0.41.0: db 不存在 → None (silent, 跟 recall_by_domain 同 pattern)."""
+    from web_agent.memory import aggregate_domain_stats
+
+    assert aggregate_domain_stats(tmp_path / "nonexistent.db", "wiki.test") is None
+
+
+def test_v041_aggregate_domain_stats_empty_domain_returns_none(tmp_path):
+    """V0.41.0: domain='' → None (避真发现 #21 生产 db 625 行空 domain 测试污染聚合)."""
+    from web_agent.memory import aggregate_domain_stats
+
+    db = tmp_path / "memory.db"
+    for i in range(5):
+        record_task(db, "", f"g{i}", f"r{i}", True)  # 625 行污染模拟
+    assert aggregate_domain_stats(db, "") is None
+    assert aggregate_domain_stats(db, "   ") is None  # whitespace-only 同视空
+
+
+def test_v041_aggregate_domain_stats_recent_filter(tmp_path):
+    """V0.41.0: recent_days 锁查询窗口, 老于 30 天 task 不算 (防 90 天前老数据稀释 recent signal)."""
+    import time as time_module
+
+    from web_agent.memory import aggregate_domain_stats, init_memory_db
+
+    db = tmp_path / "memory.db"
+    now = time_module.time()
+    old_ts = now - 60 * 86400
+    recent_ts = now - 5 * 86400
+    conn = init_memory_db(db)
+    try:
+        for i in range(5):
+            conn.execute(
+                "INSERT INTO memories (ts, domain, goal, result, success) VALUES (?, ?, ?, ?, ?)",
+                (old_ts, "wiki.test", f"old{i}", f"r{i}", 1),
+            )
+        for i in range(3):
+            conn.execute(
+                "INSERT INTO memories (ts, domain, goal, result, success) VALUES (?, ?, ?, ?, ?)",
+                (recent_ts, "wiki.test", f"new{i}", f"r{i}", 0),
+            )
+        conn.commit()
+    finally:
+        conn.close()
+    stats = aggregate_domain_stats(db, "wiki.test", recent_days=30)
+    assert stats is not None
+    assert stats.total == 3
+    assert stats.success == 0
+
+
+def test_v041_format_domain_stats_for_trace_renders(tmp_path):
+    """V0.41.0: 格式 '本 domain 最近 N 天历史 X task, P% pass rate (last seen YYYY-MM-DD)'."""
+    from web_agent.memory import aggregate_domain_stats, format_domain_stats_for_trace
+
+    db = tmp_path / "memory.db"
+    for i in range(5):
+        record_task(db, "wiki.test", f"g{i}", f"r{i}", i < 3)
+    stats = aggregate_domain_stats(db, "wiki.test")
+    rendered = format_domain_stats_for_trace(stats)
+    assert "本 domain" in rendered
+    assert "30 天" in rendered
+    assert "5 task" in rendered
+    assert "60%" in rendered  # 3/5 = 60% pass
+    assert "last seen" in rendered
+
+
+def test_v041_format_domain_stats_none_returns_empty():
+    """V0.41.0: None stats → '' (caller if-truthy 跳 inject)."""
+    from web_agent.memory import format_domain_stats_for_trace
+
+    assert format_domain_stats_for_trace(None) == ""
+
+
+def test_v041_build_inject_string_includes_stats_prefix(tmp_path):
+    """V0.41.0: build_inject_string prepend domain stats 行 (在 5 条 raw memory 前)."""
+    from web_agent.memory import build_inject_string
+
+    db = tmp_path / "memory.db"
+    for i in range(5):
+        record_task(db, "wiki.test", f"g{i}", f"r{i}", i < 3)
+    out = build_inject_string(db, "wiki.test")
+    assert out is not None
+    stats_idx = out.find("本 domain 最近")
+    memories_idx = out.find("过去在该 domain")
+    assert stats_idx >= 0, "stats prefix 必出现"
+    assert memories_idx > stats_idx, "stats 必在 memories raw 前"

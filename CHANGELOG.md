@@ -2,6 +2,108 @@
 
 All notable changes to web-agent. 版本号遵循 SemVer 简化形式（V<major>.<minor>.<patch>）。
 
+## [0.41.0] - 2026-05-11
+
+### Feat (V0.41 C 长期记忆 cross-task 学习系列开篇 1/N — domain success-rate aggregator + 真发现 #21)
+
+V0.40.2 收尾 user 选 C 主题. V0.13.0 W5-D 已落 cross-session 长期记忆基础设施 (memory.db
+memories 表), V0.14.0 W5-D.2 inject planner 通道. V0.41 加 cross-task 学习层 — domain
+success-rate 聚合 inject 给 planner, 让"X domain 历史 6 task 67% pass rate"成为 planner
+策略 hint 而非只看 5 条 raw 行.
+
+### 真测 memory.db 现状 (V0.34 教训第 N+2 次应用)
+
+`sqlite3 data/memory.db ".schema" + "SELECT COUNT(*) ..."`:
+
+```
+total memories: 850 行 (V0.40.2 CHANGELOG 提 "778 行" stale, 真值 850, 又一次 V0.39.0
+文档 stamp 教训应用 — 但 V0.41.0 收 850 → 文档 stamp 规则下次系列收尾时再 sync)
+
+domain 分布:
+| ('' 空 domain) | 625 行 | 618 success | ← 测试污染 (73%)
+| example.com    | 187 行 | 186 success | ← V0.21+ data:text/html 单测污染
+| dev.to         | 7 行   | 6 success   |
+| github.com     | 7 行   | 7 success   |
+| news.ycombinator.com | 7 行 | 5 success |
+| en.wikipedia.org | 6 行 | 4 success   |
+| zh.wikipedia.org | 5 行 | 4 success   |
+| httpbin.org    | 4 行   | 2 success   |
+
+真站点 cross-task 数据: 36 行 (4%), 是 C 主题真信号源.
+```
+
+**reflections 表 sqlite_master 查 count = 0 → 生产 db 上 reflections 表从未建过**.
+
+### 真发现 #21 V0.28 W6-A reflections 路径生产几乎不触发
+
+`init_reflections_db` 是 lazy create, V0.28 W6-A `_maybe_reflect_on_failure` 只在
+`should_reflect(final_result)` 触发时调. 850 行 memory 里没人撞过 → 生产 `data/memory.db`
+**reflections 表不存在**.
+
+可能原因:
+- 850 行有 618 行 success + 230 行测试污染, 真站点 fail 才 ~10-20 次, 都未走 reflect path
+- 或 `_maybe_reflect_on_failure` 触发条件过严 (`should_reflect` 内 FAILURE_MARKERS 匹配)
+
+**V0.41.x 后续 (V0.41.1 候选)**: audit V0.28 W6-A reflect path 实际触发率, 跟 V0.28.3 reflect
+eval/runner.py 路径对比 (eval reflect_run2 是显式调, 不依赖 should_reflect → 测试触发率 100%
+但生产 cli 路径 ~0%).
+
+(累计真发现至 V0.41: 21 个; V0.41 系列 +1: #21.)
+
+### Changed (~80 src LOC + ~120 测 LOC)
+
+- `src/web_agent/memory.py`:
+  - `DomainStats` dataclass (frozen+slots): total / success / pass_rate / recent_n_days / last_ts
+  - `aggregate_domain_stats(db_path, domain, *, recent_days=30, min_total=3) → DomainStats | None`
+    防 noise 三层 None: db 不存在 / domain="" 或 whitespace / total < min_total (默 3)
+  - `format_domain_stats_for_trace(stats) → str` 渲 "本 domain 最近 30 天历史 X task, P% pass rate (last seen YYYY-MM-DD)"
+  - `build_inject_string` prepend domain stats 行 (在 5 条 raw memories 前), 让 planner 第一眼
+    看见聚合 signal
+- `tests/test_memory.py` +8 fast 测 (V0.41.0 单元):
+  - basic (5 task 3 success → 60%)
+  - below threshold None (total < 3)
+  - db not exist None
+  - empty domain None (避真发现 #21+ 测试污染聚合)
+  - recent_days filter (60 天前老 task 不算)
+  - format renders (含 "本 domain" + "%" + "last seen")
+  - format None → ""
+  - build_inject_string stats prefix 在 memories raw 前
+- `pyproject.toml` / `__init__.py` 0.40.2 → **0.41.0** (V0.41 系列开篇 minor bump)
+- `uv.lock` 同步
+
+### 解耦审查
+
+- `aggregate_domain_stats` 纯 SQL 函数 (跟 `recall_by_domain` 同 try/finally close pattern),
+  无 LLM/网络/IO 副作用
+- `format_domain_stats_for_trace` 纯 string 渲染 (跟 `format_memories_for_trace` 平行)
+- `build_inject_string` 仅 prepend, 不改 memories/reflections 通道, BC 完全保
+
+### Verify
+
+- `uv run pytest` → **832 passed, 25 skipped** (+8 V0.41.0 fast 测, 0 现测破)
+- `uv run ruff check` → all clean
+- `uv run mypy` → Success no issues in 52 src files
+- 0 真 chromium / 真 LLM 调用 (autonomous OK)
+
+### V0.41 系列 plan
+
+| ver | 状态 | scope | autonomous |
+|-----|------|-------|------------|
+| **V0.41.0** | ✅ 本提交 | C1 domain success-rate aggregator + inject prefix + #21 真发现沉淀 | ✅ |
+| V0.41.1 | 待 | C3 failure root-cause cache (summarize_domain_failures + inject pattern) | ✅ |
+| V0.41.2 | 待 | C5 memory.db 测试污染 audit + clear-domain CLI (+backup BC) | ✅ |
+| V0.41.3 | 待 | 系列收尾 retrospective + V0.42 inventory | ✅ |
+| V0.41.x.1 (skip) | maintainer 真测 V0.40 5 task corpus before/after, 看 cross-task 学习对 pass rate 真改善 | 🛑 红线 |
+
+### 决策门槛先写 (V0.34 教训, 跟 V0.37/V0.38/V0.40 一脉)
+
+V0.41.x.1 maintainer 真测 vs V0.40.2 baseline:
+- ≥ 10% pass rate uplift → C1+C3 都保留, 进 V0.42
+- 5-10% → 边际, 仅保留 C1 (低复杂高 ROI), C3 withdraw
+- < 5% → C1+C3 都 withdraw, V0.41.3 写 retrospective 拒收 + V0.42 改换主题
+
+(V0.41.0/.1 infra 代码本身保留无害, 已带 total<min_total None 防 noise.)
+
 ## [0.40.2] - 2026-05-11
 
 ### Doc (V0.40 A' 真站点 corpus 扩系列收尾 3/3 — 5 task × 4 子轴 × 4 站家矩阵 + V0.41 inventory)
