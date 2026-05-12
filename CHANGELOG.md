@@ -2,6 +2,93 @@
 
 All notable changes to web-agent. 版本号遵循 SemVer 简化形式（V<major>.<minor>.<patch>）。
 
+## [0.50.0] - 2026-05-11
+
+### Doc (V0.50 A'' corpus 系列开篇 + sink 1/1 — 真发现 #27 V0.23/V0.24 已 cover drag/dialog/upload)
+
+V0.46.2 inventory 第 3 项 "A'' V0.40 corpus 再扩 (drag/dialog/upload anti-abuse fixture)".
+V0.50.0 audit eval/corpus/ 既有发现 **subagent plan agent 推扩真测推翻**: V0.23/V0.24 已 cover
+基础 drag/dialog/upload capability axis, anti-abuse demo fixture 难仿真 anti-bot widget.
+V0.50 sink scope, 转 V0.51 housekeeping (跟 V0.43 R3 / V0.48 sink path 同模式).
+
+### Audit (eval/corpus/ 既有 task)
+
+| corpus 模块 | task | capability_axis |
+|------------|------|-----------------|
+| `v023_drag_upload_download.py` (V0.26.1) | 3 task | drag / upload / download |
+| `v024_dialog_keyboard.py` (V0.26.1) | 2 task | dialog (obs reading) / keyboard-nav |
+| `v040_capability_real_world_extended.py` (V0.40.0) | 5 task (real-net) | extract / click / form |
+
+**结论**: V0.46.2 inventory 推 "再扩 drag/dialog/upload" 假设这些 axis 缺 corpus, 但 V0.23+V0.24
+已 cover 5 task (3+2). 重复扩同 axis = duplicate, ROI 边际.
+
+### 真发现 #27 — A'' V0.50 plan agent 推 "再扩 drag/dialog/upload" 与 V0.23/V0.24 既有冲突
+
+**Pattern**: V0.46.2 inventory 第 3 项写法暗示 "drag/dialog/upload anti-abuse fixture 缺". V0.50.0
+audit 真测推翻:
+1. V0.23/V0.24 corpus 已 cover 5 task 基础 drag/dialog/upload
+2. **anti-abuse 真 fixture 难做** — 真 anti-bot widget (CF Turnstile / hCaptcha) 不可仿, demo
+   HTML 不能 reproduce 真 challenge
+3. → V0.50 实施 "再扩同 axis" = duplicate; "anti-abuse 仿" = 仿不真; **sink scope**
+
+**与 V0.43 R3 / V0.48 sink 同模式**:
+- V0.43 R3: W5-C.2 dead-flag plan agent 推 cleanup, 真测 audit ARCHITECTURE 推翻 (by design)
+- V0.48: V0.47.4 plan agent 推 "先 cassette 真测证 reuse 检测真问题再 pool", 真测推翻 (3 站
+  cassette 全 stable → sink pool)
+- **V0.50 sink**: V0.46.2 inventory 推 "A'' 再扩 drag/dialog/upload", audit 推翻 (V0.23/V0.24
+  已 cover, anti-abuse 难仿)
+
+**conservative reframe 累计** (V0.42-V0.50 7 次):
+1. V0.42 D image cache 拒
+2. V0.43 R3 W5-C.2 cleanup 拒
+3. V0.45 send amount co-signal V0.45 conservative 留 (V0.49 收割)
+4. V0.46 type-only detector V0.46.0 拒 (V0.46.1 reframe 5-window)
+5. V0.47.3 simplify-judge extract helper 拒
+6. V0.48 fingerprint pool sink
+7. **V0.50 A'' corpus 再扩 sink** (本)
+
+(累计真发现至 V0.50: 27 个; V0.50 系列 +1: #27 plan agent 推扩与既有 cover 冲突.)
+
+### V0.50 sink + 转 V0.51 inventory
+
+V0.50 单 commit (.0 audit + sink + retro 合并, 跟 V0.49.2 doc-only 短 retro 模式). 用户授权
+"按顺序全做" V0.46.2 inventory, V0.50 跳过 → V0.51 V0.42 housekeeping (V0.36.2 + V0.41 C5 deferred).
+
+### V0.34 教训累计应用至 V0.50 (20 系列贯彻)
+
+| 系列 | 教训应用 | 真发现 |
+|------|---------|--------|
+| V0.43 R | audit ARCHITECTURE 先于 cleanup | #22 + #23 |
+| V0.48 | plan 推 implementation 真测推翻 ROI 零 | #26 |
+| **V0.50** | **plan 推扩 真测推翻已 cover** (V0.23/V0.24 既有) | **#27** |
+
+**V0.50 教训应用模式**: **inventory plan agent 推扩 / 拓展前必 audit 既有 corpus / 模块**.
+跟 V0.43 R3 (cleanup 前 audit ARCHITECTURE) / V0.44.0 (#22 audit ARCHITECTURE 先于 dead-flag verdict)
+同模式. inventory line 来源 (V0.46.2 是 V0.46.2 收尾 plan agent 写) 也会 stale, 需 V0.50.0 audit
+验证.
+
+跟 V0.39 #20 "README 72% 24-month stale" 同模式 — **任何文档 / inventory line 都需 audit 验证,
+不仅是代码假设**.
+
+### V0.51 V0.42 housekeeping 主题确认 (V0.50 完后 surface)
+
+V0.46.2 inventory 第 4 项:
+- **V0.51 V0.42 housekeeping**: V0.36.2 disk_baseline retention + V0.41 C5 长期记忆 cleanup decisions
+- **真删 = maintainer 红线** (跟 V0.48.2 / V0.47.x.1 同模式) — autonomous 落 data-clean CLI + 默
+  `--dry-run`, 真删等用户授权
+- V0.51 预计 3 commit (.0 plan + .1 CLI infra + .2 retro)
+
+### Changed (~0 src LOC, ~150 doc LOC)
+
+- `CHANGELOG.md` V0.50.0 entry (本, 合并 audit + sink + retro)
+- `pyproject.toml` / `__init__.py` 0.49.2 → 0.50.0
+- `uv.lock` 同步
+
+### Verify
+
+- `uv run pytest` → **963 passed, 28 skipped** (V0.49.2 状态 0 src 改 → 0 测变)
+- 0 src 改 → 0 ruff/mypy 重检需求
+
 ## [0.49.2] - 2026-05-11
 
 ### Doc (V0.49 safety 双修系列收尾 3/3 — V0.34 教训 19 累计 + V0.50 A'' corpus inventory)
