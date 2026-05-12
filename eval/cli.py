@@ -277,6 +277,15 @@ def main() -> None:
             "默关 opt-in. 必须配 isolated memory.db (output_dir/eval_memory.db)."
         ),
     )
+    parser.add_argument(
+        "--dry-run", action="store_true",
+        help=(
+            "V0.37.0: 列将要跑的 task + 估 cost + 校 env, 但**不开 chromium 不调 LLM** "
+            "(0 token 0 wallclock). 给 maintainer 真跑前 sanity check, 防意外烧 token. "
+            "跟 --lint-only 不同: dry-run 经过完整 task filter + env check 链路, 只 short-circuit "
+            "在 _run_async 之前."
+        ),
+    )
     args = parser.parse_args()
 
     # lint 模式: 不需 RUN_EVAL=1 (lint 0 token 0 chromium)
@@ -287,6 +296,57 @@ def main() -> None:
             sys.stderr.write("LINT FAIL:\n" + "\n".join(violations) + "\n")
             sys.exit(1)
         sys.stdout.write(f"LINT OK: {len(ALL_TASKS)} task tokens 全过 task-specific 检查\n")
+        return
+
+    # V0.37.0: --dry-run 走完整 task filter 但不调 chromium / LLM. 放在 _check_opt_in_env 之前,
+    # 让 maintainer 不设 RUN_EVAL=1 就能 sanity check task list + 估 cost + 验 env vars.
+    # 跟 V0.33.4 B' baseline 双跑 deferred 配合 — 真烧 token 前先 dry-run 列 task / 估 cost / 验 key.
+    if args.dry_run:
+        tasks = _select_tasks(args.corpus)
+        if not tasks:
+            sys.stderr.write(f"ERROR: --corpus {args.corpus!r} 没匹配任何 task (检查 axis 拼写)\n")
+            sys.exit(1)
+        providers = [p.strip() for p in args.providers.split(",") if p.strip()]
+        if not providers:
+            sys.stderr.write("ERROR: --providers 解析后为空\n")
+            sys.exit(1)
+        # cost 估算 (V0.33.4 引: Anthropic ~$0.05-0.10/task, OpenAI/Kimi 类似量级)
+        per_task_cost_lo, per_task_cost_hi = 0.05, 0.10
+        total_runs = len(tasks) * len(providers) * args.runs
+        cost_lo = total_runs * per_task_cost_lo
+        cost_hi = total_runs * per_task_cost_hi
+        real_net_count = sum(1 for t in tasks if t.requires_real_net)
+        sys.stdout.write(
+            f"# DRY-RUN (V0.37.0)\n"
+            f"corpus filter: {args.corpus}\n"
+            f"providers: {', '.join(providers)}\n"
+            f"runs: {args.runs}\n"
+            f"task count: {len(tasks)} (含 {real_net_count} real-net task)\n"
+            f"total runs: {total_runs} ({len(tasks)} task × {len(providers)} provider × {args.runs} run)\n"
+            f"estimated cost: ~${cost_lo:.2f}-${cost_hi:.2f} (Anthropic ~$0.05-0.10/task, V0.33.4 估)\n"
+            f"\n## task list\n",
+        )
+        for t in sorted(tasks, key=lambda x: x.task_id):
+            real_net = " [real-net]" if t.requires_real_net else ""
+            sys.stdout.write(f"  - {t.task_id} (axis={t.capability_axis}){real_net}\n")
+        sys.stdout.write("\n## env vars check\n")
+        env_checks = [
+            ("WEB_AGENT_RUN_EVAL", "1", "必"),
+            ("WEB_AGENT_EVAL_REAL", "1", "可 (默 cassette replay; 真跑必)"),
+            ("WEB_AGENT_EVAL_LIVE_NET", "1", "可 (real-net task 真访外网必)"),
+        ]
+        for var, expected, hint in env_checks:
+            cur = os.environ.get(var, "")
+            mark = "✓" if cur == expected else "✗"
+            sys.stdout.write(f"  [{mark}] {var}={cur or '(unset)'} (期望 {expected}, {hint})\n")
+        # API key 检查 (不调 make_client 仅 env presence)
+        provider_key_map = {"anthropic": "ANTHROPIC_API_KEY", "openai": "OPENAI_API_KEY"}
+        for p in providers:
+            key_var = provider_key_map.get(p, f"{p.upper()}_API_KEY")
+            has_key = bool(os.environ.get(key_var, "").strip())
+            mark = "✓" if has_key else "✗"
+            sys.stdout.write(f"  [{mark}] {key_var} ({'set' if has_key else 'unset'}, provider {p})\n")
+        sys.stdout.write("\nDRY-RUN OK. 真跑去掉 --dry-run 即可.\n")
         return
 
     _check_opt_in_env()

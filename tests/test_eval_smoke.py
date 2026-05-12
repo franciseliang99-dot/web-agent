@@ -183,6 +183,57 @@ def test_eval_nightly_workflow_default_disabled():
 # ---------- V0.30.5 收尾: --corpus real-world axis filter 验 ----------
 
 
+# ---------- V0.37.0 --dry-run 测 ----------
+
+
+def test_cli_dry_run_lists_tasks_without_run_eval_env(monkeypatch, capsys):
+    """V0.37.0: --dry-run 不需 RUN_EVAL=1 (bypass _check_opt_in_env 防意外烧 token early return)."""
+    monkeypatch.delenv("WEB_AGENT_RUN_EVAL", raising=False)
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    monkeypatch.setattr("sys.argv", ["web-agent-eval", "--corpus", "iframe", "--dry-run"])
+    # dry-run 末尾用 `return`, main() 正常返 None 不抛 SystemExit
+    main()
+    captured = capsys.readouterr()
+    assert "DRY-RUN" in captured.out
+    assert "task count" in captured.out
+    assert "estimated cost" in captured.out
+    # task list 含 iframe axis task
+    assert "v022-iframe-click-button" in captured.out
+    # env vars check 标记 unset
+    assert "WEB_AGENT_RUN_EVAL" in captured.out
+    assert "(unset)" in captured.out
+
+
+def test_cli_dry_run_estimates_cost_from_task_count(monkeypatch, capsys):
+    """V0.37.0: --dry-run cost 估算 = task × provider × runs × $0.05-0.10."""
+    monkeypatch.setattr("sys.argv", [
+        "web-agent-eval", "--corpus", "capability-real-world", "--dry-run", "--providers", "anthropic",
+    ])
+    main()
+    captured = capsys.readouterr()
+    # capability-real-world = 3 V0.35 task × 1 provider × 1 run = 3 runs
+    # cost ~ 3 × $0.05-0.10 = $0.15-$0.30
+    assert "task count: 3" in captured.out
+    assert "total runs: 3" in captured.out
+    assert "$0.15" in captured.out and "$0.30" in captured.out
+
+
+def test_cli_dry_run_skips_run_async_no_chromium(monkeypatch, capsys):
+    """V0.37.0: --dry-run 不调 _run_async (asyncio.run 不被触发, 不开 chromium 不烧 token)."""
+    monkeypatch.setattr("sys.argv", ["web-agent-eval", "--corpus", "iframe", "--dry-run"])
+    call_count = [0]
+
+    def fake_asyncio_run(_coro):
+        call_count[0] += 1
+        return 0
+
+    with patch("eval.cli.asyncio.run", side_effect=fake_asyncio_run):
+        main()
+    assert call_count[0] == 0, "V0.37.0 --dry-run 不应调 asyncio.run (短路 early return)"
+    captured = capsys.readouterr()
+    assert "DRY-RUN" in captured.out
+
+
 def test_select_tasks_capability_real_world_virtual_axis_returns_3_v035_tasks():
     """V0.35.3: --corpus capability-real-world → 3 V0.35 actuator 真站点轴 task.
 

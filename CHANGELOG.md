@@ -2,6 +2,78 @@
 
 All notable changes to web-agent. 版本号遵循 SemVer 简化形式（V<major>.<minor>.<patch>）。
 
+## [0.37.0] - 2026-05-11
+
+### Feat (V0.37 B' lean/WebP baseline 双跑系列开篇 1/N — eval cli `--dry-run` mode)
+
+V0.36.3 收尾 user 选 B' 主题. V0.33.4 retrospective deferred "lean/WebP 真节省未量化" 给
+maintainer 4 配置矩阵 (~$1-2 token, V0.33.4 估), V0.37 系列 autonomous 准备 infra + 4 commit
+真烧 token deferred V0.37.4 maintainer 跑.
+
+V0.37.0 = eval cli `--dry-run` flag — maintainer 真烧 token 前先列 task list + 估 cost + 校
+env vars, 防意外烧钱. 跟 V0.34.0 perceive_bench / V0.36.0 disk_baseline framework-first 同
+节奏 — 实施前 micro experiment (V0.34 教训).
+
+### V0.34 教训应用第 N 次: dry-run 防 V0.33.4 maintainer 真跑时意外烧 token
+
+V0.33.4 retrospective 给的 4 配置 how-to 是裸 bash 命令, maintainer 真跑前没 sanity check
+途径 (corpus axis 拼写错 → 跑空 task; ANTHROPIC_API_KEY 忘设 → 真跑后真烧 partial token).
+V0.37.0 加 `--dry-run` 经过完整 task filter + env check 链路但不开 chromium 不调 LLM, **0 token
+0 wallclock**.
+
+dry-run 实测 (V0.37.0 开发期间):
+```bash
+uv run web-agent-eval --corpus capability-real-world --dry-run --providers anthropic
+# DRY-RUN (V0.37.0)
+# task count: 3 (含 3 real-net task)
+# estimated cost: ~$0.15-$0.30 (Anthropic ~$0.05-0.10/task, V0.33.4 估)
+# task list: v035-github-octocat-commits-first, v035-wikipedia-qft-scroll-history-section, v035-wikipedia-search-quantum-field-theory
+# env vars check: [✗] WEB_AGENT_RUN_EVAL (unset) ...
+```
+
+### Changed (~60 src LOC + ~50 test LOC)
+
+- `eval/cli.py`:
+  - argparse 加 `--dry-run` flag (~10 LOC)
+  - `main()` `_check_opt_in_env()` **之前** 早 return dry-run 分支 (~50 LOC):
+    - `_select_tasks(args.corpus)` 完整 task filter (axis 拼写错 fail-fast)
+    - cost 估算 (`task × provider × runs × $0.05-0.10`, V0.33.4 引)
+    - task list 列 (`task_id / capability_axis / [real-net]` 标)
+    - env vars check (RUN_EVAL / EVAL_REAL / EVAL_LIVE_NET / provider API key)
+    - 不调 `_assert_live_net_consistency` / `_filter_requires_real_net` (让 dry-run 显示原始 task list)
+- `tests/test_eval_smoke.py` +3 fast 测:
+  - `test_cli_dry_run_lists_tasks_without_run_eval_env`: 不需 RUN_EVAL=1 bypass
+  - `test_cli_dry_run_estimates_cost_from_task_count`: cost 估准
+  - `test_cli_dry_run_skips_run_async_no_chromium`: asyncio.run 未被调
+- `pyproject.toml` / `__init__.py` 0.36.3 → **0.37.0** (V0.37 系列开篇 major-minor bump)
+- `uv.lock` 同步
+
+### Verify
+
+- `uv run pytest` → **798 passed, 25 skipped** (+3 V0.37.0 dry-run 测, 0 现测破)
+- `uv run ruff check` → all clean
+- `uv run mypy` → Success no issues in 51 src files
+- 真跑 `uv run web-agent-eval --corpus iframe --dry-run` → task list + cost + env check 输出正确
+
+### V0.37 系列 plan (subagent 商议后)
+
+| ver | scope | autonomous |
+|-----|-------|------------|
+| **V0.37.0** | ✅ 本提交: eval cli `--dry-run` (估 cost + 校 env, 0 token 0 wallclock) | ✅ |
+| V0.37.1 | `eval/token_baseline.py` compare 扩 N-file matrix (`--baselines a,b,c,d --labels full+png,lean+png,full+webp,lean+webp` 4 配置 2×2) | ✅ |
+| V0.37.2 | per-axis 节省 breakdown (按 task `capability_axis` group, lean 在哪轴显著) | ✅ |
+| V0.37.3 | 系列收尾 + how-to 重写 (引 V0.37.0-2 新 cli) + 跳 V0.37.4 deferred | ✅ |
+| V0.37.4 (skip) | maintainer 真录 4 配置 baseline (~$1-2 token, ~30-60 min) | 🛑 红线 |
+
+跟 V0.32.1 / V0.33.4 / V0.35.1 / V0.36.2 5 次同 SemVer 跳号 pattern (V0.37.4 deferred maintainer).
+
+### 主题诚实降级
+
+V0.37 不真量化 lean/WebP 真节省 (那是 maintainer 真跑事). V0.37.0-3 是 autonomous 准备 infra:
+让 maintainer 跑 V0.37.4 时 (i) cli 易用 (--dry-run + multi-compare) (ii) 数据分析自动 (per-axis
+breakdown) (iii) docs 完整 (V0.37.3 重写 how-to). 跟 V0.34.5 / V0.36.3 系列 "实质 perf 净收益 0,
+沉淀价值 = infra + 真发现" 同模式.
+
 ## [0.36.3] - 2026-05-11
 
 ### Doc (V0.36 I 内存优化系列收尾 3/3 — VACUUM 真测 0% + index audit OK + 真发现 #18 沉淀)
