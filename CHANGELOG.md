@@ -2,6 +2,100 @@
 
 All notable changes to web-agent. 版本号遵循 SemVer 简化形式（V<major>.<minor>.<patch>）。
 
+## [0.38.3] - 2026-05-11
+
+### Doc (V0.38 F2 SoM JS walker 合并系列收尾 4/4 — F sub-route 系列双 ROI 推翻总结 + V0.39 inventory)
+
+V0.38.0 baseline + V0.38.1 实施 + V0.38.2 真测 + 决策 (选 B simplification only). 本提交收尾:
+F sub-route 系列 retrospective (F1 V0.34 + F2 V0.38 双 ROI 推翻) + V0.34 教训 8 系列累计 +
+V0.39 主题候选 inventory. 跟 V0.33.4 / V0.34.5 / V0.35.3 / V0.36.3 / V0.37.3 系列收尾同骨架.
+
+### V0.38 系列回顾 (4 commit 全 autonomous)
+
+| ver | 状态 | scope | 净收益 |
+|-----|------|-------|--------|
+| V0.38.0 | ✅ | baseline before-F2 + decision doc (≥5%/1-5%/<1% 三档门槛) | 0 (基础设施) |
+| V0.38.1 | ✅ | F2 W1+W2 walker 合并实施 + 契约 verify | code -15 LOC simplification |
+| V0.38.2 | ✅ | 真测 after-F2 + 决策落地 (选 B retain) + 真发现 #19 | perf gain ~0 (V0.34.5 预测对) |
+| **V0.38.3** | ✅ 本提交 | F sub-route 系列 retrospective + V0.39 inventory | 0 (沉淀价值 = 教训) |
+
+V0.38 F2 walker 合并系列闭环 (4 commit 全 autonomous, 0 maintainer deferred — F2 不烧 token).
+
+### F sub-route 系列双 ROI 推翻总结 (V0.34 F1 + V0.38 F2)
+
+V0.33.4 系列收尾 user 选 F 主题, 跑了 2 个 sub-route:
+
+| sub | 系列 | scope | Plan agent 估算 | 真测真值 | 真发现 |
+|-----|------|-------|----------------|---------|--------|
+| F1 | V0.34 (6 commit) | iframe DFS asyncio.gather 同层 sibling 并发 | 67-74% | **~3%** | #17 chromium same-origin shared renderer serialize |
+| F2 | V0.38 (4 commit) | SoM JS W1+W2 walker 合并 | 0.5-2% | **~0%** | #19 chromium V8 JIT 优化 DOM 穿透 ~微秒 |
+
+**F sub-route 系列结论**: local chromium 场景下 perceive() 性能优化 ceiling ≈ 0-5%.
+两个 sub-route 共 10 commit 都被真测推翻 Plan agent 估算. **V0.34 系列教训第 0 次落地** +
+**V0.38 系列预测验证** = "F sub-route 优化在 local chromium 该停, 真 perf 应转其他维度".
+
+### V0.34 教训累计应用至 V0.38 (8 个系列贯彻)
+
+| 系列 | 应用次数 | 类型 |
+|------|---------|------|
+| V0.34 F1 | 2 | 真测推翻 (#17 chromium serialize) |
+| V0.35 A | 2 | fixture 推翻 (W3C iframe 0 count) |
+| V0.36 I | 2 | 估算推翻 (VACUUM 0% / "内存爆炸"叙事) |
+| V0.37 B' | 0 | infra 准备性质 (真发现待 V0.37.4 maintainer 跑) |
+| **V0.38 F2** | **1** | **预测验证** (#19 V0.34.5 预测对, plan agent 仍重蹈估高) |
+
+**V0.34 教训进化轨迹**:
+- V0.34 F1: 真测被动 catch Plan agent 估算错
+- V0.35 A: fixture 选型时主动 micro experiment 验
+- V0.36 I: 现状叙事 ("内存爆炸") 主动 du 真测推翻
+- V0.37 B': infra (--dry-run) 让 maintainer 真跑前 0 token 校 cost
+- **V0.38 F2**: V0.34.5 retrospective **预测**对, V0.38.0 决策门槛先写, V0.38.2 真测验证预测
+
+V0.34 教训从"被动 catch"到"主动验证"到"系统预测". V0.39+ 应预期"预测"模式成主流.
+
+### 真发现 #19 沉淀 (V0.34.5 retrospective 预测对的特殊性)
+
+跟 #13 image tile (V0.33.0 plan subagent 真发现) / #17 chromium serialize (V0.34.4 真测) /
+#18 VACUUM INSERT-only (V0.36.3 真测) 同模式, 但 #19 **不同**:
+
+- #13/#17/#18: plan agent 估高 → 真测推翻 → 真发现 (事后 catch)
+- **#19**: V0.34.5 retrospective **预测** "F2 不是 perf gain" → V0.38.0 plan agent 仍重蹈估 0.5-2%
+  → V0.38.2 真测验证预测 (sub-system 预测 catch plan agent 重蹈)
+
+教训: **预测系统建立后, plan agent 仍会重蹈** (V0.34.5 retro line vs V0.38.0 plan 矛盾, plan
+agent 不充分 retrospective context). V0.39+ 应**强制 plan agent 引用 retrospective 预测+
+决策门槛先写** (V0.38.0 已示范模式), 防类似 #19 重蹈.
+
+(累计真发现至 V0.38: 19 个; V0.38 系列 +1: #19.)
+
+### Changed (~0 src LOC, ~150 doc LOC)
+
+- `CHANGELOG.md` V0.38.3 retrospective entry (本)
+- `pyproject.toml` / `__init__.py` 0.38.2 → 0.38.3
+- `uv.lock` 同步
+
+### Verify
+
+- `uv run pytest` → **815 passed, 25 skipped** (V0.38.2 状态, 0 src 改)
+- 0 src 改 → 0 ruff/mypy 重检需求
+
+### V0.39 主题路径 inventory (留 user 选)
+
+跟 V0.33.4/V0.34.5/V0.35.3/V0.36.3/V0.37.3 同句式. autonomous 红线 = 项目方向决策需 user 输入.
+
+候选路径 (V0.34.5 + V0.35.3 + V0.36.3 + V0.37.3 累计):
+- **G stealth 加固** (sannysoft.com 72% → 85%+) — 新 sub-route, F sub-route 已完
+- **A' V0.35 真站点 corpus 扩 5+ task** (加 dialog/upload 真站点轴)
+- **新真发现 sub-route** (基于真站点 corpus 找新 bottleneck)
+- **C 长期 session 记忆 cross-task 学习** (V0.13.0 memory.db 778 行, 怎么 query inject)
+- **D LLM 调用 retry / cache 优化** (V0.25.0 transient retry 已落, 加 token 级 cache 减重复 LLM 调用)
+- 其他用户提的方向
+
+**F sub-route 已完** (F1 + F2 都 ROI 推翻, local chromium ceiling ≈ 0-5%, 推 remote chromium
+场景才有意义). V0.39 应转其他维度真 perf gain.
+
+(不带 ROI 估算 — V0.34 教训第 N 次应用: 项目方向 ROI 假设需 user 输入而非 Claude 自决.)
+
 ## [0.38.2] - 2026-05-11
 
 ### Feat + Doc (V0.38 F2 walker 合并 3/N — 真测 after-F2 + 决策门槛兑现 + 真发现 #19)
