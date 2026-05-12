@@ -2,6 +2,74 @@
 
 All notable changes to web-agent. 版本号遵循 SemVer 简化形式（V<major>.<minor>.<patch>）。
 
+## [0.40.0] - 2026-05-11
+
+### Feat (V0.40 A' 真站点 corpus 扩 5+ task 系列开篇 1/N — +2 task Mercury element + IANA doc)
+
+V0.39.1 收尾 user 选 A' 主题. V0.40 扩 V0.35 已加 3 actuator 真站点 task 到 5+ task, 加 dialog/
+upload 等真站点 capability 轴的 5+ task 验收线. V0.40.0 起步加 2 task (Mercury element extract +
+IANA doc extract), V0.40.1 再加 3 task 凑齐 5+ task.
+
+### V0.34 教训应用第 N+1 次 (curl micro experiment 抓 fixture stale)
+
+实施前 curl probe 验每个候选 fixture predicate 真存:
+
+```bash
+# Plan agent 4 候选 (C1/C2/C3/C4) probe 结果:
+
+# C1 Mercury element page ✓
+curl https://en.wikipedia.org/wiki/Mercury_(element) | grep "atomic number 80"
+# → "Mercury is a chemical element; ... atomic number 80" 真在首段, 5+ 年永稳
+
+# C2 Wikipedia missing-article fallback ✗ (推翻)
+curl https://en.wikipedia.org/wiki/Nonexistent_Page_xyz999 | grep "does not have an article"
+# → 空! Wikipedia 现 missing-article 跳"创建文章"页, 旧 fallback 文本去掉.
+# V0.34 教训 catch: Plan agent C2 fixture 推翻
+
+# C3 IANA example-domains ✓
+curl https://www.iana.org/help/example-domains | grep "are maintained"
+# → "example.com and example.org are maintained for documentation purposes" RFC 2606 永稳
+```
+
+**V0.40.0 选 C1 + C3 (C2 推翻)**. 跟 V0.35.0 W3C iframe 推翻 / V0.35.2 4 候选 (B/A/C/D) 选 2 同
+模式 — fixture 选型必 micro experiment 真测验, 不信 plan agent 估算.
+
+### Changed (~85 src LOC + ~80 测 LOC)
+
+- `eval/corpus/v040_capability_real_world_extended.py` **新** ~85 LOC: 2 EvalTask +
+  CAPABILITY_REAL_WORLD_EXTENDED_PREDICATES dict (跟 v035_capability_real_world.py 同 pattern)
+  - `WIKIPEDIA_MERCURY_ELEMENT_EXTRACT`: Mercury element page extract, predicate "atomic number 80"
+  - `IANA_EXAMPLE_DOMAINS_EXTRACT`: IANA RFC 2606 doc extract, predicate "are maintained"
+- `eval/corpus/__init__.py` +5 行 import + 2 ALL_TASKS append + 1 ALL_PREDICATES 合并
+- `tests/test_eval_runner.py` +5 fast 测 + 改 2 测 count (20→22, real-net ≥8→≥10)
+- `tests/test_eval_smoke.py` 改 2 测 (corpus all 20→22, real-world 8→10)
+- `pyproject.toml` / `__init__.py` 0.39.1 → **0.40.0** (V0.40 系列开篇 minor bump)
+- `uv.lock` 同步
+
+### Verify
+
+- `uv run pytest` → **824 passed, 25 skipped** (+5 V0.40.0 fast 测, 0 现测破)
+- `uv run ruff check` → all clean
+- `uv run mypy` → Success no issues in 52 src files (+1 v040 corpus)
+- 0 真 chromium / 真 LLM 调用 (autonomous OK, real-net cassette 录 deferred V0.40.x.1)
+
+### V0.40 系列 plan
+
+| ver | 状态 | scope | autonomous |
+|-----|------|-------|------------|
+| **V0.40.0** | ✅ 本提交 | +2 task (Mercury element + IANA doc) + curl probe verify | ✅ |
+| V0.40.1 | 待 | +3 task 凑齐 5+ task (candidate C4 octocat blob raw / C5 httpbin form / C6 wiki disambiguation click) | ✅ |
+| V0.40.2 | 待 | 系列收尾 retrospective + V0.41 inventory | ✅ |
+| V0.40.x.1 (skip) | maintainer 真录 cassette ~$1-2 token | 🛑 红线 |
+
+跟 V0.32.1/V0.33.4/V0.35.1/V0.36.2/V0.37.4 同 SemVer 跳号 deferred maintainer pattern.
+
+### V0.40 主题诚实降级
+
+V0.40 是 corpus 扩 5+ task 系列, 不真量化 lean/WebP/F1/F2 等 perf 指标. V0.40.0-V0.40.1 是
+autonomous 准备 task spec 落地; V0.40.x.1 maintainer 真录 cassette 后才能验 task 真跑通 +
+predicate 真过. 跟 V0.37 B' 同 "infra 准备 + V0.40.x.1 真录留 maintainer" 模式.
+
 ## [0.39.1] - 2026-05-11
 
 ### Doc (V0.39 G stealth 加固系列收尾 2/2 — 即时 withdraw + 真发现 #20 沉淀 + 文档数值 stamp 制度化)

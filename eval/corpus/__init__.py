@@ -56,6 +56,11 @@ from eval.corpus.v035_capability_real_world import (
     WIKIPEDIA_QFT_SCROLL_HISTORY,
     WIKIPEDIA_SEARCH_QUANTUM_FIELD_THEORY,
 )
+from eval.corpus.v040_capability_real_world_extended import (
+    CAPABILITY_REAL_WORLD_EXTENDED_PREDICATES,
+    IANA_EXAMPLE_DOMAINS_EXTRACT,
+    WIKIPEDIA_MERCURY_ELEMENT_EXTRACT,
+)
 from eval.predicates import Predicate, SubstringPredicate
 from eval.types import EvalTask
 
@@ -103,6 +108,8 @@ ALL_TASKS: list[EvalTask] = [
     WIKIPEDIA_SEARCH_QUANTUM_FIELD_THEORY,  # V0.35.0 A capability × real-world (actuator type+click)
     GITHUB_OCTOCAT_COMMITS_FIRST,  # V0.35.2 actuator click + multi-step navigation
     WIKIPEDIA_QFT_SCROLL_HISTORY,  # V0.35.2 actuator scroll-to-section
+    WIKIPEDIA_MERCURY_ELEMENT_EXTRACT,  # V0.40.0 A' wikipedia Mercury element page extract
+    IANA_EXAMPLE_DOMAINS_EXTRACT,  # V0.40.0 A' IANA official doc extract
 ]
 
 # 合并所有 predicate 到单 dict (runner 反查用). 各子 dict value 类型 mypy 默认推断为
@@ -120,6 +127,7 @@ for _sub_dict in (
     REAL_WORLD_PREDICATES,  # V0.30.2 D real-world
     CHAIN_REAL_WORLD_PREDICATES,  # V0.32.0 D' chain × real-world
     CAPABILITY_REAL_WORLD_PREDICATES,  # V0.35.0 A capability × real-world
+    CAPABILITY_REAL_WORLD_EXTENDED_PREDICATES,  # V0.40.0 A' 真站点 corpus 扩
 ):
     ALL_PREDICATES.update(_sub_dict)
 
