@@ -2,6 +2,139 @@
 
 All notable changes to web-agent. 版本号遵循 SemVer 简化形式（V<major>.<minor>.<patch>）。
 
+## [0.44.0] - 2026-05-11
+
+### Doc (V0.44 W6-A reflect path audit 系列开篇 1/4 — 真发现 #24 SAFETY 假阳性 + #25 WALLCLOCK plan 缺陷, V0.28 subagent A 双端推翻)
+
+V0.43 闭环后 V0.44 主题选定 = V0.28 W6-A reflect path audit (#21 催生). 本提交 = doc audit:
+trace.db 87 tasks 真实失败 marker 详查 → V0.28 subagent A "SAFETY/WALLCLOCK 外因 reflect 无价值"
+假设**双端真测推翻**, V0.44 plan reframe (4 commit, 不 5).
+
+### V0.28 reflect path 现状 (V0.41 reframe 后)
+
+- `reflect.py:46-49` `TRIGGERING_FAILURE_MARKERS = {max_steps, LOOP_DETECTED}` (V0.28 subagent A 决)
+- `loop.py:399-434` `_maybe_reflect_on_failure` 仅在 max_steps/LOOP_DETECTED abort 路径触发
+- `memory.py:133` `init_reflections_db` **lazy create** (record_reflection 触发时建表)
+- **#21 真发现** (V0.41.0): 生产 memory.db reflections 表 **从未被 lazy create** (因 should_reflect
+  仅覆盖 5.7%, 真实生产 trigger 0 次)
+- V0.41.1 reframe: inject 时不读 reflections 表, 从 memories.result 抽 FAILURE_MARKERS (memory.py:317)
+
+### V0.43.0 trace.db 真实失败 marker 分布 (87 tasks)
+
+| marker | count | % | should_reflect 覆盖 |
+|--------|-------|---|--------------------|
+| (正常 done.result) | ~65 | ~75% | N/A |
+| **SAFETY_BLOCK** | 8 | 9.2% | ❌ |
+| **NULL (任务未结束)** | 10 | 11.5% | ❌ |
+| **WALLCLOCK_EXCEEDED** | 1 | 1.1% | ❌ |
+| max_steps 耗尽 | 3 | 3.4% | ✅ |
+| LOOP_DETECTED | 2 | 2.3% | ✅ |
+| 其他 | ~13 | ~14% | (mix) |
+| **非正常完成总计** | ~22 | **~25%** | should_reflect 覆盖 ~5.7% |
+
+V0.28 subagent A 当时一刀切 "SAFETY/WALLCLOCK 外因 reflect 无价值". V0.44.0 audit 真实 trace 验证:
+
+### 真发现 #24 — SAFETY_BLOCK 主要是 safety predicate 假阳性, 非 LLM 撞墙也非真外因
+
+**Audit 8 SAFETY_BLOCK tasks**:
+- 6/8: demo 'Publish' 按钮 → `safety:send-or-pay`
+- 1/8: httpbin pizza form 'Submit order' → `safety:send-or-pay`
+- 1/8: DuckDuckGo 搜索 'Submit' → `safety:send-or-pay`
+
+→ **全 8/8 = safety predicate 假阳性** ('Publish'/'Submit'/'Submit order' 全非真支付按钮).
+LLM plan 没错 (没误 click 真支付), **predicate 错 (把 generic submit 文本误判 send-or-pay)**.
+
+**V0.28 subagent A 假设错位**: 不是外因 (网络/规则/人机验证), 也不是 plan 缺陷, **而是 safety
+predicate 自己错**. reflect "下次绕开 Publish" 无意义 — predicate 不应拦 Publish.
+
+**真实修复路径**: V0.45 separate scope **修 safety:send-or-pay predicate** (排除 'Publish' /
+'Submit' 等 generic submit 文本; 仅拦真 "send"/"pay"/"购买"/"下单" 类). V0.44 **不加 SAFETY 到
+should_reflect** (加了反 burn token without value).
+
+### 真发现 #25 — WALLCLOCK_EXCEEDED 实际是 plan 缺陷 (LLM extract loop), anti_loop detector miss
+
+**Audit WALLCLOCK 1 task (ac3abe2dd358)** — Hacker News points 数提取, 11 step 全 `extract` action:
+- step 0-10: LLM 反复调 `extract(query="读取 HN #1 points 数")` 不同微 wording
+- 每 step LLM answer "我无法读取" + "让我重新查看截图"
+- **典型 LLM extract loop 死循环**, 360s wallclock 耗尽
+- anti_loop detector miss — 因 query 字符串轻微变化每次 (V0.5.0 anti_loop 仅比对 action_type+args,
+  query noise 让 signature 漂移 → #26 候选)
+
+→ **WALLCLOCK 这 1 sample 100% plan 缺陷**, reflect 有 ROI: hint 应是 "HN points 数若 extract 3 次
+无突破, 切 page.evaluate / scroll / click 换路径".
+
+**V0.28 subagent A 假设错位**: 不是外因 (网络/SDK fault), **而是 plan 缺陷 (LLM 反复同 action
+不切换)**.
+
+**真实修复路径**: V0.44.2 **加 WALLCLOCK_EXCEEDED 到 should_reflect** + wire loop.py wallclock
+abort 路径 reflect 调用. (anti_loop 信号空间扩展 #26 留 V0.45+ scope.)
+
+### V0.44 plan reframe (vs plan subagent 原推 5 commit)
+
+| commit | plan subagent 原推 | V0.44 真测 reframe |
+|--------|------------------|-------------------|
+| V0.44.0 (本) | (not in plan) | **audit doc + 真发现 #24/#25 + plan reframe** |
+| V0.44.1 | startup init_reflections_db | **保留** — 修 #21 dead path |
+| V0.44.2 | 扩 should_reflect: SAFETY + WALLCLOCK + wire | **reframe: 仅加 WALLCLOCK, NOT SAFETY** (因 #24 真发现) + wire loop.py |
+| V0.44.3 | reflect prompt 分流 (3 family) | **scope 收窄: 2 family** (plan-defect + timeout); SAFETY family 不实施; 合并系列收尾 |
+| V0.44.4 | 真测 + audit + CHANGELOG | **合并到 V0.44.3** |
+
+V0.44 reframe 总: **4 commit (V0.44.0-3), 不 5**. SAFETY predicate 假阳性修复 V0.45 separate scope.
+
+### Decision 门槛 (数据驱动, 防 rationalize)
+
+| 指标 | baseline (V0.43) | V0.44 target |
+|------|-----------------|--------------|
+| should_reflect marker 覆盖 (V0.28 + V0.44) | 5.7% (max_steps + LOOP) | ~6.8% (+ WALLCLOCK 1.1%) |
+| should_reflect "真实 plan 缺陷" 覆盖率 | unknown | ~80%+ (剔除 #24 假阳性的 plan-defect 类) |
+| reflections 表行数 (真测) | 0 (#21 dead path) | ≥ 1 (V0.44.1 + V0.44.2 后真实触发) |
+
+V0.44 不追 "覆盖率 17%" 数字目标 (plan subagent 推, 但 V0.44.0 audit 真测推翻 — 80% SAFETY 是假
+阳性). 数据驱动 target = "**真实 plan 缺陷类全部 reflect**".
+
+### V0.34 教训累计应用至 V0.44 (14 系列贯彻)
+
+| 系列 | commit | 教训应用 |
+|------|--------|---------|
+| V0.34 F1 | 6 | 真测被动 catch |
+| V0.35 A | 4 | fixture micro experiment |
+| V0.36 I | 4 | 现状叙事推翻 |
+| V0.37 B' | 4 | infra 准备 (--dry-run) |
+| V0.38 F2 | 4 | retrospective 预测 |
+| V0.39 G | 2 | baseline 即时 withdraw |
+| V0.40 A' | 3 | 每 fixture probe |
+| V0.41 C | 3 | 真测 db schema → reframe |
+| V0.42 D | 4 | 真测 SDK + image cache miss → reframe |
+| V0.43 R | 3 | audit ARCHITECTURE 先于 cleanup + per-fixture 双向数据 |
+| **V0.44 W6-A** | **4** | **真测 trace.db 推翻 V0.28 subagent A 假设** (SAFETY/WALLCLOCK 双端外因假设错), 拒绝 plan subagent 数字目标 |
+
+**V0.44 教训应用新维度**: **N 年前 plan subagent 假设也要真测验证, 不能继承不审**. V0.28 W6-A
+subagent A 决 "SAFETY/WALLCLOCK 外因" 当时**未数据驱动** (V0.28 时还没生产 trace.db). V0.43.0 audit
+trace.db 87 tasks 后, 双端假设推翻. 跟 V0.39 #20 README "72%" 24-month-stale 同模式 —
+**历史 plan subagent 假设也是文档, 也会 stale, 也需 audit**.
+
+(累计真发现至 V0.44: 25 个; V0.44 系列 +2: #24 SAFETY predicate 假阳性 + #25 WALLCLOCK plan 缺陷.)
+
+### Changed (~0 src LOC, ~200 doc LOC)
+
+- `CHANGELOG.md` V0.44.0 entry (本)
+- `pyproject.toml` / `__init__.py` 0.43.2 → 0.44.0
+- `uv.lock` 同步
+
+### Verify
+
+- `uv run pytest` → **850 passed, 25 skipped** (V0.43.2 状态 0 src 改 → 0 测变)
+- 0 src 改 → 0 ruff/mypy 重检需求
+
+### V0.45 主题候选 (V0.44 完后 surface)
+
+V0.44 audit 催生 V0.45 候选:
+- **#24 follow-up: safety:send-or-pay predicate 假阳性修复** (剔除 'Publish'/'Submit'/'Submit order'
+  等 generic submit 文本误判; 仅拦真 send/pay/购买/下单 类)
+- **#26 候选: anti_loop detector signal 扩** (signature 应 normalize query/args 文本 noise,
+  V0.44.0 #25 WALLCLOCK extract loop catch miss)
+- 其他 V0.43.2 inventory 路径 (A'' / V0.42 housekeeping / V0.42 真测 cassette / ...)
+
 ## [0.43.2] - 2026-05-11
 
 ### Doc (V0.43 真发现 sub-route 系列收尾 3/3 — V0.34 教训 13 系列累计 + 23 真发现 + V0.44 inventory)
