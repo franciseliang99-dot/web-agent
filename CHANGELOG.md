@@ -2,6 +2,102 @@
 
 All notable changes to web-agent. 版本号遵循 SemVer 简化形式（V<major>.<minor>.<patch>）。
 
+## [0.46.0] - 2026-05-11
+
+### Doc (V0.46 anti_loop detector signal 扩系列开篇 1/3 — #26 follow-up audit + plan)
+
+V0.44.0 trace.db audit catch 真发现 #25: HN WALLCLOCK task (ac3abe2dd358) 11 step 全 extract
+action, anti_loop **miss** 因 signature 漂移. V0.46 = #26 follow-up scope 启动 — audit
+anti_loop detector signature root cause + fix plan + decision 门槛.
+
+### Root cause audit (`src/web_agent/loop.py:82-84`)
+
+```python
+def _action_signature(action: Action) -> str:
+    return f"{action.type}:{json.dumps(_action_args_only(action), ...)}"
+```
+
+`_action_args_only` 返 dict 含所有 field 除 type/thought. 对 `ExtractAction` =
+`{query, answer}` 两 field 都进 sig.
+
+**问题**:
+- `answer` 由 LLM 生成 (extract action 返 LLM 当步答案), 每步反复重试时 answer 自然不同
+  ("我无法读取..." vs "让我重新查看..." vs "从截图中..." 不同 wording)
+- `query` 也由 LLM 微调每步 ("HN #1 帖子的标题和 points 数" → "HN #1 帖子的 points 数（投票数）" → ...)
+- → sig 永远不重复, anti_loop deque (`maxlen=3`) 永远凑不齐 3 个相同 sig → miss
+
+### V0.44 audit 真实 trace (ac3abe2dd358 task)
+
+11 step 全 extract action, query 11 个不同 wording 但同 intent (读 HN points 数), answer 11
+个 "我无法读取" 类不同 wording. anti_loop 0 trigger, WALLCLOCK at step 11.
+
+### Fix 方案对比
+
+| 方案 | 描述 | 决策 |
+|------|------|------|
+| A | sig 仅 action_type | ✗ REJECT: Click 不同 mark_id 也 trigger (合理 progression false-pos) |
+| **B** | **ExtractAction sig 删 answer + normalize query** | **✅ 选** — V0.44 真实 evidence 直击 |
+| C | 加 type-only detector N=5 同 type | ✗ DEFER: future-proofing, V0.44 无 evidence (V0.34 教训 conservative) |
+| D | embedding / text similarity | ✗ REJECT: over-engineered, B 已 cover |
+
+**选 B, 拒 C/A/D**. C subagent 推 belt-and-suspenders 但 V0.45 conservative scope reframe 同模式 —
+仅修 V0.44 真实 evidence, 不预测 hypothetical 未来. V0.47+ scope 若未来 audit 发现 type-only
+loop evidence 再加 C.
+
+### V0.46 fix plan (3 commit, 跟 V0.43 R / V0.45 节奏一致)
+
+| commit | scope |
+|--------|-------|
+| V0.46.0 (本) | doc audit + plan + decision 门槛 + 拒 C |
+| V0.46.1 | ExtractAction sig fix (drop answer + normalize query) + regression test V0.44 trace replay |
+| V0.46.2 | 系列收尾 retrospective + V0.34 教训 16 累计 + V0.47 inventory |
+
+### Decision 门槛 (V0.46.1 真测验证)
+
+| 指标 | baseline (V0.44) | V0.46 target |
+|------|-----------------|--------------|
+| V0.44 HN trace 11 step extract loop anti_loop trigger | 0 (miss, WALLCLOCK at step 11) | **≥1 trigger by step ≤5** (regression test 用 11 真实 query 复现, sig collapse) |
+| 现有 anti_loop test (其他 action 类型) | green (test_loop_anti_loop) | green (no regression) |
+| 全 pytest | 880 passed | ≥880 passed (新 regression test +N) |
+
+### V0.34 教训累计应用至 V0.46 (16 系列贯彻)
+
+| 系列 | commit | 教训应用 |
+|------|--------|---------|
+| V0.43 R | 3 | audit ARCHITECTURE 先于 cleanup + per-fixture 双向数据 |
+| V0.44 W6-A | 4 | 历史 plan subagent 假设 audit + 真测双端推翻 |
+| V0.45 | 3 | 数据驱动 conservative fix scope, 拒 subagent 激进 plan |
+| **V0.46** | **3** | **同 V0.45 pattern: 拒 subagent C (type-only detector) 因 V0.44 无 evidence** |
+
+V0.46 是 conservative reframe 第 4 次 (累计: V0.42 D image cache / V0.43 R3 W5-C.2 cleanup /
+V0.45 Send amount / V0.46 type-only detector). 稳定 pattern — subagent plan 推全面 future-proofing,
+我数据驱动 scope 收窄.
+
+(累计真发现至 V0.46: 25 个; V0.46 系列 +0 新, 是 #25 follow-up #26 真 fix; #26 是 V0.44.0 #25
+follow-up 同源真发现 sub-finding, 不单独 count.)
+
+### Changed (~0 src LOC, ~150 doc LOC)
+
+- `CHANGELOG.md` V0.46.0 entry (本)
+- `pyproject.toml` / `__init__.py` 0.45.2 → 0.46.0
+- `uv.lock` 同步
+
+### Verify
+
+- `uv run pytest` → **880 passed, 25 skipped** (V0.45.2 状态 0 src 改 → 0 测变)
+- 0 src 改 → 0 ruff/mypy 重检需求
+
+### V0.47 主题候选 (V0.46 完后 surface)
+
+(跟 V0.45.2 inventory + V0.46.0 DEFER 同 candidates):
+- **type-only anti_loop detector** (V0.46.0 DEFER C, 留 V0.47+ scope 若未来发现 evidence)
+- delete/remove rule name cleanup (V0.45 catch)
+- send amount co-signal (V0.45 plan 保守留)
+- A'' V0.40 corpus 再扩 (drag/dialog/upload anti-abuse fixture)
+- V0.42 housekeeping (V0.36.2 + V0.41 C5 deferred 合并)
+- V0.44.x.1 / 真测 cassette (maintainer 红线)
+- 其他用户提的方向
+
 ## [0.45.2] - 2026-05-11
 
 ### Doc (V0.45 safety:send-or-pay predicate 假阳性修复系列收尾 3/3 — V0.34 教训 15 系列累计 + V0.46 inventory)
