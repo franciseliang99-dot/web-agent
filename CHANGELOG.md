@@ -2,6 +2,73 @@
 
 All notable changes to web-agent. 版本号遵循 SemVer 简化形式（V<major>.<minor>.<patch>）。
 
+## [0.53.0] - 2026-05-11
+
+### Feat (V0.53 schema startup generalize — V0.52 #28 设计层泛化, trace.db init_db startup hook)
+
+V0.52.0 真发现 #28 (V0.42 telemetry schema 生产 dead-migrate, autonomous 长期不烧 token →
+run_react_loop 内 lazy init_db 永不触发) autonomous fix 完成 schema. 本提交 = **设计层
+generalize**: cli.run_task startup 加 `init_trace_db(Path("data/trace.db")).close()`, 跟 V0.44.1
+`init_reflections_db` + V0.47.2 `init_protections_db` 同模式. **未来 V0.x.0 加 db schema 字段后,
+schema 始终在 cli startup 触发 migrate, 不再依赖 lazy run_react_loop trigger**.
+
+### Changed (~10 src LOC + ~15 test LOC)
+
+- `src/web_agent/cli.py`:
+  - import `init_db as init_trace_db` from `web_agent.trace`
+  - run_task `mem_db` startup hook block 加 `init_trace_db(Path("data/trace.db")).close()`
+    (紧跟 `init_reflections_db` + `init_protections_db` 同序)
+- `tests/test_cli.py`:
+  - `test_cli_imports_init_trace_db_for_schema_startup_invariant` (跟 V0.44.1 import-time invariant
+    test 同模式, 防未来重构移除 startup hook)
+- `pyproject.toml` / `__init__.py` 0.52.0 → 0.53.0
+- `uv.lock` 同步
+- `CHANGELOG.md` V0.53.0 entry (本)
+
+### Schema startup hook chain (V0.13.0 → V0.53.0 累计)
+
+| ver | hook | db schema |
+|-----|------|-----------|
+| V0.13.0 | `init_memory_db` (lazy via `record_task`) | `memories` 表 |
+| V0.28.1 | `init_reflections_db` (lazy via `record_reflection`, V0.44.1 startup 加固) | `reflections` 表 |
+| V0.42.0 | `init_db` ALTER 4 字段 (lazy via `run_react_loop`) | `steps` 加 4 cache token 字段 |
+| V0.44.1 | startup hook `init_reflections_db(mem_db).close()` | 防 #21 lazy create dead path |
+| V0.47.2 | startup hook `init_protections_db(mem_db).close()` | 防 #28 同 pattern (新表) |
+| **V0.53.0** (本) | **startup hook `init_trace_db(trace_db).close()`** | **防 #28 V0.42 ALTER dead-migrate** |
+
+### V0.34 教训累计应用至 V0.53 (23 系列贯彻)
+
+| 系列 | 教训应用 |
+|------|---------|
+| V0.41 C #21 + V0.44.1 fix | reflections lazy → startup invariant |
+| V0.47.2 fix | protections schema startup 同模式 |
+| **V0.52 #28 + V0.53 fix** | **trace V0.42 telemetry schema lazy → startup generalize 完成** |
+
+**V0.53 教训应用新维度**: **schema startup hook 设计模式 generalize 完成** — 所有 db schema 改动
+后 cli startup 强制 init_db 调用, 不再依赖任何 lazy run-time trigger. 未来 V0.x.0 加新 schema
+字段时 init_db 的 ALTER 直接被 cli startup 触发, autonomous 长期不烧 token 也保证 schema 一致.
+
+跟 V0.44.1 + V0.47.2 累计形成 startup invariant chain (memory + reflections + protections + trace),
+所有 db schema 在 cli 启动时 migrate 触发, **避免 #21 / #28 类 dead-migrate 真发现重蹈**.
+
+### Decision 门槛 (V0.53 验证)
+
+| 指标 | target | 真测结果 |
+|------|--------|---------|
+| `cli_mod` 有 `init_trace_db` attr | ✅ | 防回归 test pass |
+| pytest | ≥ 977 (V0.52.0 baseline) | **978** ✅ (+1 V0.53.0 防回归 test) |
+| mypy / ruff | clean | clean (54 src) |
+| trace.db V0.42 4 字段 schema 触发 | autonomous import 完成 (V0.52.0 已 fix), startup hook 防回归 | ✅ |
+
+(累计真发现至 V0.53: 28 个不变; V0.53 系列 +0 — V0.52 #28 设计层 generalize 实施, 不催新 catch.)
+
+### V0.54 主题候选 (V0.53 完后 surface, 等用户)
+
+- **代理层接入** (env `WEB_AGENT_PROXY`, V0.48.2 #26 催生) 首选
+- Captcha Solver / 指纹浏览器
+- V0.42.x.1 / V0.51.x.1 user env 真跑 sample
+- 其他用户提的方向
+
 ## [0.52.0] - 2026-05-11
 
 ### Doc (V0.52 deferred maintainer cassette sweep 1/1 — 真发现 #28 V0.42 telemetry schema dead-migrate + 关单 sieve + autonomous fix)

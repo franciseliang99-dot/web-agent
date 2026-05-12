@@ -30,6 +30,7 @@ from web_agent.memory import (
     is_success,
     record_task,
 )
+from web_agent.trace import init_db as init_trace_db
 from web_agent.planner_hierarchy import (
     build_subgoal_hint_text,
     merge_into_memories,
@@ -90,6 +91,10 @@ async def run_task(
         init_reflections_db(mem_db).close()
         # V0.47.2: 同模式 init protection_observations 表 (V0.47.3 cli 写入 + inject 用).
         init_protections_db(mem_db).close()
+        # V0.53.0: 同模式 init trace.db (V0.52.0 真发现 #28 generalize — V0.42 telemetry schema
+        # ALTER 不再依赖 run_react_loop lazy 触发. autonomous 长期不烧 token 也保证 schema migrate
+        # 触发, 跟 V0.44.1 reflections + V0.47.2 protections startup hook 模式一致).
+        init_trace_db(Path("data/trace.db")).close()
         domain = extract_domain(start_url)
         include_mem = (
             os.environ.get("WEB_AGENT_MEMORY_DISABLE", "").lower() not in ("true", "1", "yes")

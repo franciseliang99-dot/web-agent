@@ -35,6 +35,21 @@ def test_cli_imports_init_reflections_db_for_startup_invariant() -> None:
     )
 
 
+def test_cli_imports_init_trace_db_for_schema_startup_invariant() -> None:
+    """V0.53.0: cli.py 启动路径需含 init_trace_db (#28 真发现 generalize — V0.42 telemetry
+    schema ALTER 不再依赖 run_react_loop lazy 触发).
+
+    防回归: 未来重构若移除 cli startup hook, trace.db V0.42 4 字段 (input_tokens / output_tokens
+    / cache_creation_input_tokens / cache_read_input_tokens) 永不 ALTER, 重蹈 #28 schema
+    dead-migrate (跟 V0.44.1 #21 + V0.47.2 protections 同 startup invariant 模式).
+    """
+    import web_agent.cli as cli_mod
+    assert hasattr(cli_mod, "init_trace_db"), (
+        "V0.53.0: cli.py 缺 init_trace_db 导入 — startup hook 被移除? "
+        "真发现 #28 trace.db V0.42 schema dead-migrate 风险回归"
+    )
+
+
 # ---------- argparse 测 (用 monkeypatch run_task 收集 kwargs) ----------
 
 class _RunTaskRecorder:
