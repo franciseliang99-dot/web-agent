@@ -2,6 +2,104 @@
 
 All notable changes to web-agent. 版本号遵循 SemVer 简化形式（V<major>.<minor>.<patch>）。
 
+## [0.40.2] - 2026-05-11
+
+### Doc (V0.40 A' 真站点 corpus 扩系列收尾 3/3 — 5 task × 4 子轴 × 4 站家矩阵 + V0.41 inventory)
+
+V0.40.0 +2 task + V0.40.1 +3 task 凑齐 5 task 达 A' "5+ task" 验收线. 本提交收尾: 系列总结
++ V0.34 教训 10 系列累计 + V0.40 corpus 矩阵 + V0.41 主题 inventory. 跟 V0.33.4 / V0.34.5 /
+V0.35.3 / V0.36.3 / V0.37.3 / V0.38.3 / V0.39.1 系列收尾同骨架.
+
+### V0.40 系列回顾 (3 commit autonomous + 1 deferred)
+
+| ver | 状态 | scope | autonomous |
+|-----|------|-------|------------|
+| V0.40.0 | ✅ | +2 task (Mercury element + IANA doc) + curl probe 验 | ✅ |
+| V0.40.1 | ✅ | +3 task (octocat raw / httpbin form / Mercury planet disambig) 凑齐 5+ | ✅ |
+| **V0.40.2** | ✅ 本提交 | 系列收尾 retrospective + V0.41 inventory | ✅ |
+| V0.40.x.1 (skip) | maintainer 真录 5 task cassette ~$1-2 token | 🛑 红线 |
+
+V0.40 A' 真站点 corpus 扩系列闭环 (3 commit autonomous, 1 maintainer deferred).
+
+### V0.40 corpus 矩阵 (5 task × 4 actuator 子轴 × 4 独立站家)
+
+| actuator 子轴 | task | predicate | site |
+|--------------|------|-----------|------|
+| actuator-page-extract | v040-wikipedia-mercury-element-extract | "atomic number 80" | wikipedia |
+| actuator-page-extract | v040-iana-example-domains-doc-extract | "are maintained" | iana |
+| actuator-click-raw | v040-github-octocat-raw-blob-extract | "Hello World!" | github |
+| actuator-form-read | v040-httpbin-form-customer-name-label-extract | "Customer name" | httpbin |
+| actuator-disambig-click | v040-wikipedia-mercury-disambig-planet-follow | "smallest planet" | wikipedia |
+
+**跨站源 baseline**: V0.30 全 wikipedia (1 source), V0.30.4 加 GitHub (2 source), V0.40 扩至 **4
+source** (wikipedia / iana / github / httpbin), V0.34 教训应用: 防 fixture 选型偏单一站.
+
+### V0.40 真站点 corpus 全集 (累计 V0.30 + V0.32 + V0.35 + V0.40 = 13 task)
+
+| 系列 | task 数 | actuator 子轴 |
+|------|---------|--------------|
+| V0.30 D real-world | 3 | static perceiver-extract (wikipedia + github octocat) |
+| V0.32 D' chain × real-world | 2 | chain (GitHub topic / Wikipedia cross-ref) |
+| V0.35 A capability × real-world | 3 | type+click search / click-nav / scroll-to-section |
+| **V0.40 A' real-world 扩** | **5** | **page-extract / click-raw / form-read / disambig-click** |
+
+**累计 13 real-net task** (跟 V0.40 前 8 task 比 +5, 翻倍接近). corpus 真实 capability axis 覆盖
+从 V0.30 单一 perceiver-extract 拓宽到 V0.40 多 actuator 子轴矩阵.
+
+### V0.34 教训累计应用至 V0.40 (10 系列贯彻)
+
+| 系列 | commit 数 | 教训应用模式 |
+|------|----------|------------|
+| V0.34 F1 | 6 | 真测被动 catch Plan agent 估算错 |
+| V0.35 A | 4 | fixture 选型 micro experiment 推翻 W3C |
+| V0.36 I | 4 | 现状叙事推翻 ("内存爆炸") |
+| V0.37 B' | 4 | infra 准备 (--dry-run 防意外烧 token) |
+| V0.38 F2 | 4 | retrospective 预测对, plan agent 仍重蹈 |
+| V0.39 G | 2 | baseline 真测即时 withdraw (事前 catch) |
+| **V0.40 A'** | **3** | **每 task fixture 实施前 curl probe 验, V0.40.0 C2 推翻** |
+
+**V0.34 教训进化轨迹**: 6→4→4→4→4→2→3 commit. V0.40 比 V0.39 多 1 commit 因 5+ task 需要
+2 commit 实施 (V0.40.0 + V0.40.1), 不是 ROI 推翻型. 真测应用 模式趋稳:
+- V0.39 G: baseline 真测立即 withdraw (1 次 catch 决策)
+- V0.40 A': 每个 fixture 个别 curl probe 验 (5 次 catch 持续应用, C2 推翻 + C1/C3/C4/C5/C6 保留)
+
+**V0.34 教训方法论沉淀**: "每个 fixture 单独 micro experiment" 比 "整系列 baseline 真测" 更
+细粒度. V0.40 系列示范 "对一组 fixture 逐个验证" 模式, 而非 V0.39 那种"整体一次性 baseline".
+
+### 真发现累计 V0.40
+
+V0.40 系列 +0 真发现 (跟 V0.35 A 同 corpus 扩 + V0.37 B' 同 infra 准备 性质, 真发现要等 V0.40.x.1
+maintainer 真录 cassette 后才能出). 累计真发现至 V0.40: 20 (V0.39 已加 #20 README stale).
+
+### Changed (~0 src LOC, ~110 doc LOC)
+
+- `CHANGELOG.md` V0.40.2 retrospective entry (本)
+- `pyproject.toml` / `__init__.py` 0.40.1 → 0.40.2
+- `uv.lock` 同步
+
+### Verify
+
+- `uv run pytest` → **824 passed, 25 skipped** (V0.40.1 状态, 0 src 改 → 0 测变)
+- 0 src 改 → 0 ruff/mypy 重检需求
+
+### V0.41 主题路径 inventory (留 user 选)
+
+跟 V0.33.4 / V0.34.5 / V0.35.3 / V0.36.3 / V0.37.3 / V0.38.3 / V0.39.1 同句式. autonomous 红线
+= 项目方向决策需 user 输入.
+
+候选路径 (V0.39.1 累计):
+- **C 长期 session 记忆 cross-task 学习** (V0.13.0 memory.db 778 行, query inject 设计)
+- **D LLM cache / retry 优化** (V0.25.0 transient retry 已落, 加 token 级 cache 减重复 LLM 调用)
+- **新真发现 sub-route** (基于真站点 corpus 找新 bottleneck)
+- **A'' V0.40 corpus 再扩** (drag/dialog/upload 真站点轴仍未覆盖, 但 anti-abuse fixture 难找)
+- **其他方向** (用户提)
+
+**已闭环主题** (V0.40 后): F sub-route (F1+F2 全 ROI 推翻), G stealth (96.8% 接近 ceil),
+A/A' real-world corpus 13 task (跨 4 站家). **未推** (V0.37.4/V0.36.2/V0.35.1/V0.40.x.1
+deferred): maintainer 真录 cassette / data-clean 真删 (retention 决策红线).
+
+(不带 ROI 估算 — V0.34 教训第 N 次应用: 项目方向 ROI 假设需 user 输入而非 Claude 自决.)
+
 ## [0.40.1] - 2026-05-11
 
 ### Feat (V0.40 A' 真站点 corpus 扩 2/N — +3 task 凑齐 5+ task 验收线)
