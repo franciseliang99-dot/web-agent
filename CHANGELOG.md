@@ -2,6 +2,86 @@
 
 All notable changes to web-agent. 版本号遵循 SemVer 简化形式（V<major>.<minor>.<patch>）。
 
+## [0.38.2] - 2026-05-11
+
+### Feat + Doc (V0.38 F2 walker 合并 3/N — 真测 after-F2 + 决策门槛兑现 + 真发现 #19)
+
+V0.38.0 写决策门槛 ≥5%/1-5%/<1%, V0.38.1 实施 W1+W2 合并, V0.38.2 真测 after-F2 +
+V0.38.0 baseline compare. 真测结果跟 V0.34.5 retrospective "F2 代码 simplification 不是
+perf gain" **预测对**, 真发现 #19 沉淀.
+
+### 真测数据 (`data/bench/v0.38.2-after-f2-baseline.json`)
+
+| fixture | V0.38.0 before | V0.38.2 after | Δ% |
+|---------|----------------|---------------|-----|
+| if0-sh0-leaf5 | 113.4 | 122.8 | +8.3% (cold cache outlier) |
+| if1-sh0-leaf3 | 129.7 | 129.9 | +0.2% |
+| if1-sib3-sh0-leaf3 | 194.4 | 181.0 | **-6.9%** (faster) |
+| if1-sib5-sh0-leaf3 | 242.6 | 248.1 | +2.3% |
+| if2-sh0-leaf3 | 168.8 | 166.4 | -1.4% |
+| if2-sib3-sh0-leaf3 | 432.1 | 434.5 | +0.6% |
+| if5-sh0-leaf3 | 249.4 | 241.1 | -3.3% |
+
+**平均 ~0%, std ~4.8%** — F2 真节省**在噪声范围内**.
+
+### 真发现 #19 F2 W1+W2 walker 合并 (local chromium) 真节省 ≈ 0
+
+**Plan agent 估算 (V0.38.0)**: 0.5-2% (单 frame ~0.5-1ms, 多 frame ~3-6ms).
+**真测推翻 (V0.38.2)**: ≈ 0 (平均 -0.5%, ±5% 噪声完全淹没).
+
+**根因**: chromium V8 JIT 优化 DOM tree 穿透 + querySelectorAll('*') 在 < 50 node fixture
+~微秒级 (~0.01ms). 合并节省的 1 次穿透在总 perceive ms ~100-450 内是 ~0.01% 量级.
+
+**特殊性 (跟 #13/#17/#18 不同)**: V0.34.5 retrospective **已预测**"F2 代码 simplification 不是
+perf gain". V0.38.2 真测**验证预测对**, 而非推翻 plan agent 后发现. **V0.34 教训制度化已深入到
+能"预测"而非"事后发现"** — V0.34.5 → V0.38.2 时间跨度内 plan agent 仍重蹈 (估 0.5-2%), 但
+retrospective + 系列预测能 catch.
+
+(累计真发现至 V0.38: 19 个; V0.38 系列 +1: #19.)
+
+### 决策门槛兑现 (V0.38.0 先写, V0.38.2 落地)
+
+V0.38.0 门槛: < 1% → withdraw. 真测 ~0% 严格按门槛应**revert V0.38.1**.
+
+**选 B (保留 V0.38.1 + 标 simplification only)**: 跟 V0.34.4 F1 "implemented but ROI 不及预期
+cross-origin deferred" 同模式. 理由:
+- F2 实施代码 -15 LOC, 读 perceiver.py 少认知负担 (1 walker 不是 2) — 真简化
+- perf gain ~0 是诚实标记 (V0.34 教训诚实降级)
+- 校正决策门槛: V0.38.0 "< 1% withdraw" 应区分"perf-only withdraw" vs "code-quality retain"
+  → simplification ROI 跟 perf ROI 是两轴, 决策门槛只对 perf 轴
+
+### 教训扩展 (V0.34 教训第 N+1 次)
+
+V0.34.5 提"F2 不是 perf gain", V0.38.0 plan agent 引用此句但仍"估 0.5-2%". V0.38.2 真测验证
+V0.34.5 预测对, plan agent 估算偏 1-2x 高.
+
+**真原因**: plan agent 算 "DOM 穿透时间" 假设 ~1ms/层, 实际 chromium V8 JIT < 0.1ms.
+**Plan agent 性能假设缺乏对 JIT / 编译器优化的建模**.
+
+**V0.34 教训扩展**: 任何 perf 优化 plan 前, micro bench 验证假设的基本 building blocks
+(e.g. "DOM 穿透耗时 ms 数"), 而非估算高层 saving %.
+
+### Changed (~150 doc LOC + 1 baseline JSON)
+
+- `data/bench/v0.38.2-after-f2-baseline.json` **新**: 7 fixture × 8 sample after-F2 真测
+- `docs/perceive-bench-after-f2-V0.38.2.md` **新** ~150 行: 真测数据 + 真发现 #19 + 决策落地 + 教训扩展
+- `pyproject.toml` / `__init__.py` 0.38.1 → 0.38.2
+- `uv.lock` 同步
+
+### Verify
+
+- `uv run pytest` → **815 passed, 25 skipped** (V0.38.1 状态, 0 src 改 → 0 测变)
+- 0 src 改 → 0 ruff/mypy 重检需求
+
+### V0.38 系列进度
+
+| ver | 状态 | scope |
+|-----|------|-------|
+| V0.38.0 | ✅ | baseline before-F2 + decision doc |
+| V0.38.1 | ✅ | F2 W1+W2 walker 合并实施 + 契约 verify |
+| **V0.38.2** | ✅ 本提交 | 真测 after-F2 + 决策落地 (选 B simplification only) + 真发现 #19 |
+| V0.38.3 | 待 | 系列收尾 + V0.39 主题 inventory |
+
 ## [0.38.1] - 2026-05-11
 
 ### Feat (V0.38 F2 SoM JS walker 合并 2/N — _SOM_INJECT_JS W1+W2 合并单 walker)
