@@ -2,6 +2,106 @@
 
 All notable changes to web-agent. 版本号遵循 SemVer 简化形式（V<major>.<minor>.<patch>）。
 
+## [0.42.3] - 2026-05-11
+
+### Doc (V0.42 D LLM cache 系列收尾 4/4 — 4 维优化矩阵 + V0.34 教训 12 系列累计 + V0.43 inventory)
+
+V0.42.0 telemetry + V0.42.1 tools cache_control + V0.42.2 token budget guard 已落 (3 commit
+autonomous). 本提交收尾: 系列总结 + V0.34 教训 12 系列累计 + V0.43 主题 inventory. 跟 V0.33.4
+/ V0.34.5 / V0.35.3 / V0.36.3 / V0.37.3 / V0.38.3 / V0.39.1 / V0.40.2 / V0.41.2 系列收尾同骨架.
+
+### V0.42 系列回顾 (4 commit autonomous + 1 deferred)
+
+| ver | scope | LOC | 状态 |
+|-----|-------|-----|------|
+| V0.42.0 | cache hit-rate audit telemetry (Usage schema + client + trace) | ~80 src + 150 测 | ✅ |
+| V0.42.1 | tools schema cache_control (reframe 仅 tools, plan agent image+text 推翻) | ~15 src + 95 测 | ✅ |
+| V0.42.2 | token budget guard (runaway loop 防御, 跟 V0.24.2 wallclock 同模式) | ~40 src + 80 测 | ✅ |
+| **V0.42.3** | 系列收尾 retrospective + V0.43 inventory | ~110 doc | ✅ 本提交 |
+| V0.42.x.1 (skip) | maintainer 真测 V0.40 5 task corpus, 看真省 token % | 🛑 红线 |
+
+V0.42 D LLM cache / retry 优化系列闭环 (4 commit autonomous + 1 maintainer deferred).
+
+### V0.42 优化 4 维矩阵 (跟 V0.41 4 维 inject 聚合呼应)
+
+| 维度 | V0.42 加固 | 真节省路径 |
+|------|-----------|-----------|
+| 1. cache 范围扩 | system (V0.15.x) + tools (V0.42.1) 都 cache | input cost ~3-4K tok cache hit |
+| 2. cache 观测 | V0.42.0 telemetry (cache_creation / read 字段) | maintainer 真测 cache hit % |
+| 3. cost 守护 | V0.42.2 token budget guard | runaway loop 防意外烧 |
+| 4. retry 加固 | V0.25.0 transient retry (已落) | RateLimit/Timeout/5xx 同 step 重 |
+
+V0.42 不动 user_content (image + marks + trace) — 每 step 变 cache miss + creation 反成本.
+F sub-route 优化 (V0.34 F1 + V0.38 F2) 节省 perceive 端, V0.42 D 节省 LLM 端, 互不重叠.
+
+### V0.34 教训累计应用至 V0.42 (12 系列贯彻)
+
+| 系列 | commit 数 | 教训应用模式 |
+|------|----------|------------|
+| V0.34 F1 | 6 | 真测被动 catch |
+| V0.35 A | 4 | fixture micro experiment |
+| V0.36 I | 4 | 现状叙事推翻 |
+| V0.37 B' | 4 | infra 准备 (--dry-run) |
+| V0.38 F2 | 4 | retrospective 预测 |
+| V0.39 G | 2 | baseline 真测即时 withdraw |
+| V0.40 A' | 3 | 每 fixture probe |
+| V0.41 C | 3 | 真测 db schema 决定 plan reframe |
+| **V0.42 D** | **4** | **真测 SDK + 真测 db schema 决定优化范围 (image cache miss 推翻 plan agent image+text 推)** |
+
+**V0.42 教训应用新维度**: SDK 字段层 + db schema 层 双维真测推 plan reframe. plan agent V0.42.1
+原推 "image + text 都加 cache_control" → 真分析 image base64 每 step 变 cache miss + cache_creation
+1.25× 反成本 → reframe **仅 tools cache_control**.
+
+跟 V0.41.1 reframe (plan agent 推 reflections 表, 真测 db 表不存在改 memories.result) 同思路 —
+**实施前真测 SDK 行为 + 数据流 / schema 现状** 比 plan agent 假设更可靠.
+
+### Changed (~0 src LOC, ~110 doc LOC)
+
+- `CHANGELOG.md` V0.42.3 retrospective entry (本)
+- `pyproject.toml` / `__init__.py` 0.42.2 → 0.42.3
+- `uv.lock` 同步
+
+### Verify
+
+- `uv run pytest` → **848 passed, 25 skipped** (V0.42.2 状态, 0 src 改 → 0 测变)
+- 0 src 改 → 0 ruff/mypy 重检需求
+
+### V0.42 真发现 (V0.42.0 sink — 未单列 #N, 但 reframe 价值同)
+
+**finding**: V0.15.x 注释吹的 "已用 prompt caching" 实仅 cache system prompt (~2K tok). 大头
+user_content (~10K tok image base64 + marks + trace) **跨 step 变 cache miss**. V0.42.1 加
+tools cache_control 扩 cache 范围到 ~3-4K tok (system + tools), 但 user_content 大头 V0.34 教训
+"reframe": **不应 cache** (cache miss + cache_creation 1.25× 反成本).
+
+V0.42 系列实质 perf gain 等待 V0.42.x.1 maintainer 真测 (V0.42.0 telemetry 已 instrumented),
+但 V0.42 教训沉淀已直接价值: **cache 策略实施前真分析 cache breakpoint 位置 + 每 block 跨 step
+变化率**, 防 plan agent "全加 cache_control" 反成本.
+
+### V0.43 主题路径 inventory (留 user 选)
+
+跟历次系列收尾同句式. autonomous 红线 = 项目方向决策需 user 输入.
+
+候选路径:
+- **新真发现 sub-route** (基于真站点 corpus 找新 bottleneck)
+- **A'' V0.40 corpus 再扩** (drag/dialog/upload 真站点轴 — anti-abuse fixture 难找)
+- **V0.28 reflect path audit** (#21 催生: should_reflect 触发率 0% 调研 + fix)
+- **V0.42 housekeeping** (V0.36.2 + V0.41 C5 deferred 合并 — memory.db + screenshots 清理)
+- **V0.42 后真测 cassette** (maintainer 真录 + V0.42 真省验证) — 但 maintainer 红线
+- 其他用户提的方向
+
+**已闭环主题** (V0.42 后):
+- F sub-route (F1+F2 ROI 推翻)
+- G stealth (96.8% 接近 ceil)
+- A/A' real-world corpus (13 task, 4 站家)
+- C 长期记忆 cross-task 学习 (4 维聚合 inject)
+- **D LLM cache 优化 (V0.42 完, 4 维矩阵 + telemetry + budget guard)**
+
+**未推** (deferred maintainer):
+- V0.37.4 / V0.40.x.1 / V0.41.x.1 / V0.42.x.1: 真录 cassette + 真测 token 省 % (ANTHROPIC_API_KEY + ~$1-2)
+- V0.36.2 / V0.41 C5: housekeeping retention 决策红线
+
+(不带 ROI 估算 — V0.34 教训第 N 次应用: 项目方向 ROI 假设需 user 输入而非 Claude 自决.)
+
 ## [0.42.2] - 2026-05-11
 
 ### Feat (V0.42 D LLM cache 3/N — token budget guard, runaway loop 防御)
