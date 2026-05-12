@@ -2,6 +2,101 @@
 
 All notable changes to web-agent. 版本号遵循 SemVer 简化形式（V<major>.<minor>.<patch>）。
 
+## [0.45.0] - 2026-05-11
+
+### Doc (V0.45 safety:send-or-pay predicate 假阳性修复系列开篇 1/3 — #24 follow-up audit + plan)
+
+V0.44.0 trace.db audit catch 真发现 #24: SAFETY_BLOCK 8/8 任务全是 safety:send-or-pay predicate
+假阳性. 本提交 = V0.45 #24 follow-up scope 启动: audit safety.py 当前 regex root cause +
+V0.45 修 plan + decision 门槛.
+
+### Root cause audit (`src/web_agent/safety.py:35-53`)
+
+**英文 `_DANGER_BUTTON_PATTERNS[0]`** 含 4 个 generic 动词 over-block: `submit|publish|post|order`
+(standalone). 这些词不指向真支付:
+- `submit`: 所有 form submit 都命中 (httpbin pizza / search / login form)
+- `publish`: 所有 publish 类按钮命中 (dev.to / Gmail compose 等)
+- `post`: 所有 forum post / blog post 按钮命中
+- `order` (standalone): "Submit order" 命中, 但 "Order History" / "Sort Order" 同命中
+
+**中文 `_DANGER_BUTTON_PATTERNS[1]`**: 类似含 `发布|提交` (与上述 submit/publish 对偶) generic.
+
+(`delete|remove` rule name 错位 — 'send-or-pay' 不应含 destructive, V0.46 cleanup scope).
+
+### V0.44 audit 真实 false-pos case (8/8 SAFETY_BLOCK)
+
+| count | button text | regex 命中词 |
+|-------|------------|------------|
+| 6 | 'Publish' (demo 'Type here' input + 'Publish' button) | `publish` |
+| 1 | 'Submit order' (httpbin pizza form) | `submit` AND `order` |
+| 1 | 'Submit' (DuckDuckGo search) | `submit` |
+
+### V0.45 fix plan (3 commit)
+
+| commit | scope |
+|--------|-------|
+| V0.45.0 (本) | doc audit + plan + decision 门槛 |
+| V0.45.1 | safety.py regex fix (英文删 submit/publish/post/order standalone, 中文删 发布/提交) + test_safety.py 更新 + 新建 test_safety_v044_regression.py |
+| V0.45.2 | 系列收尾 retrospective + V0.34 教训 15 累计 + V0.46 inventory |
+
+### Conservative scope (拒绝 subagent 激进 plan)
+
+- ✅ **仅删** V0.44 audit 真实 evidence 显示假阳性的 generic 动词: `submit|publish|post|order` (standalone)
+- ❌ **NOT 动 send**: V0.44 audit 没显示 Send false-pos; subagent plan 推 "send 加 amount co-signal"
+  (即 "Send $50" 拦, "Send Email" 释放) 但 V0.34 教训 "数据驱动 fix 不超 scope" 选保守 — Send Email
+  仍拦留 V0.46+ scope 如未来 audit 发现 Send false-pos
+- ❌ **NOT 动 delete/remove**: rule name 'send-or-pay' 不含 destructive, V0.46 cleanup
+- ✅ **保留 specific 短语**: `place[ -]order|confirm[ -]?order` (真支付动作)
+
+### Decision 门槛 (V0.45.1 真测验证)
+
+| 指标 | baseline (V0.44) | V0.45 target |
+|------|-----------------|--------------|
+| False-positive (V0.44 audit 8 case) | 100% (8/8 误拦) | **0%** (V0.45.1 8 case 全 allow=True) |
+| False-negative (真支付 fixture 8 case) | unknown | **0%** (V0.45.1 8 真支付 fixture 全 allow=False) |
+| 现有 `test_safety.py:137` ("Submit", True) | 化石断言 (V0.45 之前 over-block 化石) | 改 ("Submit", False) |
+
+V0.45.1 真测 fixture 覆盖:
+- False-pos releases (V0.45 修): Publish / Submit / Submit order / Post / Publish Article / Sort Order
+- True-pos still blocks (V0.45 不动): Pay Now / Confirm Payment / Place Order / Withdraw $500 /
+  立即支付 / 下单 / 确认订单 / 转账
+
+### V0.34 教训累计应用至 V0.45 (15 系列贯彻)
+
+| 系列 | commit | 教训应用 |
+|------|--------|---------|
+| V0.43 R | 3 | audit ARCHITECTURE 先于 cleanup + per-fixture 双向数据 |
+| V0.44 W6-A | 4 | 历史 plan subagent 假设 audit + 真测双端推翻 |
+| **V0.45** | **3** | **数据驱动 conservative fix scope, 拒绝 subagent 激进 plan (Send 加 amount co-signal V0.44 无 evidence)** |
+
+V0.45 教训应用模式: **subagent plan 推 future-proofing, 我保守 conservative — 仅修 V0.44 audit
+真实 evidence**. 跟 V0.42 D 仅 tools cache 不动 image 同模式 — 只修真发现 evidence 看到的, 不预测
+hypothetical 未来.
+
+(累计真发现至 V0.45: 25 个; V0.45 系列 +0 新真发现, V0.45 是 #24 follow-up fix.)
+
+### Changed (~0 src LOC, ~150 doc LOC)
+
+- `CHANGELOG.md` V0.45.0 entry (本)
+- `pyproject.toml` / `__init__.py` 0.44.3 → 0.45.0
+- `uv.lock` 同步
+
+### Verify
+
+- `uv run pytest` → **854 passed, 25 skipped** (V0.44.3 状态 0 src 改 → 0 测变)
+- 0 src 改 → 0 ruff/mypy 重检需求
+
+### V0.46 主题候选 (V0.45 完后 surface)
+
+V0.45 audit 催生:
+- **`delete|remove` rule name cleanup**: rule 'send-or-pay' 不该含 destructive, 拆 'destructive-action' 单独 rule
+- **`send` 加 amount co-signal**: 如未来 audit 发现 'Send Email' / 'Send Message' false-pos
+- **#26 候选: anti_loop detector signal 扩** (V0.44.0 #25 WALLCLOCK extract loop catch miss)
+- A'' V0.40 corpus 再扩 (drag/dialog/upload anti-abuse fixture)
+- V0.42 housekeeping (V0.36.2 + V0.41 C5 deferred 合并)
+- V0.42/V0.44 后真测 cassette (maintainer 红线)
+- 其他用户提的方向
+
 ## [0.44.3] - 2026-05-11
 
 ### Doc (V0.44 W6-A reflect path audit 系列收尾 4/4 — V0.34 教训 14 系列累计 + 25 真发现 + V0.45 inventory)
