@@ -2,6 +2,115 @@
 
 All notable changes to web-agent. 版本号遵循 SemVer 简化形式（V<major>.<minor>.<patch>）。
 
+## [0.39.0] - 2026-05-11
+
+### Feat (V0.39 G stealth 加固系列开篇 1/N — probe 改造抽分 + 真发现 #20 推翻 README "72%" 24-month-stale)
+
+V0.38.3 收尾 user 选 G 主题. V0.39.0 = probe 改造抽 DOM 分数 + baseline 真录 + decision doc.
+**真发现 #20 推翻 README "~72%"**: V0.16.14 时数 24 months 未重测, V0.30.0 apply_stealth_plus 加固
+后真值 96.8% (30/31, 唯一 fail WebDriver New). 跟 V0.38.0 / V0.36.0 / V0.34.0 framework-first 同节奏.
+
+### 真发现 #20 README "~72%" 24-month-stale, 真值 96.8%
+
+V0.38.3 retrospective + V0.39 主题描述都引 "sannysoft.com ~72% 通过率" (V0.16.14 patchright spike
+时数). V0.30.0 后大量加固 (`apply_stealth_plus` + V0.30.4 stealth_plus 真发现) **未重测**, README
++ ARCHITECTURE §1.3 + V0.34.5 retrospective 引此数据持续 24 months 不更新.
+
+**真测推翻** (V0.39.0 commit, `data/stealth_probes/sannysoft_20260512_004959.json`):
+
+```json
+{
+  "summary": {
+    "total": 31,
+    "passed_count": 30,
+    "pass_rate": 0.968,
+    "failed_tests": ["WebDriver\n(New)"]
+  }
+}
+```
+
+**真值: 30/31 passed (96.8%), 唯一 fail = WebDriver (New)**. 比 README 72% **+24.8%**, 跟 V0.30
++ V0.34.4 sink 真发现 #17 同模式 — Plan 估算/文档数据没真测验证就是 silent stale.
+
+**Plan 影响**: V0.38.3 retrospective 提的 V0.39 主题 "sannysoft 72% → 85%+" **已自动达成** —
+V0.30.0 已把 72% 提到 96.8% (远超 85%+). V0.39 主题原 ROI 估 (13% 提升空间) **完全错误**, 真实
+空间仅 3.2% (1/31 修 WebDriver New).
+
+**教训**: 文档数值的"上次更新时间"必须刻在 doc 里. V0.39 起所有 stealth / perceiver / token 数据
+doc 引用**必带版本号 stamp** (e.g. "V0.39.0 96.8%, 30/31, 2026-05-11"), 防 plan agent / 未来
+Claude 引旧数据猜 ROI.
+
+(累计真发现至 V0.39: 20 个; V0.39 系列 +1: #20.)
+
+### 决策门槛兑现 (V0.34 教训第 9 次, 先写防 rationalize)
+
+V0.39 决策门槛 (V0.38.0 同模式但更严):
+
+| 提升 | 决策 |
+|------|------|
+| ≥ 10% | 实施保留 + 沉淀真发现 |
+| 5-10% | 保留 + 标"边际收益" |
+| **< 5%** | **withdraw 不实施** + 沉淀真发现 |
+
+**当前提升空间 = 3.2% (1/31)** → 严格按门槛 **< 5% withdraw**.
+
+### V0.39 plan reframe (V0.38.3 推 5 commit, 真测后压到 2 commit)
+
+| ver | 原 plan | reframe |
+|-----|---------|---------|
+| V0.39.0 (本) | baseline + decision | ✅ baseline + 真发现 #20 + 文档校正 + probe 改造 |
+| V0.39.1 | G #1 实施 (CDP stealth 注入) | ~~实施~~ **withdraw** (< 5% 门槛触发) |
+| V0.39.2-4 | G #2 / 真测 / 收尾 | ~~~ **跳** |
+| **V0.39.1** (压缩后) | — | 系列收尾 retrospective (5→2 commit) |
+
+跟 V0.38.2 真测推翻 plan agent 估算后 reframe 同模式, **但 V0.39 更彻底** — V0.38.2 实施完才发现,
+V0.39.0 实施前就 catch (V0.34 教训进化到"实施前 micro experiment 即时 withdraw").
+
+### Changed (~110 LOC test + ~150 LOC doc + ~5 LOC README/ARCHITECTURE)
+
+- `tests/test_stealth_probe_sannysoft.py` 改造:
+  - 加 `_EXTRACT_RESULTS_JS` JS 抽 sannysoft 表 `tr td` 分数
+  - 加 `_summarize` helper (passed_count/failed_count/pass_rate/failed_tests dedupe+sort)
+  - 加 JSON dump `data/stealth_probes/sannysoft_<date>.json` (跟 PNG 同 timestamp)
+  - V0.30.2 size > 10KB 断保留 (向后兼容); 加 total >= 20 断 (防完全没抽到)
+  - pytestmark 从 module 移到 real-test only (fast unit 测默 CI 跑不 skip)
+  - +4 fast unit 测 (`_summarize` extract count / empty / dedupe / `_EXTRACT_RESULTS_JS` smoke)
+- `data/stealth_probes/sannysoft_<date>.json` 新格式 (V0.30.2 仅 PNG, V0.39.0 加 JSON dump)
+- `docs/stealth-probe-baseline-V0.39.0.md` **新** ~150 行: 真发现 #20 + 决策门槛 + reframe plan
+- `README.md` L315 "~72%" → V0.39.0 96.8% 数据 stamp + V0.30.0 加固背景
+- `docs/ARCHITECTURE.md` §1.3 L77 "~72%" → V0.39.0 96.8% stamp + 真发现 #20 注
+- `pyproject.toml` / `__init__.py` 0.38.3 → **0.39.0** (V0.39 系列开篇 minor bump)
+- `uv.lock` 同步
+
+### Verify
+
+- `uv run pytest` → **819 passed, 25 skipped** (+4 V0.39.0 fast 测, 0 现测破)
+- `uv run ruff check` → all clean
+- `uv run mypy` → Success no issues in 51 src files
+- 真 probe `WEB_AGENT_RUN_SLOW=1 WEB_AGENT_STEALTH_PROBE=1 pytest tests/test_stealth_probe_sannysoft.py` →
+  passed, JSON dump = 30/31 96.8%
+
+### V0.34 教训进化轨迹累计 V0.39 (9 系列)
+
+| 系列 | 教训应用模式 |
+|------|-------------|
+| V0.34 F1 | 真测被动 catch Plan agent 估算错 |
+| V0.35 A | fixture 选型时主动 micro experiment |
+| V0.36 I | 现状叙事主动推翻 (du 真测) |
+| V0.37 B' | infra 准备 (--dry-run 防意外烧 token) |
+| V0.38 F2 | retrospective 预测对, plan agent 仍重蹈 |
+| **V0.39 G** | **baseline 真测**触发 decision 门槛**即时 withdraw** (V0.34 教训成熟到事前 catch) |
+
+V0.34 教训进化已成熟到 "实施前 micro experiment 即时 withdraw 不耗心力" — 8 个系列累计沉淀的
+方法论真起作用.
+
+### V0.39 系列进度
+
+| ver | 状态 | scope | autonomous |
+|-----|------|-------|------------|
+| **V0.39.0** | ✅ 本提交 | probe 改造 + baseline + 真发现 #20 + 文档校正 + decision 门槛 withdraw | ✅ |
+| V0.39.1 | 待 | 系列收尾 retrospective (压缩 5→2 commit) + V0.40 inventory | ✅ |
+
 ## [0.38.3] - 2026-05-11
 
 ### Doc (V0.38 F2 SoM JS walker 合并系列收尾 4/4 — F sub-route 系列双 ROI 推翻总结 + V0.39 inventory)

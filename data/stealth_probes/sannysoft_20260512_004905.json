@@ -1,0 +1,52 @@
+{
+  "date": "20260512_004905",
+  "mode": "launch_headless",
+  "summary": {
+    "total": 31,
+    "passed_count": 30,
+    "failed_count": 1,
+    "pass_rate": 0.967741935483871,
+    "failed_tests": [
+      "WebDriver\n(New)"
+    ],
+    "unknown_rows": 26
+  },
+  "raw": {
+    "passed": [
+      "User Agent\n(Old)",
+      "WebDriver Advanced",
+      "Chrome\n(New)",
+      "Permissions\n(New)",
+      "Plugins Length\n(Old)",
+      "Plugins is of type PluginArray",
+      "Languages\n(Old)",
+      "WebGL Vendor",
+      "WebGL Renderer",
+      "Broken Image Dimensions",
+      "PHANTOM_UA",
+      "PHANTOM_PROPERTIES",
+      "PHANTOM_ETSL",
+      "PHANTOM_LANGUAGE",
+      "PHANTOM_WEBSOCKET",
+      "MQ_SCREEN",
+      "PHANTOM_OVERFLOW",
+      "PHANTOM_WINDOW_HEIGHT",
+      "HEADCHR_UA",
+      "HEADCHR_CHROME_OBJ",
+      "HEADCHR_PERMISSIONS",
+      "HEADCHR_PLUGINS",
+      "HEADCHR_IFRAME",
+      "CHR_DEBUG_TOOLS",
+      "SELENIUM_DRIVER",
+      "CHR_BATTERY",
+      "CHR_MEMORY",
+      "TRANSPARENT_PIXEL",
+      "SEQUENTUM",
+      "VIDEO_CODECS"
+    ],
+    "failed": [
+      "WebDriver\n(New)"
+    ],
+    "unknown_rows": 26
+  }
+}
