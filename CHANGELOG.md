@@ -2,6 +2,115 @@
 
 All notable changes to web-agent. 版本号遵循 SemVer 简化形式（V<major>.<minor>.<patch>）。
 
+## [0.47.0] - 2026-05-11
+
+### Doc (V0.47 防护识别 + 学习记忆系列开篇 1/5 — 文章 3 层能力 audit + autonomous scope 划界 + plan)
+
+用户引文 2026 AI 代理"防护识别 + 自动切换"3 层能力 (L1 静态 / L2 动态 / L3 分类 + Router 学习).
+本系列 = autonomous 可做 scope: **L1+L2+L3 分类 + Router 学习记忆**, 不接 L3 武器切换 (住宅代理 /
+Captcha Solver / 指纹浏览器 = maintainer 红线 V0.48+ scope).
+
+### 现状 audit (`src/web_agent/`)
+
+| 现有 | 文章对位 | gap |
+|------|---------|-----|
+| `captcha.py` 4 vendor JS probe (CF Turnstile / reCAPTCHA / hCaptcha / google-verify) | L1 静态识别 部分 | 仅 vendor 命中 → 人工解, **不分等级 + 不记忆** |
+| `apply_stealth_plus` (V0.30.0, sannysoft 96.8%) | L3 高防 fingerprint 部分 | **静态单一 fingerprint**, 不动态切 by domain |
+| `loop.py` `_TRANSIENT_HTTP_STATUSES` (408/429/503...) | L2 状态码 部分 | **仅 LLM API retry, 不监测页面 nav status** |
+| `memory.py` W5-D `MemoryEntry` + `DomainStats` + `FailurePattern` | Router 学习 部分 | **无 protection_level 字段** |
+| `browser.py` 单 binary CDP, 0 proxy flag | L3 武器切换 | **零** — V0.48+ maintainer 红线 |
+| `jd_extract.py:240` V0.20.4 实测 CF (`page.goto` 触发重激活) | — | **被动 mitigation (用 ctx.pages 不 goto), 不主动识别 + 记忆** |
+
+### V0.43.0 trace.db 防护类失败 baseline
+
+| marker | count | % |
+|--------|-------|---|
+| "Cloudflare 验证中" (jd_extract task) | 1 | ~1% |
+| 403 / 429 / 503 page nav | 0 | 0% (corpus 主要测无保护站 Wiki/httpbin/DDG/dev.to) |
+| (V0.44 fixed) SAFETY_BLOCK predicate 假阳性 | 0 | 0% (V0.45.1 已 fix #24) |
+
+直接因防护失败比例低 (~1/87), 但**项目能力空白** — V0.47 加 autonomous identification +
+记忆基础, V0.48+ maintainer 决定是否接 paid 武器切换.
+
+### V0.47 autonomous scope 划界
+
+✅ **autonomous 可做** (本系列 V0.47.0-4):
+- L1 静态识别: `ctx.on("response")` 抓 main-frame headers / set-cookie / status (`server: cloudflare`,
+  `cf_clearance`, `cf-ray` 等)
+- L2 动态检测: 同 listener 抓 page nav status code (403/429/503) — 不做 JS render 压力测试 (scope wide)
+- L3 分类: `classify(signal) -> Literal["low","medium","high","unknown"]` 纯函数 (跟 CLAUDE.md
+  "模型 vs 代码边界" — status / header 字段已能回答, 不需 LLM)
+- Router 学习: `memory.py` 加 `protection_observations` 表, `build_inject_string` prepend 1 行
+  "本 domain 上次保护等级: high (CF Turnstile + 403)" 让 LLM planner 上下文看到 (跟 V0.41 C1
+  pass_rate prepend 同模式)
+- **不切武器, 仅观察 + 记忆 + inject context**. LLM planner 看到上下文自决要不要 retry/换 task
+
+❌ **maintainer 红线 V0.48+ scope** (需用户授权):
+- 数据中心代理 / 住宅代理 = 第三方付费 + env 配 API key + 烧 $
+- Captcha Solver (2Captcha 等) = 第三方付费 + captcha.py V0.16.x 既定立场 "人工解 better"
+- 指纹浏览器 (Multilogin / AdsPower) = 第三方付费 + 改 CDP launch 路径
+- 动态 fingerprint pool 扩展 (autonomous 边界, 但当前 96.8% 已近 ceiling)
+
+### V0.47 fix plan (5 commit, 跟 V0.43 R / V0.44 W6-A / V0.45 / V0.46 节奏)
+
+| commit | scope | LOC |
+|--------|-------|-----|
+| V0.47.0 (本) | doc audit + plan + decision 门槛 + autonomous scope 划界 | ~200 doc |
+| V0.47.1 | `protection.py` 新模块 + `ctx.on("response")` listener + `classify()` 纯函数 + unit tests | ~80 src + ~80 test |
+| V0.47.2 | `memory.py` `protection_observations` 表 + `record_protection` + `recall_protection_by_domain` | ~50 src + ~50 test |
+| V0.47.3 | `build_inject_string` prepend protection level (跟 V0.41 C1 pass_rate 同 chain) | ~30 src + ~30 test |
+| V0.47.4 | 系列收尾 retrospective + V0.34 教训 17 累计 + V0.48 maintainer inventory | ~100 doc |
+
+### Decision 门槛 (V0.47.0 先写, 防 rationalize)
+
+| 指标 | target | 失败处理 |
+|------|--------|---------|
+| 10 真站 detection 准确率 (V0.47.1 fixture) | ≥ 80% (8/10 正确 Low/Med/High 分类) | <80% → V0.47.1 plan 推翻, reframe signal 维度 |
+| memory.db schema migration | 0 breakage on existing 898 rows | breakage → revert 走新表路径 |
+| pytest | ≥ 898 (V0.46.2 baseline) + V0.47 fast tests | regression → 修 |
+| LOC | < 200 src + < 300 test | 超 → scope cut |
+
+### V0.34 教训应用至 V0.47 (17 系列贯彻预期)
+
+| 系列 | commit | 教训应用 |
+|------|--------|---------|
+| V0.45 | 3 | 数据驱动 conservative fix scope, 拒 subagent 激进 plan |
+| V0.46 | 3 | plan 假设双向真测 (V0.45 拒激进, V0.46 真测发现保守不够) |
+| **V0.47** | **5** | **L3 武器切换在第三方付费红线处停手** — observe + record + inject context, 不假设全自动闭环. 跟 captcha.py V0.16 W4-2 "人工解 better" 既定立场一致 |
+
+**V0.47 教训应用新维度**: **第三方付费 / API key 类武器在 autonomous scope 边界停手, 列 maintainer
+inventory**. 跟 V0.40.x.1 / V0.42.x.1 / V0.44.x.1 / V0.46.x.1 真录 cassette + ANTHROPIC_API_KEY
+红线同模式 — autonomous 不烧 $, maintainer 决定红线.
+
+(累计真发现至 V0.47: 25 个; V0.47 系列 +0 暂时, 真测发现 catch 留 V0.47.1-4 实际跑.)
+
+### Changed (~0 src LOC, ~200 doc LOC)
+
+- `CHANGELOG.md` V0.47.0 entry (本)
+- `pyproject.toml` / `__init__.py` 0.46.2 → 0.47.0
+- `uv.lock` 同步
+
+### Verify
+
+- `uv run pytest` → **898 passed, 25 skipped** (V0.46.2 状态 0 src 改 → 0 测变)
+- 0 src 改 → 0 ruff/mypy 重检需求
+
+### V0.48 主题候选 (V0.47 完后 surface, **含 maintainer 红线**)
+
+V0.47 audit 直接催生 maintainer 红线 V0.48+:
+- **数据中心代理 / 住宅代理接入** (env `WEB_AGENT_PROXY` + 烧 $ + 测 protection_level=high
+  domain 自动切代理验证)
+- **Captcha Solver API** (2Captcha 等第三方, captcha.py V0.16 立场反向, 需用户重审)
+- **指纹浏览器 CDP launch** (Multilogin / AdsPower, 改 chrome_launcher.py)
+- **动态 fingerprint pool by domain** (autonomous 边界, V0.30.0 96.8% ceiling 评估)
+
+V0.47 完前其他候选:
+- delete/remove rule name cleanup (V0.45 catch)
+- send 加 amount co-signal (V0.45 plan 保守留)
+- A'' V0.40 corpus 再扩
+- V0.42 housekeeping (V0.36.2 + V0.41 C5)
+- 其他用户提的方向
+
 ## [0.46.2] - 2026-05-11
 
 ### Doc (V0.46 anti_loop detector signal 扩系列收尾 3/3 — V0.34 教训 16 系列累计 + V0.47 inventory)
