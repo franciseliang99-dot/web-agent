@@ -2,6 +2,116 @@
 
 All notable changes to web-agent. 版本号遵循 SemVer 简化形式（V<major>.<minor>.<patch>）。
 
+## [0.46.2] - 2026-05-11
+
+### Doc (V0.46 anti_loop detector signal 扩系列收尾 3/3 — V0.34 教训 16 系列累计 + V0.47 inventory)
+
+V0.46.0 plan + V0.46.1 真 fix 已落 (2 commit autonomous). 本提交收尾: 系列总结 + V0.34 教训 16
+系列累计 + V0.47 主题 inventory. 跟 V0.33.4 → V0.45.2 系列收尾同骨架.
+
+### V0.46 系列回顾 (3 commit autonomous, V0.46.1 真测 reframe)
+
+| ver | scope | LOC | 状态 |
+|-----|-------|-----|------|
+| V0.46.0 | audit doc + plan + decision 门槛 (V0.46.0 plan 假设 alternation 不是, 待 V0.46.1 真测推翻) | ~150 doc | ✅ |
+| V0.46.1 | B (sig fix) + 5-window detector (V0.46.0 plan reframe) + 17 unit tests | ~50 src + ~150 test + ~70 doc | ✅ |
+| **V0.46.2** | 系列收尾 retrospective + V0.47 inventory | ~70 doc | ✅ 本提交 |
+
+V0.46 #25 sub-finding (anti_loop signal extension) 闭环 (3 commit, 跟 V0.43 R / V0.45 节奏).
+V0.46.1 真测 reframe 沉淀 V0.34 教训 16 系列新维度.
+
+### V0.46 #25 sub-finding 真 fix 链路
+
+| 阶段 | V0.44 HN trace 11 step extract loop anti_loop trigger |
+|------|--------------------------------------------------|
+| V0.44.0 catch (#25 真发现) | 0 (miss, WALLCLOCK at step 11) |
+| V0.46.0 plan | (无代码改动, plan 假设 B-only 可 fix) |
+| **V0.46.1 真 fix** | **5-window detector trigger at step ≤ 9** (regression test pass) |
+
+V0.46 是 #25 sub-finding 完成 fix (V0.46.1 真 fix), 跟 V0.45 修 #24 同模式 (sub-finding 内
+follow-up scope).
+
+### V0.34 教训累计应用至 V0.46 (16 系列贯彻)
+
+| 系列 | commit | 教训应用 | 真发现 |
+|------|--------|---------|--------|
+| V0.34 F1 | 6 | 真测被动 catch | #15 #16 #17 |
+| V0.35 A | 4 | fixture micro experiment | 0 |
+| V0.36 I | 4 | 现状叙事推翻 | #18 |
+| V0.37 B' | 4 | infra 准备 | 0 (deferred) |
+| V0.38 F2 | 4 | retrospective 预测 | #19 |
+| V0.39 G | 2 | baseline 即时 withdraw | #20 |
+| V0.40 A' | 3 | 每 fixture probe | 0 (deferred) |
+| V0.41 C | 3 | 真测 db schema → reframe | #21 |
+| V0.42 D | 4 | 真测 SDK + image cache miss → reframe | 0 (待 maintainer) |
+| V0.43 R | 3 | audit ARCHITECTURE 先于 cleanup + per-fixture 双向数据 | #22 + #23 |
+| V0.44 W6-A | 4 | 历史 plan subagent 假设 audit + 真测双端推翻 | #24 + #25 |
+| V0.45 | 3 | 数据驱动 conservative fix scope, 拒 subagent 激进 plan | 0 (#24 fix) |
+| **V0.46** | **3** | **plan 假设双向真测 — V0.45 拒 plan 激进, V0.46.1 真测发现保守不够扩 scope** | 0 (#25 sub-finding fix) |
+
+**V0.46 教训应用双向新维度**:
+- V0.45 (上系列): plan 激进 → 真测保守
+- V0.46 (本): plan 保守 → 真测发现保守不够, 扩 scope
+- 共同点: **plan 假设必须真测验证, 不论是激进还是保守**. V0.34 教训核心 = 数据驱动, 任一方向都不
+  能凭假设 — V0.46 是这个核心的双向新示例.
+
+### 真发现 sink 累计 (V0.34 → V0.46, 25 个不变 +0)
+
+V0.46 是 V0.44.0 #25 sub-finding 完成 fix, 不是新 catch. Fix 状态更新:
+- #21 ✅ V0.44.2 真 fix
+- #24 ✅ V0.45.1 真 fix
+- **#25 ✅ V0.46.1 真 fix** (sub-finding: anti_loop signal extension)
+- #17 catch only (chromium 物理限永久 NO-GO 加固)
+- 其他: 部分 fix / mitigation / NO-GO 详见各系列 entry
+
+模式分类不变:
+- 真测推翻 plan agent perf 估算 (5): #13 #17 #18 #19 #23
+- 真测发现 syntax/security 边界 (2): #15 #16
+- 文档 stale / agent 偷懒 (3): #20 #22 #24
+- 生产 schema vs 设计层 drift (1): #21
+- 历史 plan subagent 假设推翻 (1): #25
+
+### V0.47 主题候选 (V0.46 完后 surface)
+
+V0.45/V0.46 audit 累计催生:
+- **type-only anti_loop detector** (V0.46.0 DEFER C, V0.46.1 用更精的 5-window count detector
+  替代, type-only 仍 V0.47+ 候选若未来 audit 发现 click/type 类似 alternation evidence)
+- **delete/remove rule name cleanup** (V0.45 catch: 拆 'destructive-action' 单独 rule)
+- **send 加 amount co-signal** (V0.45 plan 保守留)
+- A'' V0.40 corpus 再扩 (drag/dialog/upload anti-abuse fixture)
+- V0.42 housekeeping (V0.36.2 + V0.41 C5 deferred 合并)
+- V0.44.x.1 / V0.46.x.1 真测 cassette (maintainer 红线)
+- 其他用户提的方向
+
+**已闭环主题** (V0.46 后):
+- F sub-route (F1+F2 ROI 推翻; V0.43 R 加固 #17 物理限)
+- G stealth (96.8% 接近 ceil)
+- A/A' real-world corpus (13 task)
+- C 长期记忆 cross-task 学习
+- D LLM cache 优化 (4 维矩阵)
+- R re-investigation (V0.43, spp 真测 sink #23)
+- W6-A reflect path audit (V0.44, #24/#25 双向真发现 + #21 真 fix)
+- safety predicate fix (V0.45, #24 真 fix)
+- **anti_loop detector signal 扩 (V0.46, #25 sub-finding 真 fix)**
+
+**未推** (deferred maintainer):
+- V0.37.4 / V0.40.x.1 / V0.41.x.1 / V0.42.x.1 / V0.44.x.1 / V0.46.x.1: 真录 cassette + 真测验证
+  (ANTHROPIC_API_KEY 红线)
+- V0.36.2 / V0.41 C5: housekeeping retention 决策红线
+
+(不带 ROI 估算 — V0.34 教训第 16 次应用: 项目方向 ROI 假设需 user 输入而非 Claude 自决.)
+
+### Changed (~0 src LOC, ~70 doc LOC)
+
+- `CHANGELOG.md` V0.46.2 retrospective entry (本)
+- `pyproject.toml` / `__init__.py` 0.46.1 → 0.46.2
+- `uv.lock` 同步
+
+### Verify
+
+- `uv run pytest` → **898 passed, 25 skipped** (V0.46.1 状态 0 src 改 → 0 测变)
+- 0 src 改 → 0 ruff/mypy 重检需求
+
 ## [0.46.1] - 2026-05-11
 
 ### Feat (V0.46 anti_loop detector signal 扩 2/3 — ExtractAction sig fix + 5-window alternation detector reframe)
