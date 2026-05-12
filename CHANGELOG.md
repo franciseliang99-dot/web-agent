@@ -2,6 +2,108 @@
 
 All notable changes to web-agent. 版本号遵循 SemVer 简化形式（V<major>.<minor>.<patch>）。
 
+## [0.43.2] - 2026-05-11
+
+### Doc (V0.43 真发现 sub-route 系列收尾 3/3 — V0.34 教训 13 系列累计 + 23 真发现 + V0.44 inventory)
+
+V0.43.0 plan + V0.43.1 真测 sink #23 已落 (2 commit autonomous). 本提交收尾: 系列总结 + V0.34
+教训 13 系列累计 + V0.44 主题 inventory. 跟 V0.33.4 / V0.34.5 / V0.35.3 / V0.36.3 / V0.37.3 /
+V0.38.3 / V0.39.1 / V0.40.2 / V0.41.2 / V0.42.3 系列收尾同骨架.
+
+### V0.43 系列回顾 (3 commit autonomous, sink 路径)
+
+| ver | scope | LOC | 状态 |
+|-----|-------|-----|------|
+| V0.43.0 | doc 启动 + #22 meta + plan + decision 门槛 | ~150 doc | ✅ |
+| V0.43.1 | instrumentation + 真测 + sink + #23 | ~30 src + ~30 测 + ~100 doc | ✅ |
+| **V0.43.2** | 系列收尾 retrospective + V0.44 inventory | ~100 doc | ✅ 本提交 |
+
+V0.43 R re-investigation 闭环 (3 commit, sink 路径). 比 retain 路径短 2 commit (V0.43.3-4 实施 +
+收尾 skip), 因 sink decision 早 V0.43.1 真测即落定.
+
+### V0.43 双向真发现 (#22 meta + #23 perf)
+
+| # | catch 模式 | 内容 |
+|---|----------|------|
+| **#22 meta** | V0.43.0 sieve | subagent + 自己误判 dead-flag without reading ARCHITECTURE (跟 #20 反向: 文档完整 + agent 偷懒) |
+| **#23 perf** | V0.43.1 真测 | chromium --site-per-process 在 fanout (sibling) 反向损耗 (V0.34 F1 #17 永久 NO-GO 加固) |
+
+V0.43 = 2 真发现 / 3 commit, 与 V0.39 G stealth (1 真发现 / 2 commit) + V0.41 C (1 真发现 / 3
+commit) 同密度. 比"普通"系列 (V0.35 A / V0.37 B' / V0.40 A' / V0.42 D, 0-1 真发现 / 3-4 commit)
+高 1-2 倍.
+
+### V0.34 教训累计应用至 V0.43 (13 系列贯彻)
+
+| 系列 | commit | 教训应用模式 | 真发现 |
+|------|--------|------------|--------|
+| V0.34 F1 | 6 | 真测被动 catch | #15 #16 #17 |
+| V0.35 A | 4 | fixture micro experiment | 0 |
+| V0.36 I | 4 | 现状叙事推翻 | #18 |
+| V0.37 B' | 4 | infra 准备 (--dry-run) | 0 (deferred) |
+| V0.38 F2 | 4 | retrospective 预测 | #19 |
+| V0.39 G | 2 | baseline 即时 withdraw | #20 |
+| V0.40 A' | 3 | 每 fixture probe | 0 (deferred) |
+| V0.41 C | 3 | 真测 db schema → reframe | #21 |
+| V0.42 D | 4 | 真测 SDK + image cache miss → reframe | 0 (待 maintainer) |
+| **V0.43 R** | **3** | **audit ARCHITECTURE 先于 cleanup verdict + per-fixture 双向数据看 fanout 反应** | **#22 + #23** |
+
+**V0.43 教训应用双维新增**:
+1. **#22 catch**: 前 12 系列教训聚焦 "plan 假设 vs 真测", #22 第二维 = "audit 假设 vs ARCHITECTURE
+   intent" — agent 自己 audit 也会偏差 → 任何 cleanup verdict 必须先 grep ARCHITECTURE + CHANGELOG.
+2. **#23 catch**: 单一 metric (overall avg ms) 可能掩盖 fixture 类别分歧. 必须看 per-fixture 数据 +
+   noise floor 实测. 跟 V0.42 D image cache miss 反成本同模式 — 不分 image/text 都加 cache_control
+   反成本; 不分 fanout/non-fanout 都开 spp flag 反损耗.
+
+### 真发现 sink 累计 (V0.34 → V0.43, 23 个)
+
+模式分类:
+- 真测推翻 plan agent perf 估算 (5): #13 #17 #18 #19 #23
+- 真测发现 syntax/security 边界 (2): #15 #16
+- 文档 stale / agent 偷懒 (2): #20 #22
+- 生产 schema vs 设计层 drift (1): #21
+- V0.34 以前历史 (#1-#14): 见 CHANGELOG 早期 entries
+
+### V0.44 主题候选 (留 user 选)
+
+跟历次系列收尾同句式. autonomous 红线 = 项目方向决策需 user 输入.
+
+候选路径 (V0.43 完后更新):
+- **V0.28 reflect path audit** (#21 催生: should_reflect 触发率 0% 调研 + fix; V0.43.0 audit 时
+  trace.db 87 tasks marker 分布数据已收集: SAFETY 8% + max_steps 3% + LOOP 2% + NULL 12% = 25%
+  非正常完成 vs reflect predicate 仅覆盖 5.7%, 数据驱动 plan 已就绪)
+- **A'' V0.40 corpus 再扩** (drag/dialog/upload 真站点轴 — anti-abuse fixture 难找)
+- **V0.42 housekeeping** (V0.36.2 + V0.41 C5 deferred 合并 — memory.db 测试 fixture 噪音清理 +
+  data/screenshots 74M retention; V0.43 audit 已知数据)
+- **V0.42 后真测 cassette** (maintainer 真录 + V0.42 真省验证 — ANTHROPIC_API_KEY 红线)
+- **#23 follow-up** (调研 chromium spp 在 non-fanout 的 10-52% gain 是哪个内部优化路径; 但目标
+  场景 V0.34 F1 fanout 已 NO-GO 加固, follow-up ROI 低)
+- 其他用户提的方向
+
+**已闭环主题** (V0.43 后):
+- F sub-route (F1+F2 ROI 推翻; V0.43 R 加固 F1 #17 物理限)
+- G stealth (96.8% 接近 ceil)
+- A/A' real-world corpus (13 task, 4 站家)
+- C 长期记忆 cross-task 学习 (4 维聚合 inject)
+- D LLM cache 优化 (V0.42 完, 4 维矩阵)
+- **R re-investigation (V0.43, spp 真测 sink #23)**
+
+**未推** (deferred maintainer):
+- V0.37.4 / V0.40.x.1 / V0.41.x.1 / V0.42.x.1: 真录 cassette + 真测 token 省 % (ANTHROPIC_API_KEY + ~$1-2)
+- V0.36.2 / V0.41 C5: housekeeping retention 决策红线
+
+(不带 ROI 估算 — V0.34 教训第 13 次应用: 项目方向 ROI 假设需 user 输入而非 Claude 自决.)
+
+### Changed (~0 src LOC, ~100 doc LOC)
+
+- `CHANGELOG.md` V0.43.2 retrospective entry (本)
+- `pyproject.toml` / `__init__.py` 0.43.1 → 0.43.2
+- `uv.lock` 同步
+
+### Verify
+
+- `uv run pytest` → **850 passed, 25 skipped** (V0.43.1 状态 0 src 改 → 0 测变)
+- 0 src 改 → 0 ruff/mypy 重检需求
+
 ## [0.43.1] - 2026-05-11
 
 ### Feat (V0.43 真发现 sub-route 2/3 — chromium --site-per-process 真测 sink + 真发现 #23 反向损耗)
