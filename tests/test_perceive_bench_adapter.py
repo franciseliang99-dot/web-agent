@@ -115,3 +115,39 @@ async def test_run_bench_browser_close_on_perceive_failure() -> None:
             await run_bench_against_chromium(fixtures, samples_per=2)
 
     assert browser_mock.close.await_count == 1
+
+
+async def test_run_bench_propagates_extra_args() -> None:
+    """V0.43.1: extra_args 传给 chromium.launch(args=...) (--site-per-process 注入路径)."""
+    pw_mock, _browser, _ctx = _build_pw_mock()
+    mock_p = pw_mock.__aenter__.return_value
+    fake_perceive = AsyncMock(return_value=([], "x", []))
+
+    with (
+        patch("eval.perceive_bench_adapter.async_playwright", return_value=pw_mock),
+        patch("eval.perceive_bench_adapter.perceive", fake_perceive),
+    ):
+        fixtures = [build_synthetic_fixture(0, 0, 1)]
+        await run_bench_against_chromium(
+            fixtures, samples_per=1, extra_args=["--site-per-process", "--no-sandbox"],
+        )
+
+    launch_kwargs = mock_p.chromium.launch.call_args.kwargs
+    assert launch_kwargs.get("args") == ["--site-per-process", "--no-sandbox"]
+
+
+async def test_run_bench_default_extra_args_empty() -> None:
+    """V0.43.1: 未传 extra_args → args=[] (V0.34.1 行为不破)."""
+    pw_mock, _browser, _ctx = _build_pw_mock()
+    mock_p = pw_mock.__aenter__.return_value
+    fake_perceive = AsyncMock(return_value=([], "x", []))
+
+    with (
+        patch("eval.perceive_bench_adapter.async_playwright", return_value=pw_mock),
+        patch("eval.perceive_bench_adapter.perceive", fake_perceive),
+    ):
+        fixtures = [build_synthetic_fixture(0, 0, 1)]
+        await run_bench_against_chromium(fixtures, samples_per=1)
+
+    launch_kwargs = mock_p.chromium.launch.call_args.kwargs
+    assert launch_kwargs.get("args") == []

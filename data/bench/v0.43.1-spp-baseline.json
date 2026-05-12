@@ -1,0 +1,67 @@
+{
+  "bench_results": [
+    {
+      "fixture_id": "if0-sh0-leaf5",
+      "perceive_ms": 66.4924792945385,
+      "mark_count": 5,
+      "memory_kb": 400.064453125,
+      "shadow_walks": 0,
+      "iframe_walks": 0,
+      "sample_count": 8
+    },
+    {
+      "fixture_id": "if1-sh0-leaf3",
+      "perceive_ms": 127.40414473228157,
+      "mark_count": 3,
+      "memory_kb": 406.4501953125,
+      "shadow_walks": 0,
+      "iframe_walks": 0,
+      "sample_count": 8
+    },
+    {
+      "fixture_id": "if1-sib3-sh0-leaf3",
+      "perceive_ms": 159.7861498594284,
+      "mark_count": 9,
+      "memory_kb": 517.4609375,
+      "shadow_walks": 0,
+      "iframe_walks": 0,
+      "sample_count": 8
+    },
+    {
+      "fixture_id": "if1-sib5-sh0-leaf3",
+      "perceive_ms": 242.39013786427677,
+      "mark_count": 15,
+      "memory_kb": 673.9755859375,
+      "shadow_walks": 0,
+      "iframe_walks": 0,
+      "sample_count": 8
+    },
+    {
+      "fixture_id": "if2-sh0-leaf3",
+      "perceive_ms": 133.09710519388318,
+      "mark_count": 3,
+      "memory_kb": 442.8896484375,
+      "shadow_walks": 0,
+      "iframe_walks": 0,
+      "sample_count": 8
+    },
+    {
+      "fixture_id": "if2-sib3-sh0-leaf3",
+      "perceive_ms": 397.5333508569747,
+      "mark_count": 27,
+      "memory_kb": 1076.44921875,
+      "shadow_walks": 0,
+      "iframe_walks": 0,
+      "sample_count": 8
+    },
+    {
+      "fixture_id": "if5-sh0-leaf3",
+      "perceive_ms": 212.5971419736743,
+      "mark_count": 3,
+      "memory_kb": 537.94482421875,
+      "shadow_walks": 0,
+      "iframe_walks": 0,
+      "sample_count": 8
+    }
+  ]
+}

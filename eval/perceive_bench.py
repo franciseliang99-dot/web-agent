@@ -368,6 +368,12 @@ def main(argv: list[str] | None = None) -> int:
         default=True,
         help="chromium headless (默 True; --no-headless 调试)",
     )
+    sp_run.add_argument(
+        "--extra-chromium-arg",
+        action="append",
+        default=[],
+        help="V0.43.1: 注入 chromium launch arg (累计; 例 --extra-chromium-arg=--site-per-process)",
+    )
 
     args = parser.parse_args(argv)
 
@@ -410,7 +416,10 @@ def main(argv: list[str] | None = None) -> int:
                 return 2
             results = asyncio.run(
                 run_bench_against_chromium(
-                    fixtures, samples_per=args.samples, headless=args.headless,
+                    fixtures,
+                    samples_per=args.samples,
+                    headless=args.headless,
+                    extra_args=args.extra_chromium_arg or None,
                 ),
             )
             payload = {"bench_results": [asdict(r) for r in results]}

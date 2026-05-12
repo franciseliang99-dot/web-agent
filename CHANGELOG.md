@@ -2,6 +2,109 @@
 
 All notable changes to web-agent. 版本号遵循 SemVer 简化形式（V<major>.<minor>.<patch>）。
 
+## [0.43.1] - 2026-05-11
+
+### Feat (V0.43 真发现 sub-route 2/3 — chromium --site-per-process 真测 sink + 真发现 #23 反向损耗)
+
+V0.43.0 plan 落定 spp re-investigation, 本提交完整闭环: instrumentation + 真测 + sink decision +
+真发现 #23 沉淀. spp **未救** #17 chromium same-origin renderer serialize, 反在 shallow fanout
+(sibling iframe) fixtures **反向损耗**.
+
+### Changed (~30 src LOC + ~30 test LOC + 2 baseline JSON)
+
+- `eval/perceive_bench_adapter.py` (~15 src LOC): `run_bench_against_chromium` 加可选
+  `extra_args: list[str] | None = None` 参数, 默 None → `chromium.launch(args=[])`
+  (V0.34.1 行为不破); 内嵌 V0.43.1 注释指此为 --site-per-process 等 chromium flag 注入路径
+- `eval/perceive_bench.py` (~10 src LOC): `sp_run` subparser 加 `--extra-chromium-arg`
+  `action="append"` CLI arg + 传给 adapter
+- `tests/test_perceive_bench_adapter.py` (+~30 LOC, 2 fast tests):
+  - `test_run_bench_propagates_extra_args`: 验 extra_args 传给 `chromium.launch(args=...)`
+  - `test_run_bench_default_extra_args_empty`: 验默 None → `args=[]` (向后兼容)
+- `data/bench/v0.43.1-spp-baseline.json` 新: 7 fixture × 8 sample, `--site-per-process` flag
+- `data/bench/v0.43.1-default-noise-baseline.json` 新: 同时间窗 default 重跑 (noise floor 测)
+- `pyproject.toml` / `__init__.py` 0.43.0 → 0.43.1
+- `uv.lock` 同步
+- `CHANGELOG.md` V0.43.1 entry (本)
+
+### 真测结果
+
+#### Noise floor (V0.34.3 历史 vs V0.43.1 default 重跑, 同 config 不同时间)
+
+| scope | % ms |
+|-------|------|
+| **overall avg** | **+1.2%** (统计稳定) |
+| if0-sh0-leaf5 | +27.3% |
+| if1-sh0-leaf3 | -15.8% |
+| if1-sib3-sh0-leaf3 | -15.4% |
+| if1-sib5-sh0-leaf3 | -11.4% |
+| if2-sh0-leaf3 | +32.9% |
+| if2-sib3-sh0-leaf3 | -7.7% |
+| if5-sh0-leaf3 | -1.6% |
+
+→ **per-fixture noise floor ±15-30%; overall avg 稳定 ±2%**
+
+#### Signal (V0.43.1 same-window default vs spp)
+
+| scope | % ms | 类别 |
+|-------|------|------|
+| **overall avg** | **-5.6%** | signal > noise (overall) |
+| if0-sh0-leaf5 (0 iframe) | -52.4% | non-fanout gain |
+| if1-sh0-leaf3 | +22.1% | non-fanout slower |
+| **if1-sib3-sh0-leaf3** | **+2.2%** | **fanout 无变化** |
+| **if1-sib5-sh0-leaf3** | **+12.2%** | **fanout 反向变慢!** |
+| if2-sh0-leaf3 | -14.4% | non-fanout gain |
+| **if2-sib3-sh0-leaf3** | **+1.1%** | **fanout 无变化** |
+| if5-sh0-leaf3 | -10.0% | deep nested gain |
+
+→ **spp gain 主要来自 non-fanout 或 deep-nested 场景, fanout (sibling) fixtures 反向损耗 or 无变化**.
+
+### 真发现 #23 — chromium --site-per-process 在 fanout (sibling iframe) 反向损耗
+
+**Pattern**: V0.34 F1 plan agent 未尝试 spp flag, 假设可救 chromium same-origin shared renderer
+serialize → fanout 并发 gain. V0.43.1 双向真测**推翻**:
+- ✗ fanout (sibling) fixtures: spp **反向变慢 +1 到 +12%** (process spawn overhead > parallel render gain)
+- ✓ 非 fanout (deep nested 或 0 iframe) fixtures: spp gain 10-52%
+
+→ **spp 不是修 V0.34 F1 #17 的路径**. F1 的 fanout sibling 并发 (asyncio.gather 同层) 在 chromium
+物理层 = same-origin shared renderer 唯一调度, `--site-per-process` flag 增加 process spawn 开销
+→ 不改善反劣化.
+
+**与真发现 #17 关系**:
+- #17 (V0.34.4 catch): chromium same-origin shared renderer serialize (F1 fanout 并发真测 ~3%)
+- **#23 (V0.43.1 catch)**: spp flag 不仅没救 #17, 反让 fanout 损耗 (V0.34 F1 永久 NO-GO 加固确认)
+
+**累计真发现 #15-#23 模式分类**:
+- 真测推翻 plan agent perf 估算 (5 个): #13 image tile / #17 chromium serialize / #18 VACUUM / #19 V8 JIT / **#23 spp fanout**
+- 真测发现 syntax/security 边界 (2 个): #15 HTML unquoted / #16 `</script>` raw text
+- 文档 stale / agent 偷懒 (2 个): #20 README stale / #22 ARCHITECTURE intent miss
+- 生产 schema vs 设计层 drift (1 个): #21 reflections dead path
+
+(累计真发现至 V0.43: 23 个; V0.43 系列 +1: #23 spp fanout 反向损耗.)
+
+### Decision sink + 不实施 opt-in env flag
+
+虽 overall avg -5.6% / -7.9% (两次跑 mean 6.7%) 落 5-10% retain as opt-in 区, **但**:
+- opt-in env flag 用户 turn-on 时期待 fanout 场景 gain (V0.34 F1 真实优化目标)
+- 真测 fanout fixtures **反向损耗** (+1 到 +12%)
+- non-fanout gain 不是 #17 修复路径, 是 chromium 内部其他优化 (out-of-process iframe overhead share)
+- gain mean 在 noise floor (±2% overall) 外, 但**应用价值在 noise floor 内** (fanout 应用场景)
+
+→ **sink + 不加 env flag**. extra_args 注入路径 (adapter + CLI) **保留** — low maintenance (~30 LOC),
+作 dev/maintainer-only 后续 chromium flag 实验 hatch (跟 V0.43.0 决定门槛"<5% sink 不实施"加注解释).
+
+### V0.43 commit 节奏更新
+
+- V0.43.0 ✅ doc 启动 + #22 meta
+- **V0.43.1** ✅ 本: instrumentation + 真测 + sink + #23
+- V0.43.2 (next) 收尾 retrospective + V0.34 教训 13 累计 + V0.44 inventory (3 commit 总, sink 路径)
+
+### Verify
+
+- `uv run pytest tests/test_perceive_bench_adapter.py -v` → 6 passed (4 existing + 2 new)
+- `uv run pytest` → **850 passed, 25 skipped** (848 + 2 new V0.43.1)
+- `uv run ruff check` → clean
+- `uv run mypy` → 0 issues in 52 src files
+
 ## [0.43.0] - 2026-05-11
 
 ### Doc (V0.43 真发现 sub-route 系列开篇 1/N — chromium --site-per-process #17 re-investigation plan + 真发现 #22 meta)

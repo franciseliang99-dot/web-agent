@@ -34,12 +34,17 @@ async def run_bench_against_chromium(
     *,
     samples_per: int = 5,
     headless: bool = True,
+    extra_args: list[str] | None = None,
 ) -> list[BenchResult]:
     """V0.34.1: 真跑 chromium 测 perceive() metric.
 
     每 fixture 跑 samples_per 次 (默 5) 取 median 防 GC noise; 同 fixture 复用 browser,
     各 sample 新建 context+page (隔离 state). data URI 加载 fixture.html (跟 V0.22.1
     _PARENT_URL 同模式) 不写临时文件.
+
+    V0.43.1: extra_args 注入 chromium.launch(args=...) 路径, 测 `--site-per-process` 等
+    flag 对 iframe DFS 并发的影响 (#17 chromium same-origin renderer serialize 再戳).
+    默 None → args=[] (V0.34.1 行为不变).
 
     返 list[BenchResult]:
         - perceive_ms = median(各 sample 耗时 ms)
@@ -53,7 +58,7 @@ async def run_bench_against_chromium(
 
     results: list[BenchResult] = []
     async with async_playwright() as p:
-        browser = await p.chromium.launch(headless=headless)
+        browser = await p.chromium.launch(headless=headless, args=extra_args or [])
         try:
             for fixture in fixtures:
                 ms_samples: list[float] = []
