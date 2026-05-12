@@ -23,6 +23,10 @@ class Step:
     # prompt cache 命中后第 2+ step input_tokens 大降, 改 per-step 真累加从 client.last_usage 读).
     input_tokens: int = 0
     output_tokens: int = 0
+    # V0.42.0 D 主题 cache hit-rate audit: Anthropic cache_creation (首次写, 1.25× input cost) +
+    # cache_read (命中, 0.1× input cost). OpenAI/Kimi 只有 cache_read (auto cache 无 creation 概念).
+    cache_creation_input_tokens: int = 0
+    cache_read_input_tokens: int = 0
 
     def for_llm(self) -> dict[str, Any]:
         """给 LLM 看的精简版（不带截图、observation 截断）。"""
@@ -63,13 +67,20 @@ def init_db(db_path: Path) -> sqlite3.Connection:
             observation TEXT,
             input_tokens INTEGER DEFAULT 0,
             output_tokens INTEGER DEFAULT 0,
+            cache_creation_input_tokens INTEGER DEFAULT 0,
+            cache_read_input_tokens INTEGER DEFAULT 0,
             PRIMARY KEY (task_id, step)
         )
         """
     )
-    # V0.33.1: ALTER 兼容老 db (V0.33.0 之前 schema 缺 token 列). sqlite ADD COLUMN 幂等性靠
-    # try/except (重复 ALTER raise OperationalError "duplicate column").
-    for col in ("input_tokens", "output_tokens"):
+    # V0.33.1 + V0.42.0: ALTER 兼容老 db (V0.33.0 / V0.42.0 之前 schema 缺新列). sqlite ADD COLUMN
+    # 幂等性靠 try/except (重复 ALTER raise OperationalError "duplicate column").
+    for col in (
+        "input_tokens",
+        "output_tokens",
+        "cache_creation_input_tokens",
+        "cache_read_input_tokens",
+    ):
         try:
             conn.execute(f"ALTER TABLE steps ADD COLUMN {col} INTEGER DEFAULT 0")
         except sqlite3.OperationalError:
@@ -95,12 +106,13 @@ def write_step(
     s: Step,
     screenshot_path: str = "",
 ) -> None:
-    # V0.33.1: 加 input_tokens/output_tokens 列 INSERT (per-step token 累加修 silent bug #14)
+    # V0.33.1 + V0.42.0: 加 cache_creation/cache_read 列 INSERT (D 主题 cache hit-rate audit)
     conn.execute(
         "INSERT OR REPLACE INTO steps "
         "(task_id, step, ts, thought, action_type, action_args, screenshot_path, "
-        "observation, input_tokens, output_tokens) "
-        "VALUES (?,?,?,?,?,?,?,?,?,?)",
+        "observation, input_tokens, output_tokens, "
+        "cache_creation_input_tokens, cache_read_input_tokens) "
+        "VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
         (
             task_id,
             s.step,
@@ -112,6 +124,8 @@ def write_step(
             s.observation,
             s.input_tokens,
             s.output_tokens,
+            s.cache_creation_input_tokens,
+            s.cache_read_input_tokens,
         ),
     )
     conn.commit()

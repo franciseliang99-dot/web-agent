@@ -112,12 +112,20 @@ class OpenAIClient:
             kwargs["tool_choice"] = "required"
         resp = await self._client.chat.completions.create(**kwargs)
 
-        # V0.26.2: 记 token usage (OpenAI / Kimi schema: prompt_tokens/completion_tokens).
+        # V0.26.2 + V0.42.0: 记 token usage (OpenAI / Kimi schema: prompt_tokens/completion_tokens).
         # Kimi extra_body thinking 模式 usage 仍存在 — 必查 hasattr 防边界 None.
+        # V0.42.0 cache_read 从 prompt_tokens_details.cached_tokens (OpenAI/Kimi 自动 cache).
+        # OpenAI 无 cache_creation 概念 (auto cache, 不分 first-write), creation 永 0.
         if resp.usage is not None:
+            cached = 0
+            details = getattr(resp.usage, "prompt_tokens_details", None)
+            if details is not None:
+                cached = getattr(details, "cached_tokens", 0) or 0
             self.last_usage = Usage(
                 input_tokens=resp.usage.prompt_tokens,
                 output_tokens=resp.usage.completion_tokens,
+                cache_creation_input_tokens=0,
+                cache_read_input_tokens=cached,
             )
 
         msg = resp.choices[0].message

@@ -271,3 +271,178 @@ async def test_step_default_tokens_zero_when_no_last_usage(monkeypatch, tmp_path
     rows = _read_step_tokens(db)
     assert len(rows) == 1
     assert rows[0] == (0, 0, 0), f"无 last_usage 时 token 应默 0, 得 {rows[0]}"
+
+
+# ---------- V0.42.0 D 主题: cache hit-rate audit telemetry ----------
+
+
+def _read_step_cache_tokens(db: Path) -> list[tuple[int, int, int, int, int]]:
+    """V0.42.0: 读 trace.db steps 表 6 列 (step, input, output, cache_creation, cache_read)."""
+    conn = sqlite3.connect(db)
+    rows = conn.execute(
+        "SELECT step, input_tokens, output_tokens, "
+        "cache_creation_input_tokens, cache_read_input_tokens FROM steps ORDER BY step"
+    ).fetchall()
+    conn.close()
+    return rows
+
+
+def test_v042_usage_dataclass_default_cache_fields_zero():
+    """V0.42.0: Usage 加 cache_creation/read 字段 default 0, V0.33.1 _FakeUsage 不破."""
+    from web_agent.types import Usage
+
+    u = Usage(input_tokens=100, output_tokens=50)
+    assert u.cache_creation_input_tokens == 0
+    assert u.cache_read_input_tokens == 0
+
+    # 显式 set 也 OK
+    u2 = Usage(input_tokens=100, output_tokens=50,
+               cache_creation_input_tokens=20, cache_read_input_tokens=80)
+    assert u2.cache_creation_input_tokens == 20
+    assert u2.cache_read_input_tokens == 80
+
+
+async def test_v042_v033_fake_usage_still_works_regression(monkeypatch, tmp_path, patch_loop_internals):
+    """V0.42.0: V0.33.1 _FakeUsage (2 字段) 跟 V0.42.0 loop.py 还兼容, 不破 833 现测."""
+    monkeypatch.delenv("WEB_AGENT_AUTO_APPROVE", raising=False)
+
+    actions = [DoneAction(thought="x", result="ok")]
+    usages = [_FakeUsage(input_tokens=5000, output_tokens=200)]  # V0.33.1 老 fake (无 cache 字段)
+    client = FakeLLMClientWithUsage(actions, usages)
+
+    db = tmp_path / "trace.db"
+    shots = tmp_path / "shots"
+    result = await run_react_loop(
+        _FakeContext(), client, goal="V0.42.0 regression",
+        max_steps=2, db_path=db, screenshots_dir=shots,
+    )
+    assert result == "ok"
+    rows = _read_step_cache_tokens(db)
+    assert len(rows) == 1
+    # V0.33.1 字段保留, V0.42.0 cache 字段 default 0 (老 fake 无 cache 字段, getattr default 0)
+    assert rows[0] == (0, 5000, 200, 0, 0), f"V0.33.1 兼容失败: {rows[0]}"
+
+
+@dataclass
+class _FakeUsageV042:
+    """V0.42.0: 扩 V0.33.1 _FakeUsage 加 cache 字段, 模 Anthropic V0.42.0 cache_creation/read."""
+    input_tokens: int
+    output_tokens: int
+    cache_creation_input_tokens: int = 0
+    cache_read_input_tokens: int = 0
+
+
+class FakeLLMClientWithCacheUsage:
+    """V0.42.0: 跟 V0.33.1 FakeLLMClientWithUsage 同, 但 last_usage 是 _FakeUsageV042 (4 字段)."""
+    name = "fake-w-cache-usage"
+    model = "fake"
+
+    def __init__(self, actions: list, usages: list[_FakeUsageV042]) -> None:
+        assert len(actions) == len(usages)
+        self._actions = list(actions)
+        self._usages = list(usages)
+        self._i = 0
+        self.last_usage: _FakeUsageV042 | None = None
+
+    async def plan(self, goal, screenshot_b64, marks, trace, **kwargs):
+        a = self._actions[self._i]
+        self.last_usage = self._usages[self._i]
+        self._i += 1
+        return a
+
+
+async def test_v042_per_step_cache_tokens_written(monkeypatch, tmp_path, patch_loop_internals):
+    """V0.42.0 核心: 各 step plan() 后 last_usage 4 字段 → sqlite trace.db 真按 step 落盘.
+
+    模 Anthropic cache 模式: step 0 cache_creation=10000 (首 write) / step 1 cache_read=10000
+    (命中) / step 2 cache_read=10000 + creation=500 (mark 变 partial cache).
+    """
+    monkeypatch.delenv("WEB_AGENT_AUTO_APPROVE", raising=False)
+
+    actions = [
+        ScrollAction(thought="x", dy=100),
+        ScrollAction(thought="x", dy=200),
+        DoneAction(thought="x", result="ok"),
+    ]
+    usages = [
+        _FakeUsageV042(input_tokens=10000, output_tokens=300,
+                       cache_creation_input_tokens=10000, cache_read_input_tokens=0),
+        _FakeUsageV042(input_tokens=10000, output_tokens=250,
+                       cache_creation_input_tokens=0, cache_read_input_tokens=10000),
+        _FakeUsageV042(input_tokens=10500, output_tokens=100,
+                       cache_creation_input_tokens=500, cache_read_input_tokens=10000),
+    ]
+    client = FakeLLMClientWithCacheUsage(actions, usages)
+
+    db = tmp_path / "trace.db"
+    shots = tmp_path / "shots"
+    result = await run_react_loop(
+        _FakeContext(), client, goal="V0.42.0 cache audit",
+        max_steps=3, db_path=db, screenshots_dir=shots,
+    )
+    assert result == "ok"
+    rows = _read_step_cache_tokens(db)
+    assert len(rows) == 3
+    # (step, input, output, cache_creation, cache_read)
+    expected = [
+        (0, 10000, 300, 10000, 0),
+        (1, 10000, 250, 0, 10000),
+        (2, 10500, 100, 500, 10000),
+    ]
+    assert rows == expected, f"V0.42.0 cache 字段落盘失败: {rows} vs {expected}"
+
+
+async def test_v042_db_alter_compat_cache_columns(tmp_path):
+    """V0.42.0: ALTER 兼容 V0.33.1 db (V0.42.0 之前 schema 缺 cache 列), COALESCE 0."""
+    from web_agent.trace import Step, init_db, write_step
+
+    db = tmp_path / "v033_legacy.db"
+    # 1. 手建 V0.33.1 schema (含 input_tokens/output_tokens, 缺 cache 列)
+    conn = sqlite3.connect(db)
+    conn.execute(
+        """
+        CREATE TABLE steps (
+            task_id TEXT NOT NULL, step INTEGER NOT NULL, ts REAL NOT NULL,
+            thought TEXT, action_type TEXT, action_args TEXT,
+            screenshot_path TEXT, observation TEXT,
+            input_tokens INTEGER DEFAULT 0, output_tokens INTEGER DEFAULT 0,
+            PRIMARY KEY (task_id, step)
+        )
+        """
+    )
+    conn.execute(
+        "INSERT INTO steps VALUES (?,?,?,?,?,?,?,?,?,?)",
+        ("v033_task", 0, 1.0, "thought", "click", "{}", "", "obs", 8000, 200),
+    )
+    conn.commit()
+    conn.close()
+
+    # 2. init_db ALTER 加 cache 2 列
+    conn = init_db(db)
+
+    # 3. 老行 cache 列 NULL → COALESCE 0
+    rows = conn.execute(
+        "SELECT step, COALESCE(cache_creation_input_tokens, 0), "
+        "COALESCE(cache_read_input_tokens, 0) FROM steps WHERE task_id='v033_task'"
+    ).fetchall()
+    assert rows == [(0, 0, 0)], f"V0.33.1 老行 cache 列应 NULL → COALESCE 0: {rows}"
+
+    # 4. V0.42.0 新 Step write (4 token 字段)
+    s = Step(
+        step=1, ts=2.0, thought="new", action_type="scroll",
+        action_args={"dy": 100}, observation="new",
+        input_tokens=12000, output_tokens=300,
+        cache_creation_input_tokens=2000, cache_read_input_tokens=10000,
+    )
+    write_step(conn, "v033_task", s, "/tmp/shot.png")
+
+    rows2 = conn.execute(
+        "SELECT step, input_tokens, output_tokens, "
+        "cache_creation_input_tokens, cache_read_input_tokens FROM steps "
+        "WHERE task_id='v033_task' ORDER BY step"
+    ).fetchall()
+    conn.close()
+    assert rows2 == [
+        (0, 8000, 200, 0, 0),
+        (1, 12000, 300, 2000, 10000),
+    ], f"V0.42.0 新 INSERT 落盘失败: {rows2}"

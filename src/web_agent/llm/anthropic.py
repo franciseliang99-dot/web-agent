@@ -104,10 +104,13 @@ class AnthropicClient:
             messages=cast(list[MessageParam], [{"role": "user", "content": user_content}]),
         )
 
-        # V0.26.2: 记 token usage 让 eval/runner 累加 cost. fail before tool_use parse 也写一次.
+        # V0.26.2 + V0.42.0: 记 token usage 让 eval/runner 累加 cost (含 cache_creation/read).
+        # Anthropic SDK Usage SDK getattr (default 0 兼容老 SDK / 无 cache 路径).
         self.last_usage = Usage(
             input_tokens=resp.usage.input_tokens,
             output_tokens=resp.usage.output_tokens,
+            cache_creation_input_tokens=getattr(resp.usage, "cache_creation_input_tokens", 0) or 0,
+            cache_read_input_tokens=getattr(resp.usage, "cache_read_input_tokens", 0) or 0,
         )
         for block in resp.content:
             if block.type == "tool_use":

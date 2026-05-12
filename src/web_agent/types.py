@@ -40,15 +40,23 @@ class BBox(TypedDict):
 
 @dataclass(frozen=True, slots=True)
 class Usage:
-    """V0.26.2: LLM API 单次调用 token 用量 (跨 provider 中性 schema).
+    """V0.26.2 + V0.42.0: LLM API 单次调用 token 用量 (跨 provider 中性 schema).
 
     anthropic resp.usage.input_tokens/output_tokens vs openai resp.usage.prompt_tokens/
     completion_tokens — 两 SDK 字段名不同, Usage 中性化让 eval/metrics 跨 provider 累加.
+
+    V0.42.0 加 cache 字段 (default=0 保 V0.33.1 FakeLLMClientWithUsage 兼容):
+    - cache_creation_input_tokens: Anthropic prompt cache 首次写入 (1.25× input cost)
+    - cache_read_input_tokens: Anthropic + OpenAI/Kimi 缓存命中 (0.1× input cost)
+
+    跟 V0.33.0 token_baseline + V0.42.0 D 主题 cache hit-rate audit 配合.
     eval 用 (web_agent 主路径不强依赖, last_usage 属性默认 None 不破坏 fake client).
     """
 
     input_tokens: int
     output_tokens: int
+    cache_creation_input_tokens: int = 0
+    cache_read_input_tokens: int = 0
 
 
 @dataclass

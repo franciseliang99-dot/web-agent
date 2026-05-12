@@ -2,6 +2,86 @@
 
 All notable changes to web-agent. 版本号遵循 SemVer 简化形式（V<major>.<minor>.<patch>）。
 
+## [0.42.0] - 2026-05-11
+
+### Feat (V0.42 D LLM cache / retry 优化系列开篇 1/N — cache hit-rate audit telemetry, 观测先于优化)
+
+V0.41.2 收尾 user 选 D 主题. V0.42.0 加 cache hit/miss telemetry (扩 Usage schema + client
+真填 + trace.db schema + loop 写). 跟 V0.34.0 / V0.36.0 / V0.38.0 / V0.40.0 framework-first 同节奏:
+观测先于优化 (V0.34 教训第 12 次应用).
+
+### V0.34 教训应用 (真测推 plan)
+
+read + sqlite probe 真测现状:
+
+| 维度 | 真测 |
+|------|------|
+| Anthropic prompt cache 已用范围 | 仅 system prompt 1 个 `cache_control: ephemeral` (anthropic.py L94) |
+| user_content (image + marks + trace ~10K tok) | **从不 cache** (V0.42.1 主优化空间) |
+| 跨 provider Usage schema | V0.33.1 只 `input_tokens/output_tokens` 2 字段, **无 cache 字段** |
+| SDK 原生暴露 | Anthropic `cache_creation/read_input_tokens` ✓; OpenAI/Kimi `prompt_tokens_details.cached_tokens` ✓ |
+| trace.db schema | 391 step 真测 **无 input_tokens 列** (老 db, V0.33.1 schema 改动 ALTER 时机晚) |
+| LOOP_DETECTED 真触发 | 仅 2 行 (V0.42 D3 action-skip 样本不足) |
+| Provider fallback | 0 (V0.42 D4 anthropic 529 → openai 跳风险大不推) |
+
+**结论**: V0.42.0 优先做**telemetry observability**, 真测 cache miss/hit ratio + 给 V0.42.1
+user_content cache_control extension 真测验依据.
+
+### 真发现 (V0.42.0 sink)
+
+**user_content (image base64 + marks JSON + trace ~10K tok) 从不 cache**: V0.15.x 注释吹的
+"已用 prompt caching" 仅 cache 系统 prompt (~2K tok), 真正大头 user_content 未 cache. 18-step
+task 同图同 marks 大概率重复 → 第 2+ step 输入 token 可省 ~80% (Anthropic 5min cache window).
+V0.42.1 加 cache_control 后真测验.
+
+### Changed (~80 src LOC + ~150 测 LOC)
+
+- `src/web_agent/types.py`: `Usage` 加 `cache_creation_input_tokens: int = 0` + `cache_read_input_tokens: int = 0` (default 保 V0.33.1 `_FakeUsage` 兼容, 不破 833 现测)
+- `src/web_agent/llm/anthropic.py`: `last_usage = Usage(...)` 从 `resp.usage.cache_creation/read_input_tokens` SDK getattr 真读 (default 0 防老 SDK)
+- `src/web_agent/llm/openai.py`: `last_usage` 从 `resp.usage.prompt_tokens_details.cached_tokens` 真读 (OpenAI/Kimi auto cache); `cache_creation_input_tokens=0` (OpenAI 无 creation 概念)
+- `src/web_agent/trace.py`: `Step` dataclass 加 2 字段 + CREATE TABLE schema + ALTER 兼容老 db + INSERT 12 列 (跟 V0.33.1 同模式)
+- `src/web_agent/loop.py:578-593, 860-870`: capture `last_usage` 4 字段 → 写 Step
+- `tests/test_token_per_step.py` +4 V0.42.0 fast 测:
+  - `test_v042_usage_dataclass_default_cache_fields_zero` (default 0 兼容)
+  - `test_v042_v033_fake_usage_still_works_regression` (V0.33.1 老 fake 不破)
+  - `test_v042_per_step_cache_tokens_written` (新 _FakeUsageV042 + FakeLLMClientWithCacheUsage 4 字段写 db)
+  - `test_v042_db_alter_compat_cache_columns` (V0.33.1 老 db ALTER 加 2 cache 列 + COALESCE 0)
+- `pyproject.toml` / `__init__.py` 0.41.2 → **0.42.0** (V0.42 系列开篇 minor bump)
+- `uv.lock` 同步
+
+### 解耦审查
+
+- `types.Usage` 仍纯 dataclass, 0 SDK 耦合 (anthropic/openai SDK 字段在各自 client 内 mapping)
+- `trace.py` schema migration 跟 V0.33.1 同 try/except OperationalError 模式 (幂等 ALTER)
+- `loop.py` 仅多 capture 2 字段 + 多写 2 字段, 0 主控流改动 (跟 V0.33.1 同 pattern)
+- 0 改 `pricing.py` / `eval/runner.py` (cache_rate 算 metric 留 V0.42.1+ 跟 user_content cache_control 一起验)
+
+### Verify
+
+- `uv run pytest` → **843 passed, 25 skipped** (+4 V0.42.0 fast 测, 0 现测破; V0.33.1 4 测 regression pass)
+- `uv run ruff check` → all clean
+- `uv run mypy` → Success no issues in 52 src files
+
+### V0.42 系列 plan
+
+| ver | 状态 | scope | autonomous |
+|-----|------|-------|------------|
+| **V0.42.0** | ✅ 本提交 | cache hit-rate audit telemetry (observability 先于优化) | ✅ |
+| V0.42.1 | 待 | user_content cache_control extension (image + marks 加 cache_control: ephemeral) | ✅ |
+| V0.42.2 | 待 | token budget guard (`WEB_AGENT_TOKEN_BUDGET_USD` env, 累计超 → TOKEN_BUDGET_EXCEEDED graceful abort) | ✅ |
+| V0.42.3 | 待 | 系列收尾 retrospective + V0.43 inventory | ✅ |
+| V0.42.x.1 (skip) | maintainer 真测 V0.40 5 task corpus, 看 V0.42.1 真省 token % | 🛑 红线 |
+
+### 决策门槛先写 (V0.34 教训, 跟 V0.37/V0.38/V0.40/V0.41 一脉)
+
+V0.42.x.1 maintainer 真测 vs V0.40.2 baseline:
+- ≥ 20% input token 省 → V0.42 D 主题保留
+- 10-20% → 边际, V0.42.3 收尾标 marginal
+- < 10% → withdraw V0.42.1 user_content cache, **保留 V0.42.0 telemetry** (观测价值独立成立)
+
+V0.42.0 单独门槛: 跑 1 个真 task 看 cache_read_input_tokens > 0 (V0.15.x system prompt cache
+应该 hit 率 ~80% in 后续 step) — 数值合理即过.
+
 ## [0.41.2] - 2026-05-11
 
 ### Doc (V0.41 C 长期记忆 cross-task 学习系列收尾 3/3 — C1+C3 双 inject 完成 + V0.42 inventory)

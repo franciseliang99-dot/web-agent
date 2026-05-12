@@ -575,9 +575,11 @@ async def run_react_loop(
             transient_retries = 0
             action: Action | None = None
             last_error: Exception | None = None
-            # V0.33.1: 捕 plan() 后 last_usage 给 Step 用 (per-step 真累加, 修 V0.26.2 silent bug #14)
+            # V0.33.1 + V0.42.0: 捕 plan() 后 last_usage 给 Step 用 (per-step 真累加 + cache 字段)
             step_input_tokens = 0
             step_output_tokens = 0
+            step_cache_creation_tokens = 0
+            step_cache_read_tokens = 0
             for attempt in range(retry_max + 1):  # 第 0 次是首发, 1..retry_max 是 retry
                 try:
                     action = await client.plan(
@@ -591,6 +593,9 @@ async def run_react_loop(
                     if _usage is not None:
                         step_input_tokens = getattr(_usage, "input_tokens", 0)
                         step_output_tokens = getattr(_usage, "output_tokens", 0)
+                        # V0.42.0 D: cache 字段 (default 0 兼容老 FakeLLMClientWithUsage)
+                        step_cache_creation_tokens = getattr(_usage, "cache_creation_input_tokens", 0)
+                        step_cache_read_tokens = getattr(_usage, "cache_read_input_tokens", 0)
                     break  # 成功跳出 retry loop
                 except Exception as e:
                     last_error = e
@@ -867,6 +872,9 @@ async def run_react_loop(
                 # V0.33.1: per-step token 真累加 (修 V0.26.2 silent bug #14 — last_usage × N 高估).
                 input_tokens=step_input_tokens,
                 output_tokens=step_output_tokens,
+                # V0.42.0 D: cache hit-rate audit per-step
+                cache_creation_input_tokens=step_cache_creation_tokens,
+                cache_read_input_tokens=step_cache_read_tokens,
             )
             trace.append(step)
             write_step(conn, task_id, step, str(shot_path))
