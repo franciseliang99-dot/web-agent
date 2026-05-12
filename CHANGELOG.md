@@ -2,6 +2,55 @@
 
 All notable changes to web-agent. 版本号遵循 SemVer 简化形式（V<major>.<minor>.<patch>）。
 
+## [0.44.1] - 2026-05-11
+
+### Feat (V0.44 W6-A reflect path audit 2/4 — startup init_reflections_db schema invariant fix)
+
+V0.44.0 audit doc 落, 本提交 = 写侧 cosmetic + auditability fix. cli.run_task startup 调
+init_reflections_db 让生产 memory.db .tables 总含 reflections schema. 真发现 #21 真原因是
+trigger 不触发 (5.7% 覆盖率), V0.44.2 才会真扩 trigger; 本提交保证 schema invariant 防 audit
+误判 dead path.
+
+### Reframe vs V0.44.0 plan (诚实 catch)
+
+V0.44.0 audit table 写 "V0.44.1 = startup init_reflections_db 修 #21 dead path", 但本提交时
+再 sieve **#21 真原因不是 lazy create 失败, 而是 trigger 0 次** — record_reflection 内
+init_reflections_db lazy create 路径本身 OK, V0.44.2 加 trigger 后 lazy create 即真实生效.
+
+→ **V0.44.1 实际是 cosmetic + auditability fix** (不是 #21 真 fix):
+- ① auditability: sqlite3 .tables 总含 reflections (即使 0 rows), 防未来 audit 重蹈 V0.41.0 #21
+  catch 路径 (那时 grep table 不存在 → judge dead path)
+- ② schema invariant 跟 init_memory_db 同 production startup mode: 不靠 lazy create
+- ③ ~5ms startup cost (CREATE IF NOT EXISTS 幂等)
+
+**真 fix #21 是 V0.44.2 扩 trigger 让 record_reflection 真触发** (lazy create 内在 init_reflections_db
+work).
+
+### Changed (~10 src LOC + ~15 test LOC)
+
+- `src/web_agent/cli.py` (~5 LOC): import `init_reflections_db` + `run_task` mem_db 拿到后调
+  `init_reflections_db(mem_db).close()` (一次性 startup hook, 幂等)
+- `tests/test_cli.py` (+~15 LOC): `test_cli_imports_init_reflections_db_for_startup_invariant`
+  防回归 — 若未来重构移除 cli startup hook, .tables 失去 invariant 风险, 生产 audit 时
+  误判 dead path 重蹈 #21
+- `pyproject.toml` / `__init__.py` 0.44.0 → 0.44.1
+- `uv.lock` 同步
+- `CHANGELOG.md` V0.44.1 entry (本)
+
+### Verify
+
+- `uv run pytest tests/test_cli.py -v -k init_reflections` → 1 passed
+- `uv run pytest` → **851 passed, 25 skipped** (850 + 1 V0.44.1 fast test)
+- `uv run ruff check` → clean
+- `uv run mypy` → 0 issues in 52 src files
+
+### V0.44 commit 节奏 (更新)
+
+- V0.44.0 ✅ audit doc + 真发现 #24/#25
+- **V0.44.1** ✅ 本: startup init_reflections_db cosmetic + auditability fix
+- V0.44.2 (next) 扩 should_reflect 加 WALLCLOCK_EXCEEDED + wire loop.py wallclock abort 路径
+- V0.44.3 系列收尾 retrospective + V0.34 教训 14 累计 + V0.45 inventory
+
 ## [0.44.0] - 2026-05-11
 
 ### Doc (V0.44 W6-A reflect path audit 系列开篇 1/4 — 真发现 #24 SAFETY 假阳性 + #25 WALLCLOCK plan 缺陷, V0.28 subagent A 双端推翻)

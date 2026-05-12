@@ -22,6 +22,19 @@ def test_run_task_is_coroutine_function():
     assert asyncio.iscoroutinefunction(run_task)
 
 
+def test_cli_imports_init_reflections_db_for_startup_invariant() -> None:
+    """V0.44.1: cli.py 启动路径需含 init_reflections_db (#21 真发现 cosmetic + auditability fix).
+
+    防回归: 未来重构若移除 cli startup hook, .tables 失去 reflections invariant 风险,
+    生产 audit 时误判 dead path 重蹈 V0.41.0 #21 真发现.
+    """
+    import web_agent.cli as cli_mod
+    assert hasattr(cli_mod, "init_reflections_db"), (
+        "V0.44.1: cli.py 缺 init_reflections_db 导入 — startup hook 被移除? "
+        "真发现 #21 reflections 表 dead path 风险回归"
+    )
+
+
 # ---------- argparse 测 (用 monkeypatch run_task 收集 kwargs) ----------
 
 class _RunTaskRecorder:

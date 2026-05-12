@@ -24,6 +24,7 @@ from web_agent.memory import (
     DEFAULT_DB as _MEM_DB,
     build_inject_string,
     extract_domain,
+    init_reflections_db,
     is_success,
     record_task,
 )
@@ -81,6 +82,10 @@ async def run_task(
         # V0.28.3 W6 收尾: cli + eval 共用 build_inject_string helper (V0.28.2 inline 路径
         # 抽出, eval/runner.py 也调). env opt-in 控制 memories / reflections 各自启停.
         mem_db = Path(os.environ.get("WEB_AGENT_MEMORY_DB", str(_MEM_DB)))
+        # V0.44.1: startup init reflections 表 (真发现 #21 cosmetic + auditability fix).
+        # lazy create via record_reflection 仍 work, 此处保证 sqlite3 .tables 总含 reflections
+        # 表防 audit 时误判 dead path. 幂等 CREATE IF NOT EXISTS, ~5ms 启动 cost.
+        init_reflections_db(mem_db).close()
         domain = extract_domain(start_url)
         include_mem = (
             os.environ.get("WEB_AGENT_MEMORY_DISABLE", "").lower() not in ("true", "1", "yes")
