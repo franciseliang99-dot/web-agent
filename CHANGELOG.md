@@ -2,6 +2,87 @@
 
 All notable changes to web-agent. 版本号遵循 SemVer 简化形式（V<major>.<minor>.<patch>）。
 
+## [0.48.1] - 2026-05-11
+
+### Feat (V0.48 动态 fingerprint pool 2/N — cassette test infra + escalated() decision 纯函数)
+
+V0.48.0 plan 落定 conservative 顺序 (先 cassette 真测证 ROI, 再 pool 实施). 本提交 autonomous
+infra: 新建 `tests/test_protection_reuse_cassette.py` (3 真站 × 10 visit 同 fingerprint 复访 +
+escalated decision 函数 + 12 fast unit). **不真跑** — V0.48.2 maintainer 红线真跑等用户授权.
+
+### Changed (~250 test LOC, 0 src 改)
+
+- **新建 `tests/test_protection_reuse_cassette.py`** (~270 LOC, 12 fast unit + 3 real-net probe skip 默):
+  - `_REUSE_TARGETS`: 3 真站 list (cloudflare/sannysoft/akamai) + 预期 baseline level
+  - `_REAL_PROBE_MARKS`: 双 env 守门 (WEB_AGENT_RUN_SLOW=1 + WEB_AGENT_REUSE_PROBE=1, 跟 V0.39.0 sannysoft 同模式)
+  - `_signal_to_dict(signal)` 纯函数: ProtectionSignal → JSON dict (frozenset → sorted list)
+  - `_record_visit(ctx, idx) -> dict`: 抓 V0.47.1 listener `_web_agent_protection_signals[-1]` + classify
+  - `_dump_cassette(domain, visits) -> Path`: 写 `data/stealth_probes/v0.48-reuse-cassette-{domain}_{date}.json` (跟 V0.39 同 dump 模式)
+  - `_LEVEL_RANK` dict + `escalated(visits) -> bool` 纯函数: 4 信号路径 (level 升级 / status 升级 / captcha vendor 命中 / cookies 集合扩) 任一命中即 True
+  - 4 helper unit tests (signal_to_dict / dump_cassette / record_visit no-signal / record_visit classify)
+  - 8 `escalated()` 决策矩阵 parametrize (空 / 单 visit / stable low / level 升级 / status 升级 / captcha 命中 / cookies 扩 / signal None)
+  - 1 real-net `test_reuse_detection_real[domain,url,baseline]` parametrize × 3 站 (skip 默, opt-in 真访)
+- `pyproject.toml` / `__init__.py` 0.48.0 → 0.48.1
+- `uv.lock` 同步
+- `CHANGELOG.md` V0.48.1 entry (本)
+
+### V0.48.1 真测 fixture 设计要点
+
+| 设计选择 | 理由 |
+|---------|------|
+| 单 chromium browser + 单 context (复用 fingerprint) | 不开新 context = 同 fingerprint 反复打 → reuse 检测核心信号 |
+| visit 间 2s `wait_for_timeout` | polite 节奏防 burst 触发 rate-limit 干扰 reuse 信号 (跟 V0.16.21 spike 15s sleep 同思路) |
+| target 不可达 first visit → `pytest.skip` | 跟 V0.39.0 sannysoft 同, 不挂 CI / dev iteration |
+| 中途 visit 失败 → record `{level: unknown, error: ...}` 续跑 | escalate 触发后真站拦截本身也是 signal |
+| escalated() 自动判 (不靠人眼) | V0.34 教训"先写门槛防 rationalize", 跑完函数即决 retain/sink |
+
+### V0.48.2 maintainer 红线占位
+
+V0.47.4 划线 V0.48 真站真跑 = maintainer 红线 (真站 IP-level footprint 应人审, 跟 V0.39
+STEALTH_PROBE / V0.40.x.1 / V0.42.x.1 / V0.44.x.1 / V0.46.x.1 / V0.47.x.1 真录 cassette 同).
+
+V0.48.2 maintainer 跑法:
+```bash
+WEB_AGENT_RUN_SLOW=1 WEB_AGENT_REUSE_PROBE=1 \
+  uv run pytest tests/test_protection_reuse_cassette.py -v
+```
+预计 ~10 min (3 站 × 10 visit × ~10s/visit). 输出 `data/stealth_probes/v0.48-reuse-cassette-*.json`
+3 个 JSON. 跑完后:
+1. `escalated()` 自动判 3 个 cassette 各自 True/False
+2. ≥1 站 True → retain pool, V0.48.3 实施 preset + seed-by-domain
+3. 全 False → sink pool, V0.48.3 = doc 收尾 + 转 V0.49
+
+### Decision 门槛验证 (V0.48.0 先写)
+
+| 指标 | V0.48.0 target | V0.48.1 真测结果 |
+|------|----------------|----------------|
+| pytest | ≥ 939 (V0.47.4 baseline) | **951** ✅ (939 + 12 V0.48.1 fast unit) |
+| mypy / ruff | clean | clean (53 src) |
+| cassette infra LOC | < 200 src + < 300 test (V0.47.0 软指标延用) | 0 src + ~270 test ✅ (test 略超 200 因 8 parametrize matrix 充分覆盖, infra 是 V0.48 完成度核心) |
+| 真测 gate | 默 skip 不真访外网 | ✅ (3 real probe pytest.skip via env gate) |
+
+### V0.48 commit 节奏更新
+
+- V0.48.0 ✅ audit doc + plan + decision 门槛
+- **V0.48.1** ✅ 本: cassette test infra + escalated() + 12 fast unit
+- **V0.48.2** ⏸️ **maintainer 红线占位** (autonomous 已落 infra, 等 maintainer 跑真测)
+- V0.48.3+ TBD (retain 路径 → preset+seed-by-domain / sink 路径 → 收尾)
+
+### autonomous 暂停 — 等 maintainer V0.48.2
+
+V0.48 系列在此暂停, autonomous infra 100% 落完. 等 maintainer 跑 V0.48.2 cassette 真测 (~10 min)
+出 3 个 JSON 文件 → `escalated()` 自动判 → 决定 V0.48.3+ retain/sink 路径.
+
+跟 V0.47.x.1 maintainer cassette 同模式, autonomous 红线 (真站 IP footprint / 真 chromium 跑 ~10 min)
+等用户授权 + 真跑.
+
+### Verify
+
+- `uv run pytest tests/test_protection_reuse_cassette.py -v` → 12 passed + 3 skipped (gated)
+- `uv run pytest` → **951 passed, 28 skipped** (939 + 12 V0.48.1)
+- `uv run ruff check` → clean
+- `uv run mypy` → 0 issues in 53 src files
+
 ## [0.48.0] - 2026-05-11
 
 ### Doc (V0.48 动态 fingerprint pool 系列开篇 1/N — cassette 真测先于 pool 实施 + plan + decision 门槛)
