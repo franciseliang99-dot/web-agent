@@ -49,6 +49,7 @@ web-agent-eval = "eval.cli:main"
 web-agent-token-baseline = "eval.token_baseline:main"
 web-agent-perceive-bench = "eval.perceive_bench:main"
 web-agent-disk-baseline = "eval.disk_baseline:main"
+web-agent-data-clean = "web_agent.data_clean:main"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/web_agent", "eval"]
