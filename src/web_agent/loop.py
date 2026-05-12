@@ -12,7 +12,7 @@ import re
 import sqlite3
 import time
 import uuid
-from collections import deque
+from collections import Counter, deque
 from pathlib import Path
 from typing import Any, Awaitable, Callable
 
@@ -79,8 +79,27 @@ def _find_mark(marks: list[Mark], mark_id: int) -> Mark | None:
     return next((m for m in marks if m.id == mark_id), None)
 
 
+def _normalize_extract_query(query: str) -> str:
+    """V0.46.1 真发现 #25 follow-up: normalize ExtractAction query for anti_loop sig.
+
+    LLM 反复试 extract 时 query wording 微调 (大小写/空格/标点变体) — 让 sig 合并语义相同的
+    wording 变体. lowercase + strip punctuation + collapse whitespace. 不 truncate 避免
+    over-collapse 不同意图的 query.
+    """
+    s = query.lower()
+    s = re.sub(r"[^\w\s一-鿿]", "", s)  # 保 alphanumeric + CJK + whitespace
+    return re.sub(r"\s+", " ", s).strip()
+
+
 def _action_signature(action: Action) -> str:
-    """归一化 action 用于死循环检测。V0.17.0: dataclass action 用 _action_args_only 取字段."""
+    """归一化 action 用于死循环检测. V0.17.0: dataclass action 用 _action_args_only 取字段.
+
+    V0.46.1 真发现 #25 follow-up: ExtractAction 特殊处理 — 删 answer (LLM 生成 noise) +
+    normalize query (lowercase / punctuation / whitespace). 修 V0.44 HN WALLCLOCK task
+    11 step extract loop anti_loop miss.
+    """
+    if isinstance(action, ExtractAction):
+        return f"extract:{_normalize_extract_query(action.query)}"
     return f"{action.type}:{json.dumps(_action_args_only(action), sort_keys=True, ensure_ascii=False)}"
 
 
@@ -490,6 +509,11 @@ async def run_react_loop(
 
     trace = Trace(task_id=task_id, goal=goal)
     recent_actions: deque[str] = deque(maxlen=3)
+    # V0.46.1 真发现 #25 follow-up reframe: 加 5-window 加 alternation detector. V0.46.0 plan
+    # 推仅 normalize query (B), V0.46.1 真测 V0.44 HN 11 query 发现是 alternation pattern
+    # (step 5/7/10 同 sig + step 6/8/9 同 sig 交替), normalize 后 deque [A,B,A] 仍不全同 →
+    # V0.5.0 3 连续相同 detector miss. 复合 detector: V0.5.0 3 连续 + V0.46.1 5-window count≥3.
+    recent_action_window: deque[str] = deque(maxlen=5)
     recent_pages: deque[str] = deque(maxlen=3)  # W5-A 反思: 页面 fingerprint 跟踪
     last_clicked_mark: Mark | None = None  # type action 的 safety check 需要上次 click 的元素
     active_idx: int = initial_active_idx  # V0.21.1: 当前 active tab 索引
@@ -708,8 +732,12 @@ async def run_react_loop(
                         end_task(conn, task_id, result)
                         return result
 
-            # 死循环检测：连续 3 次完全相同 action（type + args）→ V0.25.2 backtrack 或 abort
+            # 死循环检测：
+            # - V0.5.0: 连续 3 次完全相同 action（type + args）→ V0.25.2 backtrack 或 abort
+            # - V0.46.1 真发现 #25 follow-up: 5-window 内任意 sig 出现 ≥ 3 次 → alternation abort
+            #   (V0.5.0 catch 不到 [A,B,A,B,B] 交替, V0.46.1 reframe 加 5-window count detector)
             sig = _action_signature(action)
+            # V0.5.0 detector 优先 (早 step 触发)
             if len(recent_actions) == 3 and all(s == sig for s in recent_actions):
                 # V0.25.2: 第 1 次 trigger → page.go_back + reset 状态 + 注入 hint + retry once
                 # 第 2 次 trigger (backtrack 后又卡) → abort 维持 V0.5.0 兼容防 infinite loop
@@ -725,6 +753,7 @@ async def run_react_loop(
                         # clear recent_actions 让重 loop 检测从头算 + 注 hint 让 LLM 看到
                         ctx._web_agent_anti_loop_backtracked = True  # type: ignore[attr-defined]
                         recent_actions.clear()
+                        recent_action_window.clear()  # V0.46.1: 同 recent_actions reset 防 5-window detector 立即 re-trigger
                         recent_pages.clear()
                         last_clicked_mark = None
                         hint = (
@@ -769,6 +798,33 @@ async def run_react_loop(
                 )
                 return result
             recent_actions.append(sig)
+
+            # V0.46.1 真发现 #25 follow-up: 5-window alternation detector — V0.5.0 不 catch
+            # 的交替 pattern [A,B,A,B,B] 等. V0.44 HN WALLCLOCK 真实 trace 是 step 5/7/10 同 sig
+            # + step 6/8/9 同 sig 交替, V0.5.0 3-连续相同 miss. window 内任 sig 出现 ≥ 3 次 abort.
+            candidate_window = (list(recent_action_window) + [sig])[-5:]
+            if len(candidate_window) >= 5 and Counter(candidate_window).most_common(1)[0][1] >= 3:
+                result = (
+                    f"LOOP_DETECTED 在 step {step_i}: 5-step window 内有 sig 出现 ≥ 3 次"
+                    f" (V0.46.1 alternation detector). 反复 action 交替 (V0.5.0 3-连续相同 miss). "
+                    f"agent 已强制中止. window 内 sig (truncated 80 char each): "
+                    f"{[s[:80] for s in candidate_window]}"
+                )
+                logger.warning("anti-loop alternation %s", result[:200])
+                alt_step = Step(
+                    step=step_i, ts=time.time(), thought=action.thought,
+                    action_type=action.type, action_args=_action_args_only(action),
+                    observation="LOOP_DETECTED — alternation aborted",
+                )
+                trace.append(alt_step)
+                write_step(conn, task_id, alt_step, str(shot_path))
+                end_task(conn, task_id, result)
+                # V0.28.1 W6-A: LOOP_DETECTED 路径触发 reflect (跟 V0.5.0 同模式)
+                await _maybe_reflect_on_failure(
+                    client, goal, trace, result, task_id, domain, _resolved_mem_db,
+                )
+                return result
+            recent_action_window.append(sig)
 
             # V0.17.0: match-case dispatch on dataclass discriminated union (mypy narrow 自动)
             obs = ""

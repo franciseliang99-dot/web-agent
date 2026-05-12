@@ -37,6 +37,18 @@ def test_signature_stable_with_arg_key_order():
 
 
 def test_signature_handles_chinese_args():
-    a = ExtractAction(thought="x", query="", answer="量子纠缠")
+    """V0.46.1 update: ExtractAction sig drop answer (LLM noise) + normalize query.
+
+    旧测期望 answer 中文 in sig, V0.46.1 后 sig 仅含 normalize(query). 测改为 query 中文保留.
+    """
+    a = ExtractAction(thought="x", query="量子纠缠 points", answer="LLM 噪音")
     sig = _action_signature(a)
-    assert "量子纠缠" in sig  # ensure_ascii=False 让中文可读
+    assert "量子纠缠" in sig  # V0.46.1: normalize 保 CJK 字符
+
+
+def test_signature_extract_drops_answer_v046_1() -> None:
+    """V0.46.1: ExtractAction sig 不含 answer (LLM 生成 noise, 每次反复试都不同 → V0.44 anti_loop miss 根因)."""
+    a = ExtractAction(thought="x", query="读取 points", answer="LLM 答案 abc")
+    sig = _action_signature(a)
+    assert "LLM 答案 abc" not in sig
+    assert "abc" not in sig

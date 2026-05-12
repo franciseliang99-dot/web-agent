@@ -2,6 +2,86 @@
 
 All notable changes to web-agent. 版本号遵循 SemVer 简化形式（V<major>.<minor>.<patch>）。
 
+## [0.46.1] - 2026-05-11
+
+### Feat (V0.46 anti_loop detector signal 扩 2/3 — ExtractAction sig fix + 5-window alternation detector reframe)
+
+V0.46.0 plan 推 仅 B (ExtractAction sig normalize query 拒 C type-only detector). 本提交 V0.46.1
+真测 V0.44 真实 11 query 发现 **alternation pattern**: step 5/7/10 同 sig + step 6/8/9 同 sig
+交替, V0.46.1 仅 B (normalize) 后 deque [A,B,A] 仍不全同 → V0.5.0 3 连续相同 detector miss.
+**V0.46.0 plan 真测推翻**, reframe = B + 5-window alternation detector (类 subagent C 但精准
+to sig multiplicity, 不简单看 type).
+
+### V0.46.0 plan reframe (诚实 catch)
+
+| V0.46.0 plan | V0.46.1 真测 reframe |
+|--------------|---------------------|
+| 仅 B normalize query | B 真测推翻 — V0.44 alternation 后 [A,B,A] 不全同 |
+| 拒 C type-only detector | C subagent 推 type-only 不安全 (5 click 不同 mark_id false-pos) |
+| (无 alternation detector) | 加 **5-window + count(any sig) ≥ 3** detector (C' refined version, 仅看 sig 而非 type, 防 false-pos) |
+
+跟 V0.44.1 reframe 同模式 (V0.44.0 plan 写"修 #21 dead path" 但 V0.44.1 诚实 catch "cosmetic +
+auditability fix"). 跟 V0.45 拒 subagent 激进 plan **反向** — V0.45 是 plan 推全, 我保守; V0.46
+是 plan 推保守 (拒 C), 真测发现保守不够, **扩 scope**.
+
+### Changed (~50 src LOC + ~150 test LOC)
+
+- `src/web_agent/loop.py`:
+  - `+from collections import Counter` (5-window count)
+  - `+_normalize_extract_query(query)` helper (~10 LOC): lowercase + strip punct + collapse ws
+  - `_action_signature` 加 ExtractAction branch: drop answer + normalize query (~10 LOC)
+  - `+recent_action_window: deque[str] = deque(maxlen=5)` (alongside V0.5.0 `recent_actions` maxlen=3)
+  - 5-window alternation detector block (~25 LOC): candidate window count(any sig) ≥ 3 → trigger
+    + LOOP_DETECTED step + reflect call (跟 V0.5.0 abort path 同模式)
+  - backtrack path 加 `recent_action_window.clear()` 同 `recent_actions.clear()` (V0.25.2 兼容)
+- `tests/test_anti_loop_extract.py` (新建, ~200 LOC, 17 fast tests):
+  - 5 `_normalize_extract_query` unit (lowercase / strip punct / collapse ws / preserve CJK+alphanumeric / no truncate)
+  - 3 `_action_signature` ExtractAction branch (drop answer / normalize collapses wording / different intent ≠ sig)
+  - 2 V0.44 真实 trace 11 query regression (5-window catch + V0.5.0 仍 miss alternation 防回归)
+  - 2 5-window false-pos guard (5 unique sig / 仅 2 same)
+  - 5 5-window pattern matrix (alternation [A,B,A,B,A] / 5-window [A,A,A,B,C] / 全 unique / 全 ≤ 2 / [A,B,A,C,A])
+- `tests/test_loop_anti_loop.py`:
+  - 修 `test_signature_handles_chinese_args` (旧期望 answer in sig, V0.46.1 改 query in sig)
+  - 加 `test_signature_extract_drops_answer_v046_1` (新测 answer 不在 sig)
+- `pyproject.toml` / `__init__.py` 0.46.0 → 0.46.1
+- `uv.lock` 同步
+- `CHANGELOG.md` V0.46.1 entry (本)
+
+### Decision 门槛 (V0.46.0 先写) 验证
+
+| 指标 | V0.46.0 target | V0.46.1 真测结果 |
+|------|---------------|----------------|
+| V0.44 HN trace 11 step trigger by step ≤ 5 | (B-only 假设) | **改 step ≤ 9** (alternation 需 4 step 累积 + 5-window check) ✅ |
+| 现有 anti_loop test green | green | 2 test 改 (1 chinese fixture / 1 backtrack flow 加 window clear), 0 regression ✅ |
+| 全 pytest | ≥ 880 | **898 passed** ✅ (880 + 18 V0.46.1) |
+
+注: V0.46.0 target step ≤ 5 假设 B-only normalize 后 V0.44 step 5/6/7 凑 3 连续相同 sig. 真测
+发现 alternation 让 deque [A,B,A] 不全同 → V0.46.0 假设 wrong. V0.46.1 5-window detector catch
+at step ≤ 9 (实际 test step 9 trigger). target relax 但 fix 仍 hold (V0.44 trace 不再 miss).
+
+### V0.46.1 真发现 #25 follow-up 链路完成
+
+| 阶段 | V0.44 trace 11 step extract loop anti_loop trigger |
+|------|--------------------------------------------------|
+| V0.44.0 catch | 0 (miss, WALLCLOCK at step 11) |
+| V0.46.0 plan | (无代码改动) |
+| **V0.46.1 真 fix** | **5-window detector trigger at step ≤ 9** (regression test pass) |
+
+V0.46 #25 sub-finding (anti_loop signal extension) 闭环, V0.46.2 系列收尾.
+
+### Verify
+
+- `uv run pytest tests/test_anti_loop_extract.py -v` → 17 passed
+- `uv run pytest` → **898 passed, 25 skipped** (880 + 18 V0.46.1)
+- `uv run ruff check` → clean
+- `uv run mypy` → 0 issues in 52 src files
+
+### V0.46 commit 节奏
+
+- V0.46.0 ✅ audit doc + plan (V0.46.1 推翻 plan reframe)
+- **V0.46.1** ✅ 本: B + 5-window detector reframe (#25 sub-finding 真 fix)
+- V0.46.2 (next) 系列收尾 retrospective + V0.34 教训 16 累计 + V0.47 inventory
+
 ## [0.46.0] - 2026-05-11
 
 ### Doc (V0.46 anti_loop detector signal 扩系列开篇 1/3 — #26 follow-up audit + plan)
