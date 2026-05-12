@@ -2,6 +2,129 @@
 
 All notable changes to web-agent. 版本号遵循 SemVer 简化形式（V<major>.<minor>.<patch>）。
 
+## [0.39.1] - 2026-05-11
+
+### Doc (V0.39 G stealth 加固系列收尾 2/2 — 即时 withdraw + 真发现 #20 沉淀 + 文档数值 stamp 制度化)
+
+V0.39.0 落 probe 改造 + 真测 baseline 96.8% + decision 门槛 withdraw. V0.39.1 收尾: 2 commit
+闭环 (vs V0.38.3 原 plan 5 commit, V0.39.0 真测推翻原 ROI 假设后 reframe). 跟 V0.33.4 / V0.34.5
+/ V0.35.3 / V0.36.3 / V0.37.3 / V0.38.3 系列收尾同骨架, **本系列最短闭环 (2 commit)**.
+
+### V0.39 系列回顾 (2 commit, 史上最短 sub-route 系列)
+
+| ver | scope | 净收益 |
+|-----|-------|--------|
+| V0.39.0 | probe 改造抽分 + 真测 baseline 96.8% + decision 门槛 withdraw | 真发现 #20 沉淀 + 文档校正 |
+| **V0.39.1** | 系列收尾 retrospective + V0.40 inventory | 0 (沉淀价值 = 即时 withdraw 方法论制度化) |
+
+V0.39 G stealth 加固系列闭环 (2 commit 全 autonomous, 0 maintainer deferred).
+
+### V0.34 教训进化轨迹累计 V0.39 (9 系列, 已成熟到事前 catch)
+
+| 系列 | 系列 commit 数 | 教训应用模式 |
+|------|----------------|------------|
+| V0.34 F1 | 6 | 真测被动 catch Plan agent 估算错 (实施完才发现) |
+| V0.35 A | 4 | fixture 选型时主动 micro experiment 推翻 (W3C 0 iframe) |
+| V0.36 I | 4 | 现状叙事主动推翻 ("内存爆炸" 87 MB 实际) |
+| V0.37 B' | 4 | infra 准备 (`--dry-run` 防意外烧 token) |
+| V0.38 F2 | 4 | retrospective 预测对, plan agent 仍重蹈, 实施完真测验证 |
+| **V0.39 G** | **2 (压缩)** | **baseline 真测**触发 decision 门槛**即时 withdraw**, 实施前就 catch |
+
+**进化轨迹**: 6 commit → 4 commit → **2 commit**. V0.34 教训方法论真起作用 — 越后期系列, 越能
+事前 catch + 即时 withdraw, 减少投入心力. V0.39 是最短 sub-route 系列 (2 commit), 因 V0.39.0
+baseline 真测**直接推翻**原 plan 80%+ 假设 (真值 96.8%, 提升空间 3.2% < 决策门槛 5%).
+
+### 真发现 #20 沉淀 (文档数值 24-month-stale 模式)
+
+**Hypothesis (V0.16.14 spike)**: sannysoft.com ~72% 通过率, patchright NO-GO 后留 V0.30.0+ 加固.
+
+**24 months drift (V0.16.14 → V0.39.0)**:
+- V0.30.0 `apply_stealth_plus` 加固 (V0.30 plan D / E)
+- V0.30.4 `stealth_plus` 真发现 (CHANGELOG 详)
+- V0.34.5 retrospective 引 "~72%"
+- V0.38.3 retrospective 引 "72% → 85%+"
+- **真测**: 30/31 = 96.8% (V0.39.0 真测)
+
+**真值 vs Doc 数据差**: +24.8% (24 months 加固累计未重测).
+
+**根因**: 性能/通过率数据 doc 化时**没刻"上次测时间"**, plan agent / 未来 Claude 读 doc 时
+无法识别数据时效. README "~72%" 字面没标 "V0.16.14 时数", 24 months 后仍被引用.
+
+**教训 (V0.39 起强制)**: 数据 doc 必带版本号 + 真测日期 stamp.
+```markdown
+✗ "sannysoft 实测 ~72% 通过率"
+✓ "sannysoft 实测 **V0.39.0 96.8% (30/31, 2026-05-11)**"
+```
+
+V0.39 起所有 stealth / perceiver / token / disk / chain task 数据 doc 引用套此规则.
+
+### 文档数值 stamp 制度化 (V0.39 起)
+
+V0.39.0 已落:
+- `README.md:315` 改 "V0.16.14 ~72%" → "V0.39.0 96.8%, 30/31"
+- `docs/ARCHITECTURE.md:77` 改 "~72%" → "V0.39.0 96.8% (30/31)"
+
+V0.39+ 起 plan agent / Claude 写性能/通过率/cost 数据时:
+1. 必带 **版本号** stamp (e.g. "V0.X.Y")
+2. 必带 **真测日期** (e.g. "2026-05-11")
+3. 必带 **样本量** (e.g. "30/31 fixture")
+4. 若引旧版数据, **明标 "(V0.X.Y 时数, 可能 stale)"**
+
+跟 V0.33.4 "完成 / 通过 / 成功的措辞必须可验证" 同精神 (CLAUDE.md 失败恢复段沉淀).
+
+### Changed (~0 src LOC, ~100 doc LOC)
+
+- `CHANGELOG.md` V0.39.1 retrospective entry (本)
+- `pyproject.toml` / `__init__.py` 0.39.0 → 0.39.1
+- `uv.lock` 同步
+
+### Verify
+
+- `uv run pytest` → **819 passed, 25 skipped** (V0.39.0 状态, 0 src 改 → 0 测变)
+- 0 src 改 → 0 ruff/mypy 重检需求
+
+### 真 Chrome binary 推荐 (maintainer note, 不改代码)
+
+V0.34.5 candidate inventory 提的 "E. 真 Chrome binary 推荐" 零代码方案:
+
+`scripts/start_chrome.sh` V0.16.18 已检测 11 个 Chromium binary (chrome / chromium / brave /
+edge / vivaldi / opera). open-source `chromium` 比 `google-chrome` fingerprint **弱** (缺
+Google API key / Cookie sync / WebRTC encryption keys). maintainer 若想从 96.8% 提到 100%+,
+**优先用 `google-chrome-stable`** 而非 `chromium-browser` (V0.16.18 已支持, 装 Chrome 即 work).
+
+但 V0.39.0 真测在 sandbox `chromium-browser` (V0.34.0 起标 chromium 147.0.7727.15) 也跑到
+**96.8%**, Chrome vs Chromium 差距估 < 3% (剩下 1/31 = WebDriver New). **真 Chrome 升级不在
+V0.39 系列推**, 留 maintainer 装真 Chrome 后自跑 `WEB_AGENT_RUN_SLOW=1 WEB_AGENT_STEALTH_PROBE=1
+pytest tests/test_stealth_probe_sannysoft.py` 真验.
+
+### V0.39 系列状态
+
+| ver | 状态 | scope |
+|-----|------|-------|
+| V0.39.0 | ✅ | probe 改造 + baseline + 真发现 #20 + 文档校正 + decision 门槛 withdraw |
+| **V0.39.1** | ✅ 本提交 | 系列收尾 + 9 系列 V0.34 教训累计 + 文档数值 stamp 制度化 + V0.40 inventory |
+
+**V0.39 G stealth 加固系列闭环 (2 commit, 史上最短)**.
+
+### V0.40 主题路径 inventory (留 user 选)
+
+跟 V0.33.4 / V0.34.5 / V0.35.3 / V0.36.3 / V0.37.3 / V0.38.3 同句式. autonomous 红线 = 项目方向决策需 user 输入.
+
+候选路径 (V0.38.3 累计):
+- **A' V0.35 真站点 corpus 扩 5+ task** (加 dialog/upload 真站点轴)
+- **C 长期 session 记忆 cross-task 学习** (V0.13.0 memory.db 778 行, query inject 设计)
+- **D LLM cache / retry 优化** (V0.25.0 transient retry 已落, 加 token 级 cache 减重复 LLM 调用)
+- **新真发现 sub-route** (基于真站点 corpus 找新 bottleneck)
+- **F sub-route 收尾** (V0.34 F1 + V0.38 F2 都 ROI 推翻, **关闭 F sub-route 主题**, 不重复推)
+- **G stealth 已闭环** (V0.39 完成, 真值 96.8% 远超原 85%+ 目标)
+- 其他用户提的方向
+
+**已闭环主题** (V0.39 后): F sub-route (F1/F2 全 ROI 推翻), G stealth (96.8% 接近 ceil).
+**未推** (V0.37.4 / V0.36.2 / V0.35.1 deferred): maintainer 真录 cassette / data-clean 真删
+(retention 决策红线).
+
+(不带 ROI 估算 — V0.34 教训第 N 次应用: 项目方向 ROI 假设需 user 输入而非 Claude 自决.)
+
 ## [0.39.0] - 2026-05-11
 
 ### Feat (V0.39 G stealth 加固系列开篇 1/N — probe 改造抽分 + 真发现 #20 推翻 README "72%" 24-month-stale)
