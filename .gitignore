@@ -54,4 +54,5 @@ Thumbs.db
 
 # Claude Code 本地工具状态 (ScheduleWakeup lock 等)
 .claude/
-data/stealth_probes/*.png  # V0.30.2 PNG 截屏不进 git (~1MB/张); V0.39.0 JSON baseline (~1KB) 进 git 跟 data/bench/ 同处理
+# V0.30.2 PNG 截屏不进 git (~1MB/张); V0.39.0 JSON baseline (~1KB) 进 git 跟 data/bench/ 同处理
+data/stealth_probes/*.png
