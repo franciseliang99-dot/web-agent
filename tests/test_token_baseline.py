@@ -225,6 +225,100 @@ def test_main_matrix_label_count_mismatch_exit_2(monkeypatch, capsys, tmp_path):
     assert "ERROR" in captured.err
 
 
+# ---------- V0.37.2 compare_baselines_by_axis ----------
+
+
+def test_compare_baselines_by_axis_groups_by_axis():
+    """V0.37.2: 按 axis group + 各 axis 独立 compare_baselines."""
+    from eval.token_baseline import compare_baselines_by_axis
+    a = [
+        TaskTokenStats("t1-iframe", "anthropic", 1000, 200, 0.003, 0.0006, 5),
+        TaskTokenStats("t2-iframe", "anthropic", 2000, 400, 0.006, 0.0012, 6),
+        TaskTokenStats("t3-baseline", "anthropic", 500, 100, 0.0015, 0.0003, 3),
+    ]
+    b = [
+        TaskTokenStats("t1-iframe", "anthropic", 600, 150, 0.0018, 0.00045, 4),
+        TaskTokenStats("t2-iframe", "anthropic", 1200, 300, 0.0036, 0.0009, 5),
+        TaskTokenStats("t3-baseline", "anthropic", 450, 90, 0.00135, 0.00027, 3),
+    ]
+    axis_map = {"t1-iframe": "iframe", "t2-iframe": "iframe", "t3-baseline": "baseline"}
+    reports = compare_baselines_by_axis(a, b, axis_map)
+    assert set(reports.keys()) == {"iframe", "baseline"}
+    # iframe axis: 2 task, t1+t2 都省 input
+    iframe_r = reports["iframe"]
+    assert iframe_r.overall["total_input_delta"] == -1200  # (600-1000) + (1200-2000)
+    assert iframe_r.overall["percent_cost"] < 0  # 省 cost
+    # baseline axis: 1 task, 微省
+    baseline_r = reports["baseline"]
+    assert baseline_r.overall["total_input_delta"] == -50  # 450-500
+
+
+def test_compare_baselines_by_axis_unknown_axis_grouped_separately():
+    """V0.37.2: axis_map 未命中的 task 归入 '(unknown)' axis 不丢."""
+    from eval.token_baseline import compare_baselines_by_axis
+    a = [TaskTokenStats("t-unmapped", "anthropic", 100, 50, 0.0003, 0.00015, 2)]
+    b = [TaskTokenStats("t-unmapped", "anthropic", 80, 40, 0.00024, 0.00012, 2)]
+    reports = compare_baselines_by_axis(a, b, axis_map={})  # 空 axis_map
+    assert "(unknown)" in reports
+    assert reports["(unknown)"].overall["total_input_delta"] == -20
+
+
+def test_compare_baselines_by_axis_one_side_missing_axis_skipped():
+    """V0.37.2: a 有 axis X 但 b 无 (or 反) → 该 axis skip (跟 compare_baselines 配对缺失同 pattern)."""
+    from eval.token_baseline import compare_baselines_by_axis
+    a = [
+        TaskTokenStats("t1", "anthropic", 100, 50, 0.0003, 0.00015, 2),
+        TaskTokenStats("t2", "anthropic", 200, 100, 0.0006, 0.0003, 3),
+    ]
+    b = [TaskTokenStats("t1", "anthropic", 80, 40, 0.00024, 0.00012, 2)]
+    axis_map = {"t1": "iframe", "t2": "multi-tab"}
+    reports = compare_baselines_by_axis(a, b, axis_map)
+    # multi-tab 只 a 有 b 无 → skip; iframe a+b 都有 → 1 report
+    assert "iframe" in reports
+    assert "multi-tab" not in reports
+
+
+def test_render_axis_compare_markdown_sorted_axes():
+    """V0.37.2: render 按 axis 名字母排序 (稳定 diff)."""
+    from eval.token_baseline import compare_baselines_by_axis, render_axis_compare_markdown
+    a = [
+        TaskTokenStats("t1", "anthropic", 100, 50, 0.0003, 0.00015, 2),
+        TaskTokenStats("t2", "anthropic", 200, 100, 0.0006, 0.0003, 3),
+    ]
+    b = [
+        TaskTokenStats("t1", "anthropic", 80, 40, 0.00024, 0.00012, 2),
+        TaskTokenStats("t2", "anthropic", 160, 80, 0.00048, 0.00024, 3),
+    ]
+    axis_map = {"t1": "iframe", "t2": "baseline"}
+    md = render_axis_compare_markdown(compare_baselines_by_axis(a, b, axis_map))
+    # baseline 在 iframe 字母前
+    assert md.index("baseline") < md.index("iframe")
+    # 表头含 axis 列
+    assert "axis" in md
+
+
+def test_main_compare_by_axis_subcommand(monkeypatch, capsys, tmp_path):
+    """V0.37.2: cli compare --by-axis → render per-axis markdown."""
+    a_path = tmp_path / "a.json"
+    a_path.write_text(json.dumps({"metrics": [{
+        # 用 V0.22 真 task_id (axis=iframe in corpus)
+        "task_id": "v022-iframe-click-button", "provider": "anthropic",
+        "input_tokens": 1000, "output_tokens": 200,
+        "input_cost_usd": 0.003, "output_cost_usd": 0.0006, "steps": 5,
+    }]}))
+    b_path = tmp_path / "b.json"
+    b_path.write_text(json.dumps({"metrics": [{
+        "task_id": "v022-iframe-click-button", "provider": "anthropic",
+        "input_tokens": 600, "output_tokens": 150,
+        "input_cost_usd": 0.0018, "output_cost_usd": 0.00045, "steps": 4,
+    }]}))
+    rc = main(["compare", str(a_path), str(b_path), "--by-axis"])
+    assert rc == 0
+    captured = capsys.readouterr()
+    assert "Per-axis compare" in captured.out
+    assert "iframe" in captured.out  # ALL_TASKS axis_map 命中
+
+
 # ---------- cli main ----------
 
 

@@ -18,6 +18,7 @@ from __future__ import annotations
 import argparse
 import json
 import sys
+from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -186,6 +187,72 @@ def compare_matrix(
     return MatrixCompareReport(labels=labels, cells=cells)
 
 
+def compare_baselines_by_axis(
+    baseline_a: list[TaskTokenStats],
+    baseline_b: list[TaskTokenStats],
+    axis_map: Mapping[str, str],
+    *,
+    a_label: str = "A",
+    b_label: str = "B",
+) -> dict[str, BaselineCompareReport]:
+    """V0.37.2: 按 task `capability_axis` group 算 sub-report, 让 lean/WebP 节省按 axis 分布可见.
+
+    axis_map: dict[task_id, axis] (调用方从 corpus 提供 — 不污染 TaskTokenStats schema, BC 旧 JSON).
+    返 dict[axis, BaselineCompareReport]: 每 axis 一个独立 compare_baselines (复用主函数).
+    未 axis_map 命中的 task 归入 axis="(unknown)".
+
+    用例 (V0.33.4 B' baseline): lean 在 `iframe` axis 节省 25% (多 mark 多 SoM field bytes),
+    在 `baseline` axis 节省 5% (单 frame 少 mark). 按 axis breakdown 让"lean 该不该改默"
+    更细化 — 部分 axis 显著, 默改 lean 可能损失部分 axis 用户.
+    """
+    # 按 axis group baseline_a / baseline_b
+    a_by_axis: dict[str, list[TaskTokenStats]] = {}
+    b_by_axis: dict[str, list[TaskTokenStats]] = {}
+    for s in baseline_a:
+        axis = axis_map.get(s.task_id, "(unknown)")
+        a_by_axis.setdefault(axis, []).append(s)
+    for s in baseline_b:
+        axis = axis_map.get(s.task_id, "(unknown)")
+        b_by_axis.setdefault(axis, []).append(s)
+    # 各 axis 独立 compare
+    axes = set(a_by_axis) | set(b_by_axis)
+    reports: dict[str, BaselineCompareReport] = {}
+    for axis in axes:
+        a_sub = a_by_axis.get(axis, [])
+        b_sub = b_by_axis.get(axis, [])
+        if not a_sub or not b_sub:
+            continue  # 缺一边 axis skip (跟 compare_baselines 配对缺失 skip 一致)
+        reports[axis] = compare_baselines(a_sub, b_sub, a_label=a_label, b_label=b_label)
+    return reports
+
+
+def render_axis_compare_markdown(reports: dict[str, BaselineCompareReport]) -> str:
+    """V0.37.2: 渲 per-axis compare breakdown markdown (跟 V0.33.0 render_baseline_compare 同模式).
+
+    每 axis 一行 overall, 按 axis 名字母排序 (稳定 diff). 空 reports → 占位提示.
+    """
+    if not reports:
+        return "(no per-axis compare data — axis_map 命中为空)"
+    # 取第 1 个 axis report 的 labels (所有 axis 共用同 A/B labels)
+    first = next(iter(reports.values()))
+    lines = [
+        f"# Per-axis compare ({first.a_label} → {first.b_label})",
+        "",
+        "| axis | input Δ | output Δ | cost Δ | % cost |",
+        "|------|---------|----------|--------|--------|",
+    ]
+    for axis in sorted(reports.keys()):
+        r = reports[axis]
+        lines.append(
+            f"| {axis} | "
+            f"{r.overall['total_input_delta']:+.0f} | "
+            f"{r.overall['total_output_delta']:+.0f} | "
+            f"${r.overall['total_cost_delta_usd']:+.4f} | "
+            f"{r.overall['percent_cost']:+.1f}% |",
+        )
+    return "\n".join(lines)
+
+
 def render_matrix_markdown(report: MatrixCompareReport) -> str:
     """V0.37.1: 渲 N×N matrix markdown table (cell = `% cost change row→col`).
 
@@ -260,6 +327,10 @@ def main(argv: list[str] | None = None) -> int:
     sp_compare.add_argument("b_path", help="B baseline JSON")
     sp_compare.add_argument("--a-label", default="A", help="A 标签 (markdown header)")
     sp_compare.add_argument("--b-label", default="B", help="B 标签")
+    sp_compare.add_argument(
+        "--by-axis", action="store_true",
+        help="V0.37.2: 按 task capability_axis group 出 sub-table (lean 在哪 axis 节省显著)",
+    )
 
     sp_stats = sub.add_parser("stats", help="单 baseline per-task token stats")
     sp_stats.add_argument("path", help="baseline JSON path")
@@ -283,8 +354,17 @@ def main(argv: list[str] | None = None) -> int:
         if args.cmd == "compare":
             a = load_baseline_json(Path(args.a_path))
             b = load_baseline_json(Path(args.b_path))
-            report = compare_baselines(a, b, a_label=args.a_label, b_label=args.b_label)
-            sys.stdout.write(render_baseline_compare_markdown(report) + "\n")
+            if args.by_axis:
+                # V0.37.2: 从 ALL_TASKS 自动 build axis_map (避调用方手工传)
+                from eval.corpus import ALL_TASKS
+                axis_map = {t.task_id: t.capability_axis for t in ALL_TASKS}
+                axis_reports = compare_baselines_by_axis(
+                    a, b, axis_map, a_label=args.a_label, b_label=args.b_label,
+                )
+                sys.stdout.write(render_axis_compare_markdown(axis_reports) + "\n")
+            else:
+                report = compare_baselines(a, b, a_label=args.a_label, b_label=args.b_label)
+                sys.stdout.write(render_baseline_compare_markdown(report) + "\n")
             return 0
         if args.cmd == "matrix":
             paths = [Path(p.strip()) for p in args.baselines.split(",") if p.strip()]
@@ -324,7 +404,9 @@ __all__ = [
     "MatrixCompareCell",
     "MatrixCompareReport",
     "compare_baselines",
+    "compare_baselines_by_axis",
     "compare_matrix",
+    "render_axis_compare_markdown",
     "render_matrix_markdown",
     "load_baseline_json",
     "render_baseline_compare_markdown",

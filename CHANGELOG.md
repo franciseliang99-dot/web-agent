@@ -2,6 +2,74 @@
 
 All notable changes to web-agent. 版本号遵循 SemVer 简化形式（V<major>.<minor>.<patch>）。
 
+## [0.37.2] - 2026-05-11
+
+### Feat (V0.37 B' lean/WebP baseline 双跑 3/N — per-axis 节省 breakdown)
+
+V0.37.0 `--dry-run` + V0.37.1 N-file matrix 已落. V0.37.2 加 per-axis breakdown — 让 lean/WebP
+节省按 task `capability_axis` 分布, maintainer 真录后能见 "lean 在 iframe axis 节省 25%, 在
+baseline axis 节省 5%" 这种细粒度数据, 决"改默 lean"是否对所有 axis 用户都赢.
+
+### Changed (~80 src LOC + ~80 测 LOC)
+
+- `eval/token_baseline.py`:
+  - `compare_baselines_by_axis(a, b, axis_map: Mapping[str, str], ...)` 按 axis group + 各
+    axis 独立 compare_baselines (Mapping 协变让 V0.26.0 CapabilityAxis Literal 也接入)
+  - `render_axis_compare_markdown(reports: dict[axis, Report])` 渲 per-axis sub-table (axis 名字母排序稳定 diff)
+  - cli `compare --by-axis` flag 自动 from `eval.corpus.ALL_TASKS` build axis_map (调用方零参数)
+  - `__all__` 加 2 新 symbol
+  - import `Mapping` from collections.abc (mypy invariant dict→Mapping covariant fix)
+- `tests/test_token_baseline.py` +5 fast 测:
+  - `test_compare_baselines_by_axis_groups_by_axis`: 按 axis group + 各 axis 独立 delta
+  - `test_compare_baselines_by_axis_unknown_axis_grouped_separately`: 空 axis_map → "(unknown)"
+  - `test_compare_baselines_by_axis_one_side_missing_axis_skipped`: 缺 axis skip
+  - `test_render_axis_compare_markdown_sorted_axes`: axis 名排序
+  - `test_main_compare_by_axis_subcommand`: cli --by-axis 真跑 verify output
+- `pyproject.toml` / `__init__.py` 0.37.1 → 0.37.2
+- `uv.lock` 同步
+
+### V0.37 maintainer how-to 演进 (V0.37.3 系列收尾整理完整)
+
+```bash
+# V0.37.0 + V0.37.1 + V0.37.2 后 maintainer 跑 B' baseline:
+# 1. dry-run (V0.37.0)
+uv run web-agent-eval --corpus all --dry-run --providers anthropic
+
+# 2. 4 配置真烧 token (V0.37.4 deferred maintainer 跑)
+WEB_AGENT_RUN_EVAL=1 WEB_AGENT_EVAL_REAL=1 WEB_AGENT_EVAL_LIVE_NET=1 ANTHROPIC_API_KEY=sk-ant-... \
+  uv run web-agent-eval --output data/eval/v033-full-png.json
+WEB_AGENT_SOM_FIELDS=lean ... --output data/eval/v033-lean-png.json
+WEB_AGENT_SCREENSHOT_FORMAT=webp ... --output data/eval/v033-full-webp.json
+WEB_AGENT_SOM_FIELDS=lean WEB_AGENT_SCREENSHOT_FORMAT=webp ... --output data/eval/v033-lean-webp.json
+
+# 3. matrix compare 一键 (V0.37.1)
+uv run web-agent-token-baseline matrix \
+  --baselines data/eval/v033-full-png.json,...,lean-webp.json \
+  --labels full+png,lean+png,full+webp,lean+webp
+
+# 4. per-axis breakdown (V0.37.2)
+uv run web-agent-token-baseline compare \
+  data/eval/v033-full-png.json data/eval/v033-lean-png.json \
+  --a-label full --b-label lean --by-axis
+# 输出 per-axis sub-table: iframe / multi-tab / drag / ... lean 在哪 axis 显著
+```
+
+### Verify
+
+- `uv run pytest` → **810 passed, 25 skipped** (+5 V0.37.2 by-axis 测, 0 现测破)
+- `uv run ruff check` → all clean
+- `uv run mypy` → Success no issues in 51 src files
+
+### V0.37 系列进度
+
+| ver | 状态 | scope | autonomous |
+|-----|------|-------|------------|
+| V0.37.0 | ✅ | `--dry-run` mode | ✅ |
+| V0.37.1 | ✅ | compare_matrix N-file (B' 2×2 一键) | ✅ |
+| **V0.37.2** | ✅ 本提交 | per-axis 节省 breakdown (`--by-axis`) | ✅ |
+| V0.37.3 | 待 | 系列收尾 + how-to 重写 + 跳 V0.37.4 deferred | ✅ |
+| V0.37.4 (skip) | maintainer 真录 4 配置 baseline ~$1-2 | 🛑 红线 |
+
 ## [0.37.1] - 2026-05-11
 
 ### Feat (V0.37 B' lean/WebP baseline 双跑 2/N — token_baseline compare_matrix N-file)
