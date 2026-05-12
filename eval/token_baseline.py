@@ -119,6 +119,97 @@ def compare_baselines(
     )
 
 
+@dataclass(frozen=True, slots=True)
+class MatrixCompareCell:
+    """V0.37.1: matrix 单 cell (row vs col) 摘要 — total delta + percent cost.
+
+    row=A baseline, col=B baseline. delta 正 = B 比 A 多 (regression), 负 = B 比 A 省.
+    diagonal (row==col) 视为 self-compare, 全 0 delta.
+    """
+
+    row_label: str
+    col_label: str
+    total_input_delta: float
+    total_output_delta: float
+    total_cost_delta_usd: float
+    percent_cost: float
+
+
+@dataclass(frozen=True, slots=True)
+class MatrixCompareReport:
+    """V0.37.1: N-baseline pairwise compare matrix (跟 BaselineCompareReport 同 dataclass 风格).
+
+    labels: N 个 baseline labels, 跟 baselines 列表顺序 1:1.
+    cells: dict[(row_idx, col_idx), MatrixCompareCell], 含 diagonal self-compare.
+    用 V0.33.4 B' baseline 双跑场景: 4 配置 (full+png / lean+png / full+webp / lean+webp) 2×2 matrix.
+    """
+
+    labels: list[str]
+    cells: dict[tuple[int, int], MatrixCompareCell]
+
+
+def compare_matrix(
+    baselines: list[list[TaskTokenStats]],
+    labels: list[str],
+) -> MatrixCompareReport:
+    """V0.37.1: N baseline pairwise compare → MatrixCompareReport.
+
+    N×N matrix, 复用 compare_baselines 算 off-diagonal cell. diagonal cell self-compare 全 0.
+    用法: compare_matrix([full_png, lean_png, full_webp, lean_webp],
+                        ["full+png", "lean+png", "full+webp", "lean+webp"]).
+    """
+    if len(baselines) != len(labels):
+        raise ValueError(
+            f"compare_matrix: baselines count {len(baselines)} != labels count {len(labels)}",
+        )
+    if len(baselines) < 2:
+        raise ValueError(f"compare_matrix: 需 N >= 2 baseline, 给 {len(baselines)}")
+    cells: dict[tuple[int, int], MatrixCompareCell] = {}
+    for i, (a_baseline, a_label) in enumerate(zip(baselines, labels, strict=True)):
+        for j, (b_baseline, b_label) in enumerate(zip(baselines, labels, strict=True)):
+            if i == j:
+                cells[(i, j)] = MatrixCompareCell(
+                    row_label=a_label, col_label=b_label,
+                    total_input_delta=0.0, total_output_delta=0.0,
+                    total_cost_delta_usd=0.0, percent_cost=0.0,
+                )
+                continue
+            sub = compare_baselines(a_baseline, b_baseline, a_label=a_label, b_label=b_label)
+            cells[(i, j)] = MatrixCompareCell(
+                row_label=a_label,
+                col_label=b_label,
+                total_input_delta=sub.overall["total_input_delta"],
+                total_output_delta=sub.overall["total_output_delta"],
+                total_cost_delta_usd=sub.overall["total_cost_delta_usd"],
+                percent_cost=sub.overall["percent_cost"],
+            )
+    return MatrixCompareReport(labels=labels, cells=cells)
+
+
+def render_matrix_markdown(report: MatrixCompareReport) -> str:
+    """V0.37.1: 渲 N×N matrix markdown table (cell = `% cost change row→col`).
+
+    diagonal "—", off-diagonal `+X.X%` / `-X.X%` (正 = col 比 row 多, 负 = col 比 row 省).
+    """
+    n = len(report.labels)
+    lines = [
+        f"# Matrix compare ({n}×{n}, cell = % cost change row→col)",
+        "",
+        "| ↓ row \\ col → | " + " | ".join(report.labels) + " |",
+        "|" + "---|" * (n + 1),
+    ]
+    for i, row_label in enumerate(report.labels):
+        cells_str = []
+        for j in range(n):
+            cell = report.cells[(i, j)]
+            if i == j:
+                cells_str.append("—")
+            else:
+                cells_str.append(f"{cell.percent_cost:+.1f}%")
+        lines.append(f"| **{row_label}** | " + " | ".join(cells_str) + " |")
+    return "\n".join(lines)
+
+
 def render_baseline_compare_markdown(report: BaselineCompareReport) -> str:
     """V0.33.0: 渲染 BaselineCompareReport 为 markdown 表 (跟 V0.28.3 reflective_uplift markdown 同模式).
 
@@ -173,6 +264,19 @@ def main(argv: list[str] | None = None) -> int:
     sp_stats = sub.add_parser("stats", help="单 baseline per-task token stats")
     sp_stats.add_argument("path", help="baseline JSON path")
 
+    sp_matrix = sub.add_parser(
+        "matrix",
+        help="V0.37.1: N baseline pairwise compare matrix (e.g. B' 4 配置 2×2)",
+    )
+    sp_matrix.add_argument(
+        "--baselines", required=True,
+        help="逗号分隔 N baseline JSON paths (e.g. 'data/eval/v033-full-png.json,...,lean-webp.json')",
+    )
+    sp_matrix.add_argument(
+        "--labels", required=True,
+        help="逗号分隔 N labels (e.g. 'full+png,lean+png,full+webp,lean+webp')",
+    )
+
     args = parser.parse_args(argv)
 
     try:
@@ -181,6 +285,22 @@ def main(argv: list[str] | None = None) -> int:
             b = load_baseline_json(Path(args.b_path))
             report = compare_baselines(a, b, a_label=args.a_label, b_label=args.b_label)
             sys.stdout.write(render_baseline_compare_markdown(report) + "\n")
+            return 0
+        if args.cmd == "matrix":
+            paths = [Path(p.strip()) for p in args.baselines.split(",") if p.strip()]
+            labels = [s.strip() for s in args.labels.split(",") if s.strip()]
+            if len(paths) != len(labels):
+                sys.stderr.write(
+                    f"ERROR: --baselines count {len(paths)} != --labels count {len(labels)}\n",
+                )
+                return 2
+            baselines = [load_baseline_json(p) for p in paths]
+            try:
+                m_report = compare_matrix(baselines, labels)
+            except ValueError as e:
+                sys.stderr.write(f"ERROR: {e}\n")
+                return 2
+            sys.stdout.write(render_matrix_markdown(m_report) + "\n")
             return 0
         if args.cmd == "stats":
             stats = load_baseline_json(Path(args.path))
@@ -201,7 +321,11 @@ def main(argv: list[str] | None = None) -> int:
 __all__ = [
     "BaselineCompareReport",
     "TaskTokenStats",
+    "MatrixCompareCell",
+    "MatrixCompareReport",
     "compare_baselines",
+    "compare_matrix",
+    "render_matrix_markdown",
     "load_baseline_json",
     "render_baseline_compare_markdown",
 ]

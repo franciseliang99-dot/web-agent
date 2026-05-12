@@ -2,6 +2,72 @@
 
 All notable changes to web-agent. 版本号遵循 SemVer 简化形式（V<major>.<minor>.<patch>）。
 
+## [0.37.1] - 2026-05-11
+
+### Feat (V0.37 B' lean/WebP baseline 双跑 2/N — token_baseline compare_matrix N-file)
+
+V0.37.0 落 `--dry-run` infra. V0.37.1 扩 `eval/token_baseline.py` `compare` 从 A vs B 二元
+到 N baseline pairwise matrix — 配合 V0.33.4 B' 4 配置 (full+png / lean+png / full+webp /
+lean+webp) maintainer 真录后一键 2×2 矩阵分析, 不再手工 6 次 pairwise compare.
+
+### Changed (~120 src LOC + ~120 测 LOC)
+
+- `eval/token_baseline.py`:
+  - `MatrixCompareCell` frozen+slots dataclass (row_label / col_label / 4 metric fields)
+  - `MatrixCompareReport` frozen+slots (labels: list[str] / cells: dict[(i,j), MatrixCompareCell])
+  - `compare_matrix(baselines, labels)` N×N pairwise, diagonal self-compare 全 0 (复用 compare_baselines)
+  - `render_matrix_markdown` 渲 N×N markdown table (diag "—", off-diag `±X.X%`)
+  - main: `matrix` subparser (`--baselines a,b,c,d --labels full+png,lean+png,full+webp,lean+webp`)
+  - `__all__` 加 4 新 symbol
+- `tests/test_token_baseline.py` +7 fast 测:
+  - `test_compare_matrix_2_baselines_2x2`: 2 baseline 验 diag=0 + off-diag = compare_baselines
+  - `test_compare_matrix_4_baselines_4x4_b_prime_config`: V0.33.4 B' 4 配置真模拟 (V0.33.3 #13 WebP 0 token 假设)
+  - `test_compare_matrix_label_count_mismatch_raises`: 错配 raise
+  - `test_compare_matrix_n_less_than_2_raises`: 单 baseline raise
+  - `test_render_matrix_markdown_diagonal_dash`: diag "—" + off-diag %
+  - `test_main_matrix_subcommand`: cli matrix 真跑 verify output
+  - `test_main_matrix_label_count_mismatch_exit_2`: cli mismatch exit 2 + stderr
+- `pyproject.toml` / `__init__.py` 0.37.0 → 0.37.1
+- `uv.lock` 同步
+
+### V0.37 maintainer how-to 演进 (V0.37.3 收尾时整理完整)
+
+V0.37.0+V0.37.1 后 maintainer 跑 B' baseline 双跑命令变成:
+
+```bash
+# 1. dry-run 校 env + 估 cost (V0.37.0)
+uv run web-agent-eval --corpus all --dry-run --providers anthropic
+
+# 2. 4 配置真烧 token (V0.33.4 how-to, V0.37.4 deferred)
+WEB_AGENT_RUN_EVAL=1 WEB_AGENT_EVAL_REAL=1 WEB_AGENT_EVAL_LIVE_NET=1 \
+  ANTHROPIC_API_KEY=sk-ant-... \
+  uv run web-agent-eval --output data/eval/v033-full-png.json
+WEB_AGENT_SOM_FIELDS=lean ... --output data/eval/v033-lean-png.json
+WEB_AGENT_SCREENSHOT_FORMAT=webp ... --output data/eval/v033-full-webp.json
+WEB_AGENT_SOM_FIELDS=lean WEB_AGENT_SCREENSHOT_FORMAT=webp ... --output data/eval/v033-lean-webp.json
+
+# 3. matrix compare 一键 (V0.37.1)
+uv run web-agent-token-baseline matrix \
+  --baselines data/eval/v033-full-png.json,data/eval/v033-lean-png.json,data/eval/v033-full-webp.json,data/eval/v033-lean-webp.json \
+  --labels full+png,lean+png,full+webp,lean+webp
+```
+
+### Verify
+
+- `uv run pytest` → **805 passed, 25 skipped** (+7 V0.37.1 matrix 测, 0 现测破)
+- `uv run ruff check` → all clean
+- `uv run mypy` → Success no issues in 51 src files
+
+### V0.37 系列进度
+
+| ver | 状态 | scope | autonomous |
+|-----|------|-------|------------|
+| V0.37.0 | ✅ | `--dry-run` mode | ✅ |
+| **V0.37.1** | ✅ 本提交 | compare_matrix N-file (B' 2×2 一键) | ✅ |
+| V0.37.2 | 待 | per-axis 节省 breakdown (lean 在哪 capability axis 显著) | ✅ |
+| V0.37.3 | 待 | 系列收尾 + how-to 重写 + 跳 V0.37.4 deferred maintainer | ✅ |
+| V0.37.4 (skip) | maintainer 真录 4 配置 baseline ~$1-2 | 🛑 红线 |
+
 ## [0.37.0] - 2026-05-11
 
 ### Feat (V0.37 B' lean/WebP baseline 双跑系列开篇 1/N — eval cli `--dry-run` mode)

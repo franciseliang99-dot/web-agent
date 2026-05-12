@@ -114,6 +114,117 @@ def test_render_baseline_compare_markdown_empty():
     assert "no baseline compare" in md
 
 
+# ---------- V0.37.1 compare_matrix ----------
+
+
+def test_compare_matrix_2_baselines_2x2():
+    """V0.37.1: 2 baseline 2×2 matrix, diag=0, off-diag = compare_baselines 结果."""
+    from eval.token_baseline import compare_matrix
+    full = [TaskTokenStats("t1", "anthropic", 1000, 200, 0.003, 0.0006, 5)]
+    lean = [TaskTokenStats("t1", "anthropic", 600, 150, 0.0018, 0.00045, 4)]
+    report = compare_matrix([full, lean], ["full", "lean"])
+    assert report.labels == ["full", "lean"]
+    # 4 cells in 2x2
+    assert set(report.cells.keys()) == {(0, 0), (0, 1), (1, 0), (1, 1)}
+    # diagonal cells 全 0
+    assert report.cells[(0, 0)].percent_cost == 0.0
+    assert report.cells[(1, 1)].total_input_delta == 0.0
+    # off-diagonal: full → lean 省 (negative delta)
+    assert report.cells[(0, 1)].total_input_delta == -400.0  # 600 - 1000
+    assert report.cells[(0, 1)].percent_cost < 0  # cost 省 → 负
+    # off-diagonal symmetry: lean → full 多 (positive)
+    assert report.cells[(1, 0)].total_input_delta == 400.0
+
+
+def test_compare_matrix_4_baselines_4x4_b_prime_config():
+    """V0.37.1: 4 baseline 4×4 — V0.33.4 B' 4 配置 (full+png/lean+png/full+webp/lean+webp)."""
+    from eval.token_baseline import compare_matrix
+    full_png = [TaskTokenStats("t1", "anthropic", 10000, 1000, 0.030, 0.003, 10)]
+    lean_png = [TaskTokenStats("t1", "anthropic", 6000, 1000, 0.018, 0.003, 10)]  # lean 省 input
+    full_webp = [TaskTokenStats("t1", "anthropic", 10000, 1000, 0.030, 0.003, 10)]  # WebP 不省 token (#13)
+    lean_webp = [TaskTokenStats("t1", "anthropic", 6000, 1000, 0.018, 0.003, 10)]
+    report = compare_matrix(
+        [full_png, lean_png, full_webp, lean_webp],
+        ["full+png", "lean+png", "full+webp", "lean+webp"],
+    )
+    # 16 cells in 4x4
+    assert len(report.cells) == 16
+    # 4 diagonal cells 全 0
+    for i in range(4):
+        assert report.cells[(i, i)].percent_cost == 0.0
+    # full+png → lean+png 省 cost (lean 优化效果)
+    assert report.cells[(0, 1)].percent_cost < 0
+    # full+png → full+webp 0 (V0.33.3 #13 WebP 不直减 token)
+    assert report.cells[(0, 2)].percent_cost == 0.0
+
+
+def test_compare_matrix_label_count_mismatch_raises():
+    """V0.37.1: baselines count != labels count → ValueError."""
+    from eval.token_baseline import compare_matrix
+    a = [TaskTokenStats("t1", "anthropic", 100, 50, 0.0003, 0.00015, 1)]
+    with pytest.raises(ValueError, match="count"):
+        compare_matrix([a, a], ["only-one-label"])
+
+
+def test_compare_matrix_n_less_than_2_raises():
+    """V0.37.1: 单 baseline matrix 没意义 → ValueError."""
+    from eval.token_baseline import compare_matrix
+    a = [TaskTokenStats("t1", "anthropic", 100, 50, 0.0003, 0.00015, 1)]
+    with pytest.raises(ValueError, match="N >= 2"):
+        compare_matrix([a], ["only-one"])
+
+
+def test_render_matrix_markdown_diagonal_dash():
+    """V0.37.1: 对角线 cell 渲 '—', off-diagonal 渲 percent."""
+    from eval.token_baseline import compare_matrix, render_matrix_markdown
+    full = [TaskTokenStats("t1", "anthropic", 1000, 200, 0.003, 0.0006, 5)]
+    lean = [TaskTokenStats("t1", "anthropic", 600, 150, 0.0018, 0.00045, 4)]
+    md = render_matrix_markdown(compare_matrix([full, lean], ["full", "lean"]))
+    # header 含 N×N
+    assert "2×2" in md
+    # diagonal "—"
+    assert "—" in md
+    # off-diagonal 含 % 符号
+    assert "%" in md
+    # labels 含
+    assert "full" in md
+    assert "lean" in md
+
+
+def test_main_matrix_subcommand(monkeypatch, capsys, tmp_path):
+    """V0.37.1: web-agent-token-baseline matrix --baselines A,B --labels a,b → stdout markdown."""
+    a_path = tmp_path / "a.json"
+    a_path.write_text(json.dumps({"metrics": [{
+        "task_id": "t1", "provider": "anthropic",
+        "input_tokens": 1000, "output_tokens": 200,
+        "input_cost_usd": 0.003, "output_cost_usd": 0.0006, "steps": 5,
+    }]}))
+    b_path = tmp_path / "b.json"
+    b_path.write_text(json.dumps({"metrics": [{
+        "task_id": "t1", "provider": "anthropic",
+        "input_tokens": 600, "output_tokens": 150,
+        "input_cost_usd": 0.0018, "output_cost_usd": 0.00045, "steps": 4,
+    }]}))
+    rc = main(["matrix", "--baselines", f"{a_path},{b_path}", "--labels", "full,lean"])
+    assert rc == 0
+    captured = capsys.readouterr()
+    assert "Matrix compare" in captured.out
+    assert "full" in captured.out
+    assert "lean" in captured.out
+
+
+def test_main_matrix_label_count_mismatch_exit_2(monkeypatch, capsys, tmp_path):
+    """V0.37.1: matrix --baselines count != labels → exit 2 + stderr ERROR."""
+    a_path = tmp_path / "a.json"
+    a_path.write_text(json.dumps({"metrics": []}))
+    b_path = tmp_path / "b.json"
+    b_path.write_text(json.dumps({"metrics": []}))
+    rc = main(["matrix", "--baselines", f"{a_path},{b_path}", "--labels", "only-one"])
+    assert rc == 2
+    captured = capsys.readouterr()
+    assert "ERROR" in captured.err
+
+
 # ---------- cli main ----------
 
 
