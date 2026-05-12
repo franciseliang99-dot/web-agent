@@ -2,6 +2,111 @@
 
 All notable changes to web-agent. 版本号遵循 SemVer 简化形式（V<major>.<minor>.<patch>）。
 
+## [0.45.2] - 2026-05-11
+
+### Doc (V0.45 safety:send-or-pay predicate 假阳性修复系列收尾 3/3 — V0.34 教训 15 系列累计 + V0.46 inventory)
+
+V0.45.0 plan + V0.45.1 真 fix 已落 (2 commit autonomous). 本提交收尾: 系列总结 + V0.34 教训
+15 系列累计 + V0.46 主题 inventory. 跟 V0.33.4 → V0.44.3 系列收尾同骨架.
+
+### V0.45 系列回顾 (3 commit autonomous, follow-up fix 节奏)
+
+| ver | scope | LOC | 状态 |
+|-----|-------|-----|------|
+| V0.45.0 | audit doc + plan + decision 门槛 (conservative scope, 拒 subagent 激进 plan) | ~150 doc | ✅ |
+| V0.45.1 | safety.py regex fix + test_safety.py 更新 + 新建 regression test (24 fast tests) | ~10 src + ~115 test + ~60 doc | ✅ |
+| **V0.45.2** | 系列收尾 retrospective + V0.46 inventory | ~70 doc | ✅ 本提交 |
+
+V0.45 #24 follow-up fix 闭环 (3 commit, 跟 V0.43 R 节奏一致). V0.45 系列 0 新真发现 (V0.45 是
+V0.44.0 真发现 #24 的 follow-up fix, 不是新 catch).
+
+### V0.45 真发现 #24 链路完成
+
+| 阶段 | safety:send-or-pay 真实生产假阳性率 | 解决路径 |
+|------|----------------------------------|---------|
+| V0.44.0 catch | **8/8 = 100%** (trace.db audit) | (catch) |
+| V0.44 W6-A 系列 | (V0.44.2 排除 SAFETY 从 should_reflect, 仅 cosmetic) | (不修 predicate, 仅 reflect 不调用 SAFETY) |
+| V0.45.0 plan | (无代码改动) | (audit + plan + decision 门槛) |
+| **V0.45.1 真 fix** | **0%** (24 regression test 全 pass) | (regex 删 generic submit/publish/post/order standalone) |
+
+V0.45 真发现 #24 完整闭环 (V0.44.0 catch → V0.45.1 真 fix). 跟 V0.34.4 #17 (catch only, mitigation
+未真 fix) / V0.41.0 #21 (V0.41.1 reframe + V0.44.2 真 fix) 不同 — V0.45 是当 series 内完成真 fix.
+
+### V0.34 教训累计应用至 V0.45 (15 系列贯彻)
+
+| 系列 | commit | 教训应用 | 真发现 |
+|------|--------|---------|--------|
+| V0.34 F1 | 6 | 真测被动 catch | #15 #16 #17 |
+| V0.35 A | 4 | fixture micro experiment | 0 |
+| V0.36 I | 4 | 现状叙事推翻 | #18 |
+| V0.37 B' | 4 | infra 准备 | 0 (deferred) |
+| V0.38 F2 | 4 | retrospective 预测 | #19 |
+| V0.39 G | 2 | baseline 即时 withdraw | #20 |
+| V0.40 A' | 3 | 每 fixture probe | 0 (deferred) |
+| V0.41 C | 3 | 真测 db schema → reframe | #21 |
+| V0.42 D | 4 | 真测 SDK + image cache miss → reframe | 0 (待 maintainer) |
+| V0.43 R | 3 | audit ARCHITECTURE 先于 cleanup + per-fixture 双向数据 | #22 + #23 |
+| V0.44 W6-A | 4 | 历史 plan subagent 假设 audit + 真测双端推翻 | #24 + #25 |
+| **V0.45** | **3** | **数据驱动 conservative fix scope, 拒绝 subagent 激进 plan** | 0 新 (是 #24 真 fix) |
+
+**V0.45 教训应用新维度**: **subagent plan 推 future-proofing (Send 加 amount co-signal),
+我保守 conservative — 仅修真发现 evidence 看到的**. 跟 V0.42 D 仅 tools cache 不动 image 同模式
+(plan 推全加 cache_control, 真测推翻 仅 tools cache hit). 跟 V0.43 R3 推翻 W5-C.2 cleanup 推
+也同模式 — subagent 看似全面的 plan 经数据 sieve 后 scope 收窄.
+
+### 真发现 sink 累计 (V0.34 → V0.45, 25 个不变, +0)
+
+V0.45 是 #24 follow-up fix, 不是新 catch. 模式分类不变:
+- 真测推翻 plan agent perf 估算 (5): #13 #17 #18 #19 #23
+- 真测发现 syntax/security 边界 (2): #15 #16
+- 文档 stale / agent 偷懒 (3): #20 #22 #24
+- 生产 schema vs 设计层 drift (1): #21
+- 历史 plan subagent 假设推翻 (1): #25
+
+V0.45 完后 fix 状态:
+- #17 catch only (V0.34.4 + V0.43.1 chromium 物理限永久 NO-GO 加固)
+- #21 ✅ V0.44.2 真 fix (扩 trigger marker)
+- **#24 ✅ V0.45.1 真 fix** (regex 删 generic 动词)
+- 其他 sink: 部分 fix / mitigation / 永久 NO-GO 分类详见各系列 entry
+
+### V0.46 主题候选 (V0.45 完后 surface)
+
+V0.44/V0.45 audit 累计催生:
+- **#26 候选: anti_loop detector signal 扩** (V0.44.0 #25 WALLCLOCK extract loop catch miss 催生:
+  signature 仅比 action_type+raw args, query 字符串轻微变化让 signature 漂移. 应 normalize
+  query/args 文本 noise)
+- **delete/remove rule name cleanup** (V0.45 audit 催生: rule 'send-or-pay' 不含 destructive,
+  拆 'destructive-action' 单独 rule)
+- **send 加 amount co-signal** (V0.45.0 plan 保守留, 未来若 audit 发现 'Send Email' false-pos 再做)
+- A'' V0.40 corpus 再扩 (drag/dialog/upload anti-abuse fixture)
+- V0.42 housekeeping (V0.36.2 + V0.41 C5 deferred 合并)
+- V0.42/V0.44 后真测 cassette (maintainer 红线)
+- V0.44.x.1 maintainer 真测 1 个 WALLCLOCK task 后 reflections 表行数 ≥ 1 (verify V0.44.2 wire)
+- 其他用户提的方向
+
+**已闭环主题** (V0.45 后):
+- F sub-route (F1+F2 ROI 推翻; V0.43 R 加固 #17 物理限)
+- G stealth (96.8% 接近 ceil)
+- A/A' real-world corpus (13 task)
+- C 长期记忆 cross-task 学习
+- D LLM cache 优化 (4 维矩阵)
+- R re-investigation (V0.43, spp 真测 sink #23)
+- W6-A reflect path audit (V0.44, #24/#25 双向真发现 + #21 真 fix)
+- **safety predicate fix (V0.45, #24 真 fix)**
+
+(不带 ROI 估算 — V0.34 教训第 15 次应用: 项目方向 ROI 假设需 user 输入而非 Claude 自决.)
+
+### Changed (~0 src LOC, ~70 doc LOC)
+
+- `CHANGELOG.md` V0.45.2 retrospective entry (本)
+- `pyproject.toml` / `__init__.py` 0.45.1 → 0.45.2
+- `uv.lock` 同步
+
+### Verify
+
+- `uv run pytest` → **880 passed, 25 skipped** (V0.45.1 状态 0 src 改 → 0 测变)
+- 0 src 改 → 0 ruff/mypy 重检需求
+
 ## [0.45.1] - 2026-05-11
 
 ### Feat (V0.45 safety:send-or-pay predicate 假阳性修复 2/3 — regex fix + regression test V0.44 audit 8/8 case)
