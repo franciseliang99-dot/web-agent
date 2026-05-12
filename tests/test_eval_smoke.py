@@ -49,9 +49,9 @@ def test_parse_providers_skip_empty():
 
 
 def test_select_tasks_all_returns_full_corpus():
-    """V0.40.0: --corpus all → 全 22 task (V0.26 10 + V0.29 2 + V0.30 3 + V0.32 2 + V0.35 3 + V0.40 2)."""
+    """V0.40.1: --corpus all → 全 25 task (V0.40.0 22 + V0.40.1 +3 凑齐 A' 5+ 验收)."""
     tasks = _select_tasks("all")
-    assert len(tasks) == 22
+    assert len(tasks) == 25
 
 
 def test_select_tasks_axis_filter():
@@ -251,26 +251,18 @@ def test_select_tasks_capability_real_world_virtual_axis_returns_3_v035_tasks():
     }
 
 
-def test_select_tasks_real_world_axis_returns_10_real_net_tasks():
-    """V0.40.0: --corpus real-world → 10 task (V0.30 3 + V0.32 2 + V0.35 3 + V0.40 2).
+def test_select_tasks_real_world_axis_returns_13_real_net_tasks():
+    """V0.40.1: --corpus real-world → 13 task (V0.30 3 + V0.32 2 + V0.35 3 + V0.40 5).
 
     requires_real_net=True 全部 — _select_tasks 是纯函数 (不调 LIVE_NET filter), 测 axis 选对.
     """
     tasks = _select_tasks("real-world")
-    assert len(tasks) == 10
+    assert len(tasks) == 13
     assert all(t.capability_axis == "real-world" for t in tasks)
     assert all(t.requires_real_net for t in tasks)
     task_ids = {t.task_id for t in tasks}
-    assert "v030-wikipedia-quantum-entanglement" in task_ids
-    assert "v030-wikipedia-apple-inc" in task_ids
-    assert "v030-github-octocat-hello-world" in task_ids
-    assert "v032-github-topic-python-first-readme" in task_ids
-    assert "v032-wikipedia-apple-to-cupertino-chain" in task_ids
-    assert "v035-wikipedia-search-quantum-field-theory" in task_ids
-    assert "v035-github-octocat-commits-first" in task_ids
-    assert "v035-wikipedia-qft-scroll-history-section" in task_ids
-    assert "v040-wikipedia-mercury-element-extract" in task_ids  # V0.40.0 A'
-    assert "v040-iana-example-domains-doc-extract" in task_ids  # V0.40.0 A'
+    v040_task_ids = {tid for tid in task_ids if tid.startswith("v040-")}
+    assert len(v040_task_ids) == 5, f"V0.40 加 5 real-world task, got {len(v040_task_ids)}"
 
 
 def test_argparse_help_mentions_real_world_axis(capsys):

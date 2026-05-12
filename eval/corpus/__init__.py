@@ -58,7 +58,10 @@ from eval.corpus.v035_capability_real_world import (
 )
 from eval.corpus.v040_capability_real_world_extended import (
     CAPABILITY_REAL_WORLD_EXTENDED_PREDICATES,
+    GITHUB_OCTOCAT_RAW_BLOB_VIEW,
+    HTTPBIN_FORM_TYPE_LABEL_EXTRACT,
     IANA_EXAMPLE_DOMAINS_EXTRACT,
+    WIKIPEDIA_MERCURY_DISAMBIG_PLANET_FOLLOW,
     WIKIPEDIA_MERCURY_ELEMENT_EXTRACT,
 )
 from eval.predicates import Predicate, SubstringPredicate
@@ -110,6 +113,9 @@ ALL_TASKS: list[EvalTask] = [
     WIKIPEDIA_QFT_SCROLL_HISTORY,  # V0.35.2 actuator scroll-to-section
     WIKIPEDIA_MERCURY_ELEMENT_EXTRACT,  # V0.40.0 A' wikipedia Mercury element page extract
     IANA_EXAMPLE_DOMAINS_EXTRACT,  # V0.40.0 A' IANA official doc extract
+    GITHUB_OCTOCAT_RAW_BLOB_VIEW,  # V0.40.1 A' GitHub raw blob click + extract
+    HTTPBIN_FORM_TYPE_LABEL_EXTRACT,  # V0.40.1 A' httpbin form label extract
+    WIKIPEDIA_MERCURY_DISAMBIG_PLANET_FOLLOW,  # V0.40.1 A' wiki disambiguation click + follow
 ]
 
 # 合并所有 predicate 到单 dict (runner 反查用). 各子 dict value 类型 mypy 默认推断为

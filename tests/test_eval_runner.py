@@ -216,13 +216,13 @@ def test_trace_obs_contains_not_matched_hints_v024_helper():
 # --- V0.26.1 corpus 完整性 + token-specific lint ---
 
 
-def test_corpus_has_22_tasks_covering_v021_v040():
-    """V0.40.0: corpus 共 22 task (20 V0.35 + 2 V0.40 A' real-world corpus 扩).
+def test_corpus_has_25_tasks_covering_v021_v040():
+    """V0.40.1: corpus 共 25 task (22 V0.40.0 + 3 V0.40.1 凑齐 A' 5+ task 验收线).
 
-    V0.35.0 +1 search, V0.35.2 +2, V0.40.0 +2 (Mercury element + IANA doc).
+    V0.40.0 +2 (Mercury element, IANA doc), V0.40.1 +3 (octocat raw, httpbin form, Mercury disambig).
     """
     from eval.corpus import ALL_TASKS
-    assert len(ALL_TASKS) == 22
+    assert len(ALL_TASKS) == 25
     axes = {t.capability_axis for t in ALL_TASKS}
     expected = {
         "baseline", "multi-tab", "iframe", "drag", "upload",
@@ -234,9 +234,9 @@ def test_corpus_has_22_tasks_covering_v021_v040():
     # V0.29.4+V0.29.5 W6-C: 至少 2 chain task (CHAIN_REVEAL_2NODE + CHAIN_REFLECT_TRIGGER)
     chain_tasks = [t for t in ALL_TASKS if t.chain_spec is not None]
     assert len(chain_tasks) >= 2, "V0.29.4+V0.29.5 加 2 chain task"
-    # V0.30+V0.32+V0.35+V0.40 D real-world: ≥ 10 task (V0.30 3 + V0.32 2 + V0.35 3 + V0.40.0 2 = 10)
+    # V0.30+V0.32+V0.35+V0.40 D real-world: ≥ 13 task (V0.30 3 + V0.32 2 + V0.35 3 + V0.40 5 = 13)
     real_net_tasks = [t for t in ALL_TASKS if t.requires_real_net]
-    assert len(real_net_tasks) >= 10, "V0.30+V0.32+V0.35+V0.40 加 ≥ 10 real-net task"
+    assert len(real_net_tasks) >= 13, "V0.30+V0.32+V0.35+V0.40 加 ≥ 13 real-net task"
 
 
 # ---------- V0.35.0 A 真站点 eval 双轴扩 fast 测 ----------
@@ -300,19 +300,30 @@ def test_v035_capability_real_world_predicates_dict_isolated():
 
 
 def test_v040_capability_real_world_extended_tasks_loaded():
-    """V0.40.0: A' 真站点扩 2 task 在 ALL_TASKS 内, tags 含 'v040' + 'a-real-world-extended' + 'actuator-page-extract'."""
+    """V0.40.0+V0.40.1: A' 真站点扩 5 task 在 ALL_TASKS 内, 全 tag 'v040' + 'a-real-world-extended'."""
     from eval.corpus import ALL_TASKS
     v040_tasks = [t for t in ALL_TASKS if "v040" in t.tags]
-    assert len(v040_tasks) == 2, f"V0.40.0 加 2 task, got {len(v040_tasks)}"
+    assert len(v040_tasks) == 5, f"V0.40 加 5 task (2 + 3), got {len(v040_tasks)}"
     task_ids = {t.task_id for t in v040_tasks}
-    assert "v040-wikipedia-mercury-element-extract" in task_ids
-    assert "v040-iana-example-domains-doc-extract" in task_ids
+    assert "v040-wikipedia-mercury-element-extract" in task_ids  # V0.40.0
+    assert "v040-iana-example-domains-doc-extract" in task_ids  # V0.40.0
+    assert "v040-github-octocat-raw-blob-extract" in task_ids  # V0.40.1
+    assert "v040-httpbin-form-customer-name-label-extract" in task_ids  # V0.40.1
+    assert "v040-wikipedia-mercury-disambig-planet-follow" in task_ids  # V0.40.1
+    # 各 task 通用 invariant
     for t in v040_tasks:
         assert "a-real-world-extended" in t.tags
-        assert "actuator-page-extract" in t.tags
         assert t.requires_real_net is True
         assert t.flaky_repeat == 3
         assert t.capability_axis == "real-world"
+    # actuator 子轴覆盖 (V0.40.0 + V0.40.1 累计)
+    sub_axes = {tag for t in v040_tasks for tag in t.tags if tag.startswith("actuator-")}
+    assert sub_axes == {
+        "actuator-page-extract",  # V0.40.0 (Mercury element + IANA)
+        "actuator-click-raw",  # V0.40.1 (octocat raw)
+        "actuator-form-read",  # V0.40.1 (httpbin form)
+        "actuator-disambig-click",  # V0.40.1 (Mercury planet disambig)
+    }
 
 
 def test_v040_capability_real_world_extended_predicates_token_lint_pass():
@@ -335,7 +346,7 @@ def test_v040_capability_real_world_extended_predicates_dict_isolated():
     overlap_v030 = set(REAL_WORLD_PREDICATES) & set(CAPABILITY_REAL_WORLD_EXTENDED_PREDICATES)
     assert not overlap_v035, f"V0.40 task_id 与 V0.35 重 ({overlap_v035})"
     assert not overlap_v030, f"V0.40 task_id 与 V0.30 重 ({overlap_v030})"
-    assert len(CAPABILITY_REAL_WORLD_EXTENDED_PREDICATES) == 2
+    assert len(CAPABILITY_REAL_WORLD_EXTENDED_PREDICATES) == 5  # V0.40.0 2 + V0.40.1 3
 
 
 def test_v040_mercury_predicate_matches_real_first_para():

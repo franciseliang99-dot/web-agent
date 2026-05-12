@@ -2,6 +2,73 @@
 
 All notable changes to web-agent. 版本号遵循 SemVer 简化形式（V<major>.<minor>.<patch>）。
 
+## [0.40.1] - 2026-05-11
+
+### Feat (V0.40 A' 真站点 corpus 扩 2/N — +3 task 凑齐 5+ task 验收线)
+
+V0.40.0 落 2 task (Mercury element + IANA doc), V0.40.1 加 3 task 达 "5+ task" 验收线:
+GitHub octocat raw blob view + httpbin form label + Mercury disambig planet follow.
+V0.34 教训应用第 N+1 次 (curl probe 验 C4/C5/C6 真在), 跟 V0.35.2 +2 task 同 batch 模式.
+
+### V0.34 教训 curl probe 验证 (实施前)
+
+```bash
+# C4 octocat README raw ✓
+curl https://raw.githubusercontent.com/octocat/Hello-World/master/README
+# → "Hello World!" 真在 (单行 README 内容, 10+ 年永稳)
+
+# C5 httpbin form label ✓
+curl https://httpbin.org/forms/post | grep "Customer name"
+# → "Customer name" label 真在 (HTTP test service form spec 5+ 年稳)
+
+# C6 Wikipedia Mercury planet ✓
+curl https://en.wikipedia.org/wiki/Mercury_(planet) | python3 -c '...'
+# → "Mercury is the first planet from the Sun and the smallest in the Solar System..."
+# → predicate "smallest planet" (15 char) 物理事实永稳
+```
+
+### V0.40 corpus 矩阵 (5 task × 4 actuator 子轴)
+
+| actuator 子轴 | V0.40.0 task | V0.40.1 task | predicate |
+|--------------|--------------|--------------|-----------|
+| actuator-page-extract | Mercury element / IANA doc | — | "atomic number 80" / "are maintained" |
+| actuator-click-raw | — | GitHub octocat raw blob | "Hello World!" |
+| actuator-form-read | — | httpbin form Customer name | "Customer name" |
+| actuator-disambig-click | — | Wikipedia Mercury planet follow | "smallest planet" |
+
+V0.40 5 task **跨 4 个 actuator 子轴 + 4 个独立站家** (wikipedia / iana / github / httpbin). V0.34
+教训应用: 跨站源 baseline 防 fixture 选型偏 wikipedia 单一 (V0.30 全 wikipedia + V0.30.4 github
+octocat 同问题).
+
+### Changed (~120 src LOC + ~30 测 LOC)
+
+- `eval/corpus/v040_capability_real_world_extended.py` +3 EvalTask + 3 SubstringPredicate (~120 LOC)
+- `eval/corpus/__init__.py` +5 import + 3 ALL_TASKS append
+- `tests/test_eval_runner.py` 改 4 测断言:
+  - corpus_has_25_tasks (22→25)
+  - real-net ≥10 → ≥13
+  - V0.40 tasks_loaded 验 5 task + 4 actuator 子轴
+  - predicates_dict_isolated len=2→5
+- `tests/test_eval_smoke.py` 改 2 测 (corpus all 22→25, real-world 10→13)
+- `pyproject.toml` / `__init__.py` 0.40.0 → 0.40.1
+- `uv.lock` 同步
+
+### Verify
+
+- `uv run pytest` → **824 passed, 25 skipped** (V0.40.0 状态, 改测断言不增 fast 测 count)
+- `uv run ruff check` → all clean
+- `uv run mypy` → Success no issues in 52 src files
+- 0 真 chromium / 真 LLM 调用 (autonomous OK, cassette 录 deferred V0.40.x.1)
+
+### V0.40 系列状态 (达 5+ task 验收线)
+
+| ver | 状态 | scope |
+|-----|------|-------|
+| V0.40.0 | ✅ | +2 task (Mercury element + IANA doc) |
+| **V0.40.1** | ✅ 本提交 | +3 task (octocat raw / httpbin form / Mercury planet disambig) 凑齐 5+ |
+| V0.40.2 | 待 | 系列收尾 retrospective + V0.41 inventory |
+| V0.40.x.1 (skip) | maintainer 真录 cassette ~$1-2 token | 🛑 红线 |
+
 ## [0.40.0] - 2026-05-11
 
 ### Feat (V0.40 A' 真站点 corpus 扩 5+ task 系列开篇 1/N — +2 task Mercury element + IANA doc)

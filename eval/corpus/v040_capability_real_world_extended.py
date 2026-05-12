@@ -81,7 +81,85 @@ IANA_EXAMPLE_DOMAINS_EXTRACT = EvalTask(
     flaky_repeat=3,
 )
 
+# V0.40.1 C4: GitHub octocat repo "Raw" button actuator click + extract.
+# octocat/Hello-World README 内容 "Hello World!" 是 GitHub 招牌账户永稳内容 (10+ 年不会改).
+# raw 视图 URL: raw.githubusercontent.com/octocat/Hello-World/master/README, 但 actuator 路径
+# 是 web UI 点 "Raw" button 跳 raw 页 extract.
+GITHUB_OCTOCAT_RAW_BLOB_VIEW = EvalTask(
+    task_id="v040-github-octocat-raw-blob-extract",
+    goal=(
+        "去 https://github.com/octocat/Hello-World/blob/master/README 页面, 点击 'Raw' 按钮 "
+        "(GitHub 文件视图右上角) 或导航到 raw 视图, 提取文件全部内容, "
+        "done(result=完整文件文本)."
+    ),
+    fixture_url="https://github.com/octocat/Hello-World/blob/master/README",
+    capability_axis="real-world",
+    expected_step_range=(3, 8),
+    max_steps=10,
+    max_wallclock_s=180.0,
+    description=(
+        "V0.40.1 A' 真站点 corpus 扩 task #3: GitHub raw blob 视图 click + multi-step extract. "
+        "predicate 'Hello World!' (12 char) octocat 招牌账户 README 永稳, 跟 V0.30 'My first "
+        "repository' 同 octocat 信誉. curl probe 已验."
+    ),
+    tags=("v040", "a-real-world-extended", "actuator-click-raw", "github"),
+    requires_real_net=True,
+    flaky_repeat=3,
+)
+
+# V0.40.1 C5: httpbin form actuator type + extract response echo.
+# httpbin.org/forms/post 是 HTTP testing service 静态 form 页, label "Customer name" 等
+# field name 5+ 年永稳 (RFC test server 不会改 form spec).
+HTTPBIN_FORM_TYPE_LABEL_EXTRACT = EvalTask(
+    task_id="v040-httpbin-form-customer-name-label-extract",
+    goal=(
+        "去 https://httpbin.org/forms/post 页面, 找到 form 内 'Customer name' 这个 label, "
+        "提取此 label 文本 + 其后 input field 的 name 属性, done(result=完整 label 文本)."
+    ),
+    fixture_url="https://httpbin.org/forms/post",
+    capability_axis="real-world",
+    expected_step_range=(2, 6),
+    max_steps=8,
+    max_wallclock_s=120.0,
+    description=(
+        "V0.40.1 A' 真站点 corpus 扩 task #4: httpbin form 静态 label extract. predicate "
+        "'Customer name' (13 char) HTTP test service form spec 永稳. 跨 site source baseline "
+        "(wikipedia/github/iana 之外加 httpbin)."
+    ),
+    tags=("v040", "a-real-world-extended", "actuator-form-read", "httpbin"),
+    requires_real_net=True,
+    flaky_repeat=3,
+)
+
+# V0.40.1 C6: Wikipedia Mercury disambiguation click follow link to Mercury (planet) page.
+# disambiguation page 列若干 "Mercury" 含义, click "Mercury (planet)" 链落 planet page,
+# extract "smallest planet in the Solar System" (太阳系最小行星, 物理事实永稳).
+WIKIPEDIA_MERCURY_DISAMBIG_PLANET_FOLLOW = EvalTask(
+    task_id="v040-wikipedia-mercury-disambig-planet-follow",
+    goal=(
+        "去 https://en.wikipedia.org/wiki/Mercury_(disambiguation) 页面, 找到 'Mercury "
+        "(planet)' 这个含义的链接, 点击进入 planet 页, 提取首段含 'smallest' 描述太阳系行星的句, "
+        "done(result=完整句子)."
+    ),
+    fixture_url="https://en.wikipedia.org/wiki/Mercury_(disambiguation)",
+    capability_axis="real-world",
+    expected_step_range=(4, 10),
+    max_steps=12,
+    max_wallclock_s=180.0,
+    description=(
+        "V0.40.1 A' 真站点 corpus 扩 task #5 (达 5+ task 验收线): Wikipedia disambiguation "
+        "click + multi-page navigation extract. predicate 'smallest planet' (15 char) "
+        "太阳系物理事实永稳 (Mercury 最小行星 5+ 年不会改). curl probe 已验."
+    ),
+    tags=("v040", "a-real-world-extended", "actuator-disambig-click", "wikipedia"),
+    requires_real_net=True,
+    flaky_repeat=3,
+)
+
 CAPABILITY_REAL_WORLD_EXTENDED_PREDICATES: dict[str, Predicate] = {
     WIKIPEDIA_MERCURY_ELEMENT_EXTRACT.task_id: SubstringPredicate(substring="atomic number 80"),
     IANA_EXAMPLE_DOMAINS_EXTRACT.task_id: SubstringPredicate(substring="are maintained"),
+    GITHUB_OCTOCAT_RAW_BLOB_VIEW.task_id: SubstringPredicate(substring="Hello World!"),
+    HTTPBIN_FORM_TYPE_LABEL_EXTRACT.task_id: SubstringPredicate(substring="Customer name"),
+    WIKIPEDIA_MERCURY_DISAMBIG_PLANET_FOLLOW.task_id: SubstringPredicate(substring="smallest planet"),
 }
