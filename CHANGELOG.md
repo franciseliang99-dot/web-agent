@@ -2,6 +2,134 @@
 
 All notable changes to web-agent. 版本号遵循 SemVer 简化形式（V<major>.<minor>.<patch>）。
 
+## [0.37.3] - 2026-05-11
+
+### Doc (V0.37 B' lean/WebP baseline 双跑系列收尾 4/4 — 完整 maintainer how-to + V0.37.4 deferred)
+
+V0.37.0 `--dry-run` + V0.37.1 N-file matrix + V0.37.2 per-axis breakdown 已落 infra. 本提交收尾:
+完整 maintainer how-to + 系列总结 + V0.37.4 真录 cassette deferred (跟 V0.33.4/V0.34.5/V0.35.3/
+V0.36.3 系列收尾同骨架).
+
+### V0.37 系列回顾 (3 commit autonomous + 1 deferred)
+
+| ver | 主题 | scope | autonomous |
+|-----|------|-------|------------|
+| V0.37.0 | `--dry-run` mode | eval cli 列 task + 估 cost + 校 env, 0 token 0 wallclock | ✅ |
+| V0.37.1 | compare_matrix N-file | token_baseline matrix subparser, B' 4 配置 2×2 一键 | ✅ |
+| V0.37.2 | per-axis breakdown | compare `--by-axis` 让 lean 节省按 capability axis 分布 | ✅ |
+| **V0.37.3** | 系列收尾 + maintainer how-to | retrospective + V0.37.4 deferred | ✅ 本提交 |
+| V0.37.4 (skip) | maintainer 真录 4 配置 baseline | ~$1-2 token, ~30-60 min wallclock | 🛑 红线 |
+
+V0.37 B' lean/WebP baseline 双跑系列闭环 (3 commit autonomous + 1 deferred maintainer).
+
+### V0.37 maintainer how-to 完整版 (V0.33.4 deferred 兑现 + V0.37 infra)
+
+**Step 0**: V0.37.0 dry-run 校 env + 估 cost (0 token 0 wallclock):
+
+```bash
+uv run web-agent-eval --corpus all --dry-run --providers anthropic
+# 期望输出:
+# task count: 20 (含 6 real-net task)
+# estimated cost: ~$1.00-$2.00 (Anthropic ~$0.05-0.10/task, V0.33.4 估)
+# env vars check: [✗] ANTHROPIC_API_KEY (unset) ← maintainer set 后再走 Step 1
+```
+
+**Step 1**: 4 配置真烧 token (V0.33.4 how-to, V0.37.4 maintainer 跑):
+
+```bash
+export WEB_AGENT_RUN_EVAL=1 WEB_AGENT_EVAL_REAL=1 WEB_AGENT_EVAL_LIVE_NET=1
+export ANTHROPIC_API_KEY=sk-ant-...
+
+# 配置 1: full + png (V0.33.0 baseline 重跑, 修 V0.33.1 #14 后基准)
+uv run web-agent-eval --output data/eval/v033-full-png.json
+
+# 配置 2: lean + png (验 V0.33.2 SoM 真节省)
+WEB_AGENT_SOM_FIELDS=lean \
+  uv run web-agent-eval --output data/eval/v033-lean-png.json
+
+# 配置 3: full + webp (验 V0.33.3 WebP 不省 token #13)
+WEB_AGENT_SCREENSHOT_FORMAT=webp \
+  uv run web-agent-eval --output data/eval/v033-full-webp.json
+
+# 配置 4: lean + webp (双优化叠加)
+WEB_AGENT_SOM_FIELDS=lean WEB_AGENT_SCREENSHOT_FORMAT=webp \
+  uv run web-agent-eval --output data/eval/v033-lean-webp.json
+```
+
+**Step 2**: V0.37.1 matrix compare 一键 4×4:
+
+```bash
+uv run web-agent-token-baseline matrix \
+  --baselines data/eval/v033-full-png.json,data/eval/v033-lean-png.json,data/eval/v033-full-webp.json,data/eval/v033-lean-webp.json \
+  --labels full+png,lean+png,full+webp,lean+webp
+# 输出 4×4 markdown matrix, cell = `% cost change row → col`
+```
+
+**Step 3**: V0.37.2 per-axis breakdown 决"改默"细化:
+
+```bash
+# lean vs full (PNG 保持) — 看 lean 在哪 axis 节省显著
+uv run web-agent-token-baseline compare \
+  data/eval/v033-full-png.json data/eval/v033-lean-png.json \
+  --a-label full --b-label lean --by-axis
+# 输出 per-axis sub-table: iframe / multi-tab / drag / ... → lean 在哪 axis 显著
+```
+
+**预估 cost**: 20 task × 4 配置 × Anthropic ≈ **~$4-8 token** (跟 V0.33.4 估 ~$1-2 不同,
+因 V0.35 加 3 real-net task + 现 corpus 20 task vs V0.33.4 时 17 task). **30-60 min wallclock**
+(real-net + LLM tool calling 双链路).
+
+### V0.34 教训累计应用至 V0.37 (7 个系列贯彻)
+
+V0.34.5 沉淀 "synthetic ≠ 真, 实施前 micro experiment" 已应用 7 个系列:
+
+| 系列 | 应用次数 | 抓出什么 |
+|------|---------|---------|
+| V0.34 F | 2 | 真发现 #17 chromium serialize / F1 ROI 推翻 |
+| V0.35 A | 2 | W3C iframe page 推翻 / 4 fixture 候选 |
+| V0.36 I | 2 | "内存爆炸"叙事推翻 / VACUUM 0% (#18) |
+| **V0.37 B'** | **0** | V0.37 是 infra 准备系列 (--dry-run 本身就是 sanity check 防伪估算工具) |
+
+V0.37 没新加真发现 — 跟 V0.35 A 同性质 (infra 准备, 不动 src 主线行为). 系列教训沉淀价值
+= 让 V0.37.4 maintainer 跑时 0 假设、有 sanity check (--dry-run) + 自动分析 (matrix +
+by-axis). 真发现要等 V0.37.4 真烧 token 后看真节省是否符合估算 (V0.33.2 lean ~16k tok/run /
+V0.33.3 WebP ~70% 磁盘).
+
+### Changed (~0 src LOC, ~120 doc LOC)
+
+- `CHANGELOG.md` V0.37.3 retrospective entry (本)
+- `pyproject.toml` / `__init__.py` 0.37.2 → 0.37.3
+- `uv.lock` 同步
+
+### Verify
+
+- `uv run pytest` → **810 passed, 25 skipped** (V0.37.2 状态, 0 src 改 → 0 测变)
+- 0 src 改 → 0 ruff/mypy 重检需求
+
+### 限制 / 遗留
+
+- **V0.37.4 真录 4 配置 baseline deferred**: autonomous 红线 (ANTHROPIC_API_KEY + ~$4-8 token).
+  跟 V0.32.1 / V0.33.4 / V0.35.1 / V0.36.2 5 次 deferred 同模式, maintainer when ready 跑.
+- **lean/WebP 真节省未量化**: V0.33.2 ~16k tok/run lean / V0.33.3 ~70% 磁盘 WebP 真值待 V0.37.4
+  maintainer 跑出来. **决"改默 lean/webp"等 V0.37.4 baseline 出数 + success rate 不掉**.
+- **systemd-style 批量 audit 兑现**: V0.33.4 提的"每 5 commit 一次 audit"在 V0.37 系列也兑现 —
+  V0.37.0 --dry-run 本身就是 maintainer 真跑前的 sanity-check audit (任何 axis 拼写错 / env
+  forgot 都 fail-fast), 沉淀给 V0.38+ 复用.
+
+### V0.38 主题路径 inventory (留 user 选)
+
+跟 V0.33.4 / V0.34.5 / V0.35.3 / V0.36.3 同句式. autonomous 红线 = 项目方向决策需 user 输入.
+
+候选路径 (V0.34.5 + V0.35.3 + V0.36.3 候选累计):
+- **F2 SoM JS 三 walker 合并** (V0.34.5 deferred, 代码 simplification 不是 perf gain)
+- **G stealth 加固** (sannysoft.com 72% → 85%+)
+- **A' V0.35 真站点 corpus 扩 5+ task** (加 dialog/upload 真站点轴)
+- **新真发现 sub-route** (基于真站点 corpus 找新 bottleneck)
+- **C 长期 session 长记忆 cross-task 学习** (V0.13.0 memory.db 778 行已有, 怎么 query inject)
+- 其他用户提的方向
+
+(不带 ROI 估算 — V0.34 教训第 N 次应用: 项目方向 ROI 假设需 user 输入而非 Claude 自决.)
+
 ## [0.37.2] - 2026-05-11
 
 ### Feat (V0.37 B' lean/WebP baseline 双跑 3/N — per-axis 节省 breakdown)
