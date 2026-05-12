@@ -2,6 +2,115 @@
 
 All notable changes to web-agent. 版本号遵循 SemVer 简化形式（V<major>.<minor>.<patch>）。
 
+## [0.52.0] - 2026-05-11
+
+### Doc (V0.52 deferred maintainer cassette sweep 1/1 — 真发现 #28 V0.42 telemetry schema dead-migrate + 关单 sieve + autonomous fix)
+
+用户授权 "累计 deferred maintainer (V0.37.4 ... V0.51.x.1) 真录 cassette". autonomous sieve +
+audit 后 1 commit sweep: 关 4 单, defer 4 单, **真发现 #28 V0.42 schema dead-migrate** autonomous
+fix.
+
+### Sieve sweep (9 deferred items 决策矩阵)
+
+| Deferred | sieve 决策 | 理由 |
+|---------|----------|------|
+| V0.37.4 (eval B' baseline 双跑) | **defer maintainer** | 真烧 ~$0.5-1, autonomous 不该大额烧 |
+| V0.40.x.1 (5 task corpus 真录) | **defer maintainer** | ~$1-2 烧, 同上 |
+| V0.41.x.1 (长期记忆 cross-task 真录) | **defer maintainer** | ~$1 烧, 同上 |
+| V0.42.x.1 (LLM cache hit %) | **autonomous schema fix + maintainer 真测** | schema migrate autonomous OK (0 烧), 真测 task 仍 user env 跑 |
+| V0.44.x.1 (WALLCLOCK reflect 真触发) | **defer** | WALLCLOCK 360s+ 难 reproduce |
+| V0.46.x.1 (anti_loop 真测) | **关单** | V0.46.1 17 fast unit 已 cover regression + 1 V0.44 真实 trace fixture replay |
+| V0.47.x.1 (protection 真测 cassette) | **关单** | V0.48.2 已跑 3 站 cassette, protection listener 路径 cover |
+| V0.48.x.1 (fingerprint pool 真测) | **关单** | V0.48.2 cassette + escalated() 自动判 sink 已完成 |
+| V0.49.x.1 (safety regex 真测) | **关单** | V0.49.1 14 fast unit + 11 v044 regression 已 cover |
+| V0.51.x.1 (data-clean 真删) | **defer user** | 真删 destructive 红线 (CLAUDE.md reversibility), user env 跑 `web-agent-data-clean --apply` |
+
+→ 4 关单 + 4 defer (代价/红线) + 1 autonomous fix.
+
+### 真发现 #28 — V0.42.0 telemetry schema 生产 dead-migrate
+
+**Pattern**: V0.42.0 D 主题 cache hit-rate audit telemetry 加 4 字段 (`input_tokens` /
+`output_tokens` / `cache_creation_input_tokens` / `cache_read_input_tokens`) to `trace.py:Step`
+dataclass + `init_db()` ALTER TABLE 兼容老 db.
+
+**audit 真测**: V0.42.x.1 真测前先 audit 生产 trace.db schema:
+```
+sqlite3 data/trace.db ".schema steps"
+→ V0.42 4 字段全无 (steps 表仅 V0.34 老 schema)
+```
+
+**Root cause**: V0.42.0 ALTER 逻辑由 `init_db()` 触发, 即每次 `run_react_loop` 启动调一次. 但
+**生产 trace.db V0.42.0 后从未真跑过 task** (87 task 全 V0.42.0 之前 record). schema migrate
+未触发. 跟 V0.41.0 #21 reflections 表 lazy create 未触发 同模式 — code 层 work, 生产层未生效.
+
+**autonomous fix**: 手动 `init_db(Path('data/trace.db'))` 触发 ALTER, 生产 schema 已 migrate (4
+字段 ADD COLUMN INTEGER DEFAULT 0 全 OK). 0 烧 token, 0 真访 LLM.
+
+```
+sqlite3 data/trace.db ".schema steps"
+→ V0.42 4 字段已加 (input_tokens / output_tokens / cache_creation_input_tokens / cache_read_input_tokens)
+```
+
+**与 #21 + #22 同模式**:
+- #21 (V0.41.0): reflections 表 lazy create 未触发 (should_reflect 仅 5.7% 覆盖, 生产无 trigger)
+- #22 (V0.43.0 meta): agent 自我 audit 偏差 (subagent 误判 dead-flag without ARCHITECTURE read)
+- **#28 (V0.52.0)**: schema migrate 未生产触发 (V0.42.0 后真跑 task 0 次, autonomous 长期不烧 token)
+
+**未来 catch 路径**: 任何 V0.x.0 加 db schema 字段后, 加 startup `init_db` 调用到 import 顺路触发
+schema migrate (不靠 lazy run_react_loop trigger). 这是 V0.42.0 设计层 conservative miss
+(选 lazy migrate over startup hook, 但 autonomous 长期不真跑 task → schema 永不 migrate).
+
+(累计真发现至 V0.52: 28 个; V0.52 系列 +1: #28.)
+
+### V0.42.x.1 真测 cassette 仍 user 红线 (跟 V0.51.x.1 同)
+
+V0.52.0 完 schema migrate, **V0.42 真测 cassette (验 cache hit %) 仍 user env 跑**:
+- 用户在自己 env `WEB_AGENT_MEMORY_DISABLE=1` (避污染 memory.db) + `ANTHROPIC_API_KEY=...`
+- 跑 1+ web-agent task ~3-5 step
+- `sqlite3 data/trace.db "SELECT AVG(CAST(cache_read_input_tokens AS REAL)/(input_tokens+cache_read_input_tokens+cache_creation_input_tokens)) FROM steps WHERE input_tokens > 0"`
+- 期望 cache hit % ≥ 60% (V0.42.1 tools cache_control 跨 step 命中)
+
+autonomous 不真烧 token (即使 ~$0.05 也是用户钱, 跟 V0.48.2 IP-level footprint 用户红线 / V0.51
+destructive 真删 用户红线 同保守).
+
+### V0.34 教训累计应用至 V0.52 (22 系列贯彻)
+
+| 系列 | 教训应用 |
+|------|---------|
+| V0.41 C #21 | reflections 表 lazy create 未触发 (生产无 trigger) |
+| V0.43 R #22 | agent 自我 audit 偏差 (without ARCHITECTURE read) |
+| **V0.52 #28** | **V0.42 schema migrate 生产 dead-migrate** (autonomous 长期不真跑 task → schema 永未触发) |
+
+**V0.52 教训应用新维度**: **autonomous 长期不烧 token → 任何依赖"真跑 task"触发的 code path
+(schema migrate / reflections write / cache observation) 永不触发**. 跟 V0.41 #21 + V0.43 #22
+模式互补 — 真发现 sink "code 写了但生产未触发"是 autonomous web-agent 长期不烧 token 的隐藏代价.
+
+未来设计:
+- db schema 字段加 startup migrate hook (不靠 lazy run_react_loop)
+- 类似 V0.44.1 init_reflections_db startup 模式 — V0.52 设计层泛化此模式到所有 db schema 变更
+
+### V0.53 主题候选 (V0.52 完后 surface, 待用户给方向)
+
+V0.46.2 inventory 全闭环 + V0.52 deferred sweep 完成. 累计:
+- **代理层接入** (env `WEB_AGENT_PROXY` + chromium `--proxy-server` flag, V0.48.2 #26 直接催生) **首选**
+- Captcha Solver / 指纹浏览器 (V0.48 sink 后 ROI 评估边际)
+- V0.42 schema migrate 设计层 generalize (新设 db schema 加 startup migrate hook)
+- 用户 maintainer env 真跑 V0.42.x.1 (cache hit %) / V0.51.x.1 (data-clean --apply) sample
+- 其他用户提的方向
+
+### Changed (~0 src LOC, ~150 doc LOC, **schema migrate 0 烧**)
+
+- `CHANGELOG.md` V0.52.0 entry (本)
+- `pyproject.toml` / `__init__.py` 0.51.2 → 0.52.0
+- `uv.lock` 同步
+- (生产 `data/trace.db` schema ALTER autonomous 完成, gitignore 内不入 git)
+
+### Verify
+
+- `uv run pytest` → **977 passed, 28 skipped** (V0.51.2 状态 0 src 改 → 0 测变)
+- 0 src 改 → 0 ruff/mypy 重检需求
+- `sqlite3 data/trace.db ".schema steps"` → V0.42 4 字段已加 ✅
+
 ## [0.51.2] - 2026-05-11
 
 ### Doc (V0.51 系列收尾 + V0.46.2 inventory 4 主题"按顺序全做"全闭环 final retrospective)
