@@ -2,6 +2,85 @@
 
 All notable changes to web-agent. 版本号遵循 SemVer 简化形式（V<major>.<minor>.<patch>）。
 
+## [0.51.0] - 2026-05-11
+
+### Doc (V0.51 V0.42 housekeeping 系列开篇 1/3 — data-clean CLI plan + retention 90d 决策)
+
+V0.46.2 inventory 第 4 项 V0.42 housekeeping (V0.36.2 + V0.41 C5 deferred). V0.51.0 audit data/
+现状 + 决策 retention 默 90d + plan CLI infra (默 `--dry-run`, 真删 user `--apply` 显式).
+
+### Audit (data/ 99M 现状)
+
+| 路径 | 大小 | 性质 | retention 决策 |
+|------|------|------|---------------|
+| `data/screenshots/` | 74M | dev iteration 截图 (loop 每 step 写 1 PNG) | **default cleanup** (90d mtime) |
+| `data/downloads/` | 21M | V0.23 download 累积 | **default cleanup** (90d mtime) |
+| `data/trace.db` | 540K | 87 tasks (~10 months span) | **default cleanup old rows** (90d ts) |
+| `data/replays/` | 168K | V0.20 replay 数据 | **default cleanup** (90d mtime) |
+| `data/stealth_probes/` | 3.4M | V0.39+V0.48 baseline + cassette | **不清** (baseline ref 长期价值) |
+| `data/bench/` | 32K | V0.34+ baseline JSON | **不清** (perf 对照基准) |
+| `data/eval/` | 624K | eval 结果 | **不清** (eval 历史对照) |
+| `data/memory.db` | 120K | 长期记忆 (V0.13.0 W5-D) | **不清** (用户跨 session 学习) |
+| `data/upwork.db` | 32K | jd_extract active dogfooding | **不清** (active 数据) |
+
+总 cleanup target ≈ 95M (74 + 21 ≈ screenshots + downloads dominate), 长期价值数据 4.3M 保留.
+
+### Retention 默 90d 决策 (V0.34 教训"先写门槛防 rationalize")
+
+| 选项 | trade-off | 决策 |
+|------|----------|------|
+| 30d aggressive | screenshots/downloads 快减少, 但 dev iteration 数据丢失风险 | ❌ 用户决策红线 (用户不一定知 30d 等于 删近期数据) |
+| **90d conservative** | 3 个月 baseline, 既清老数据又留近期 dev iteration | ✅ 默, autonomous 安全 |
+| 永不清 | 磁盘累积无界 (V0.51 audit data/ 99M 已 90M ≥ 1 个月数据) | ❌ 用户长期累积痛点 |
+
+**90d ≈ web-agent 1 release cycle (V0.45/V0.46/V0.47 节奏看 ~1-2 周/系列, 30 系列 ≈ 90d)**.
+
+### V0.51 fix plan (3 commit, autonomous + maintainer 红线分层)
+
+| commit | scope | autonomous? |
+|--------|-------|-------------|
+| V0.51.0 (本) | doc audit + retention 默 90d + CLI plan | ✅ |
+| V0.51.1 | 新建 `src/web_agent/data_clean.py` + console_script `web-agent-data-clean` + 3 target (screenshots/downloads/trace.db rows) + fast unit + 默 `--dry-run` | ✅ |
+| **V0.51.2** | 系列收尾 + V0.46.2 4 主题 final retrospective + V0.34 教训 21 累计 | ✅ |
+
+**真删 = maintainer 红线**: V0.51.1 CLI 默 `--dry-run` 只打印将删的文件 + 数量 + 释放大小; 真删
+用户 `web-agent-data-clean --apply` 显式跑. 跟 V0.48.2 真站访问 / V0.47.x.1 cassette 同 autonomous
+不做不可逆操作模式 + CLAUDE.md "destructive operations 用户确认".
+
+### Decision 门槛 (V0.51.1 真测验证)
+
+| 指标 | target |
+|------|--------|
+| Dry-run 默 → 0 真删 | ✅ 默 `--dry-run`, 不传 `--apply` 0 真删 |
+| --apply 真删 cleanup 准确性 | 仅删 mtime > 90d 文件 (mock fs unit test 验) |
+| trace.db rows 不动 (只 cleanup, 不触 schema) | ✅ DELETE FROM tasks WHERE started_at < cutoff, schema 不动 |
+| 保留路径 (stealth_probes/bench/eval/memory.db/upwork.db) | ✅ hardcoded 排除 list, 不出现在 cleanup target |
+| pytest | ≥ 963 (V0.49.1 baseline) + V0.51.1 新 tests |
+
+### V0.34 教训累计应用至 V0.51 (21 系列贯彻)
+
+| 系列 | 教训应用 |
+|------|---------|
+| V0.47 | autonomous vs maintainer 红线分层 (代理/Solver 红线) |
+| V0.48 | conservative 真测先于 implementation |
+| **V0.51** | **不可逆操作 (真删) 用户显式授权 + autonomous 默 dry-run** |
+
+V0.51 教训应用模式: **destructive operations 默 dry-run + 显式 --apply 真做**. 跟 V0.48.2 cassette
+真测 + V0.47.x.1 cassette / V0.36.2 retention 决策红线 + CLAUDE.md "carefully consider reversibility
+and blast radius" 同模式.
+
+(累计真发现至 V0.51: 27 个; V0.51 系列 +0 暂时 — V0.51.1 实施时真测后可能 catch.)
+
+### Changed (~0 src LOC, ~150 doc LOC)
+
+- `CHANGELOG.md` V0.51.0 entry (本)
+- `pyproject.toml` / `__init__.py` 0.50.0 → 0.51.0
+- `uv.lock` 同步
+
+### Verify
+
+- `uv run pytest` → **963 passed, 28 skipped** (V0.50.0 状态 0 src 改 → 0 测变)
+
 ## [0.50.0] - 2026-05-11
 
 ### Doc (V0.50 A'' corpus 系列开篇 + sink 1/1 — 真发现 #27 V0.23/V0.24 已 cover drag/dialog/upload)
