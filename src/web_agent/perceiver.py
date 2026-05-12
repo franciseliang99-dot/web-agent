@@ -26,6 +26,10 @@ _SOM_INJECT_JS = """
   // V0.22.1: id_offset 让 iframe 内 SoM id 跟 Python Mark.id 全局一致 (无 drift).
   // 视觉框 tag.textContent + 返回 dict.id 都 ref 同一 id 变量, 三方自动一致.
   const ID_OFFSET = (opts && opts.id_offset) || 0;
+  // V0.38.1 F2: W1 (collect) + W2 (clear stale data-som-id) 合并单 walker, 同 1 DOM tree DFS
+  // 内一次性 collect + 清旧 attr. 节省 1 次 DOM 穿透 + 1 次 querySelectorAll('*') shadowRoot 探测/层.
+  // V0.22.x shadow DOM 穿透契约保 (W5-B stack-based open shadowRoot walker); V0.22.2 actuator
+  // data-som-id 契约保 (clear 在 inject 入口跑, removeAttribute 时机不变).
   const collected = [];
   const visited = new WeakSet();
   const stack = [document];
@@ -33,6 +37,9 @@ _SOM_INJECT_JS = """
     const root = stack.pop();
     if (visited.has(root)) continue;
     visited.add(root);
+    // W2 合并: 同 root 一次穿透同时清旧 data-som-id (V0.22.2 防 actuator stale)
+    root.querySelectorAll('[data-som-id]').forEach(e => e.removeAttribute('data-som-id'));
+    // W1: collect 交互元素
     root.querySelectorAll(sel).forEach(e => collected.push(e));
     if (!SHADOW_ON) continue;
     root.querySelectorAll('*').forEach(e => {
@@ -52,24 +59,6 @@ _SOM_INJECT_JS = """
     return true;
   });
   document.querySelectorAll('[data-som-mark]').forEach(e => e.remove());
-  // V0.22.2: 清旧 data-som-id (上次 perceive 残留) 防 actuator 走错 id;
-  // 跨 open shadowRoot walker (跟主收集 selector 同模式).
-  {
-    const visited = new WeakSet();
-    const stack = [document];
-    while (stack.length) {
-      const root = stack.pop();
-      if (visited.has(root)) continue;
-      visited.add(root);
-      root.querySelectorAll('[data-som-id]').forEach(e => e.removeAttribute('data-som-id'));
-      if (!SHADOW_ON) continue;
-      root.querySelectorAll('*').forEach(e => {
-        if (e.shadowRoot && e.shadowRoot.mode === 'open' && !visited.has(e.shadowRoot)) {
-          stack.push(e.shadowRoot);
-        }
-      });
-    }
-  }
   const colors = ['#FF3B30', '#34C759', '#007AFF', '#AF52DE', '#FF9500', '#5AC8FA'];
   return els.map((el, i) => {
     const r = el.getBoundingClientRect();

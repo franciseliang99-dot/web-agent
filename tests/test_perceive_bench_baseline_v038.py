@@ -63,19 +63,26 @@ def test_v038_pre_f2_baseline_mark_count_matches_v034_3():
         )
 
 
-def test_v038_pre_f2_som_inject_js_has_two_walkers():
-    """V0.38.0: _SOM_INJECT_JS 内 `while (stack.length)` 数 = 2 (W1 collect + W2 clear data-som-id).
+def test_v038_1_som_inject_js_walker_merged_to_one():
+    """V0.38.1: _SOM_INJECT_JS 内 `while (stack.length)` 数 = 1 (W1+W2 合并单 walker).
 
-    invariant 测 — V0.38.1 实施 F2 合并 W1+W2 后, 数 = 1, 该测必同步改. 防 V0.38.1 漏改某 walker.
+    F2 实施后 W1 collect + W2 clear data-som-id 合并成单 walker 同 1 DOM tree DFS 跑.
+    V0.22.x shadow DOM 穿透契约 + V0.22.2 actuator data-som-id 契约保 (clear 时机不变).
     """
     perceiver_py = Path(__file__).resolve().parent.parent / "src" / "web_agent" / "perceiver.py"
     src = perceiver_py.read_text(encoding="utf-8")
-    # 抽 _SOM_INJECT_JS 字符串 (start to closing triple-quote)
     m = re.search(r'_SOM_INJECT_JS\s*=\s*"""(.*?)"""', src, re.DOTALL)
     assert m is not None, "_SOM_INJECT_JS 未找到"
     inject_js = m.group(1)
     walker_count = inject_js.count("while (stack.length)")
-    assert walker_count == 2, (
-        f"V0.38.0 _SOM_INJECT_JS 期望 2 walker (W1 collect + W2 clear), 真测 {walker_count}. "
-        f"V0.38.1 实施 F2 后应改 == 1, 该测同步改."
+    assert walker_count == 1, (
+        f"V0.38.1 F2 _SOM_INJECT_JS 期望 1 walker (W1+W2 合并), 真测 {walker_count}"
+    )
+    # V0.22.2 契约: clear data-som-id 仍在 inject 入口跑 (合并到主 walker 内)
+    assert "removeAttribute('data-som-id')" in inject_js, (
+        "V0.22.2 contract: clear stale data-som-id 仍必跑 (防 actuator 走错 id)"
+    )
+    # V0.22.x shadow 穿透契约
+    assert "shadowRoot.mode === 'open'" in inject_js, (
+        "W5-B contract: shadow DOM open mode walker 必保"
     )

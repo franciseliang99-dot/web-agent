@@ -2,6 +2,73 @@
 
 All notable changes to web-agent. 版本号遵循 SemVer 简化形式（V<major>.<minor>.<patch>）。
 
+## [0.38.1] - 2026-05-11
+
+### Feat (V0.38 F2 SoM JS walker 合并 2/N — _SOM_INJECT_JS W1+W2 合并单 walker)
+
+V0.38.0 落 baseline + decision doc. V0.38.1 实施 F2 方案 C: `_SOM_INJECT_JS` W1 (collect) + W2
+(clear stale data-som-id) 合并成单 walker 同 1 DOM tree DFS 跑. 节省 1 次 DOM 穿透 + 1 次
+`querySelectorAll('*')` shadowRoot 探测/层.
+
+### 实施 (V0.38.0 plan 方案 C 兑现)
+
+```js
+// V0.38.1 _SOM_INJECT_JS W1+W2 合并单 walker (替代 V0.38.0 两 walker)
+const collected = [];
+const visited = new WeakSet();
+const stack = [document];
+while (stack.length) {
+  const root = stack.pop();
+  if (visited.has(root)) continue;
+  visited.add(root);
+  // W2 合并: 同 root 一次穿透同时清旧 data-som-id (V0.22.2 防 actuator stale)
+  root.querySelectorAll('[data-som-id]').forEach(e => e.removeAttribute('data-som-id'));
+  // W1: collect 交互元素
+  root.querySelectorAll(sel).forEach(e => collected.push(e));
+  if (!SHADOW_ON) continue;
+  root.querySelectorAll('*').forEach(e => {
+    if (e.shadowRoot && e.shadowRoot.mode === 'open' && !visited.has(e.shadowRoot)) {
+      stack.push(e.shadowRoot);
+    }
+  });
+}
+```
+
+### 解耦 + 契约保 (CLAUDE.md 依赖方向)
+
+- **V0.22.x shadow DOM 穿透契约保** (W5-B): 同 stack-based pattern, 同 WeakSet visited, 同 `open` mode 检查
+- **V0.22.2 actuator data-som-id 契约保**: clear stale id 仍在 inject 入口跑, removeAttribute 时机不变, Python `Mark.id == DOM data-som-id` 三方一致仍成立
+- **V0.34.4 RENUMBER_JS 不动**: W3 独立 evaluate 留作 fan-out cross-process fixture 用 (cross-origin 路径 V0.22.4 skip 不 evaluate, RENUMBER 当前无实际节省, 但架构 prep 保留)
+
+### Changed (~20 src LOC)
+
+- `src/web_agent/perceiver.py:_SOM_INJECT_JS` W1+W2 合并 (-30/+15 LOC, 净 -15 LOC 代码简化)
+- `tests/test_perceive_bench_baseline_v038.py:test_v038_pre_f2_som_inject_js_has_two_walkers` → `test_v038_1_som_inject_js_walker_merged_to_one` (V0.38.0 invariant 测同步改, walker count 2→1 + V0.22.2 + W5-B 契约 grep verify)
+- `pyproject.toml` / `__init__.py` 0.38.0 → 0.38.1
+- `uv.lock` 同步
+
+### Verify
+
+- `uv run pytest` → **815 passed, 25 skipped** (V0.38.0 状态, 0 测净变 — invariant 测改, V0.22.x / V0.34.4 测全过)
+- `uv run ruff check` → all clean
+- `uv run mypy` → Success no issues in 51 src files
+
+### V0.38.2 plan (下 commit 真测 compare)
+
+V0.38.1 实施完, V0.38.2 跑 baseline-after-f2 真测 + V0.38.0 baseline compare:
+- 跟 V0.38.0 decision 门槛对照 (≥5% / 1-5% / <1% withdraw)
+- 沉淀真发现 #N (是 perf gain 或 withdraw 是 simplification only)
+- 跟 V0.34.4 F1 ROI 3% withdraw 同 ROI 推翻模式 (诚实降级)
+
+### V0.38 系列进度
+
+| ver | 状态 | scope |
+|-----|------|-------|
+| V0.38.0 | ✅ | baseline before-F2 + decision doc |
+| **V0.38.1** | ✅ 本提交 | W1+W2 walker 合并 + 契约 verify |
+| V0.38.2 | 待 | baseline after-F2 真测 + compare + 真发现沉淀 |
+| V0.38.3 | 待 | 系列收尾 + V0.39 主题 inventory |
+
 ## [0.38.0] - 2026-05-11
 
 ### Feat (V0.38 F2 SoM JS walker 合并系列开篇 1/N — baseline before-F2 + 决策门槛先写)
