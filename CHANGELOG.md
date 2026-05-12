@@ -2,6 +2,110 @@
 
 All notable changes to web-agent. 版本号遵循 SemVer 简化形式（V<major>.<minor>.<patch>）。
 
+## [0.54.0] - 2026-05-11
+
+### Doc (V0.54 V0.42.x.1 + V0.51.x.1 真跑 sample sweep — V0.51 sanity 完成 + V0.42 maintainer stay)
+
+用户授权 "V0.42.x.1 / V0.51.x.1 user env 真跑 sample". autonomous 真跑结果: V0.51 sanity 完成
+(dry-run 0 files cleanup confirmed), V0.42 真测**stay maintainer 红线** (.env ANTHROPIC_API_KEY 空 placeholder, autonomous 无 key).
+
+### V0.51.x.1 真跑结果 (sanity CLI infra OK)
+
+```bash
+uv run web-agent-data-clean --ttl-days 90
+```
+
+输出:
+```
+# data-clean dry-run (ttl=90d, autonomous 默 dry-run, 真删需 `--apply`)
+| target          | count | bytes | sample (first 5) |
+| screenshots     | 0     | 0     | (none) |
+| downloads       | 0     | 0     | (none) |
+| replays         | 0     | 0     | (none) |
+| trace.db tasks  | 0     | 0     | (none) |
+Total: 0 files/rows, 0 bytes (0.0 MB)
+```
+
+**真发现**: sandbox `data/` 99M 全数据 **< 30d age** (most recent dev iteration), 90d ttl 默认下
+**真删 0 文件**. CLI infra 真跑可执行 (sanity smoke), 真"清理 value" = 0 (默 ttl 太宽).
+
+**未实施 `--apply`**: 0 files 无需 --apply. 若用户希望真清理 ~few MB 老文件 (May 1-3 截图 ~10d 前),
+需 user 决策 `--ttl-days 7` 或更短 ttl (跟 CLAUDE.md "ttl 数值用户决策" 一致, autonomous 不擅自改默).
+
+### V0.42.x.1 真跑 STOP (autonomous 无 key)
+
+```bash
+WEB_AGENT_RUN_EVAL=1 WEB_AGENT_EVAL_REAL=1 web-agent-eval --corpus multi-tab \
+  --providers anthropic --runs 1 --output data/eval/v054_v042_cache_audit/
+```
+
+输出:
+```
+[eval.cli] eval: 1 task selected (corpus=multi-tab)
+[eval.cli] skip provider anthropic: ANTHROPIC_API_KEY 未设置 — 请填 .env 或 export 环境变量
+ERROR: 无可用 client (检查 API key env)
+```
+
+**真发现** (audit-level, 不沉淀 #N 因属个人 dev env 配置):
+- `.env` `ANTHROPIC_API_KEY=` 空 placeholder (键名在, value 空)
+- autonomous 无真 key → 跟 V0.52.0 sieve 推**"V0.42.x.1 真测 user env 跑"红线**一致
+- subagent V0.52.0 sieve 推 minimal cassette ~$0.05, **autonomous 无 key 不能真烧** (CLAUDE.md
+  Secrets 处理: 凭证认证 user 必须授权 + 在 env 给 key, autonomous 不该自填)
+
+**未实施 V0.42 真测**: 跟 V0.52.0 maintainer 红线占位一致 stay. user env 跑法:
+```bash
+export ANTHROPIC_API_KEY=sk-ant-...
+WEB_AGENT_RUN_EVAL=1 WEB_AGENT_EVAL_REAL=1 web-agent-eval --corpus multi-tab \
+  --providers anthropic --runs 1 --output data/eval/v054_v042_cache_audit/
+sqlite3 data/trace.db "SELECT AVG(CAST(cache_read_input_tokens AS REAL) / \
+  NULLIF(input_tokens+cache_read_input_tokens+cache_creation_input_tokens, 0)) \
+  FROM steps WHERE input_tokens > 0"
+# 期望 cache hit % ≥ 60% (V0.42.1 tools cache_control 跨 step 命中)
+```
+
+### V0.34 教训累计应用至 V0.54 (24 系列贯彻)
+
+| 系列 | 教训应用 |
+|------|---------|
+| V0.51 | destructive 默 dry-run + --apply 用户显式 |
+| V0.52 | autonomous schema migrate 0 烧 |
+| **V0.54** | **真烧 token 仍 user env 红线 (即使 key 在 .env, autonomous 不自填空 placeholder)** |
+
+**V0.54 教训应用新维度**: **autonomous 红线含 "user 不在场补 secret"**. CLAUDE.md "Secrets 处理"
++ "凭证认证 user 必须授权" — 即使 .env 含 key, autonomous **不在 sandbox 内填空 placeholder**
+(防 leak / 防误把测 key 当真 key 用). 跟 V0.51.x.1 真删 destructive 红线对偶: V0.51 是"不可逆
+真删用户授权 explicit", V0.54 是"真烧 token 凭证用户给 key explicit".
+
+跟 V0.27 vault / V0.18 elicit (auto-approve env, user 显式) 同模式 — autonomous 默不 spec
+secret/destructive params.
+
+(累计真发现至 V0.54: 28 个不变; V0.54 系列 +0 — sample sweep audit-only, 不催新 catch.)
+
+### V0.51.x.1 + V0.42.x.1 状态更新
+
+| Deferred | V0.54 后状态 |
+|---------|------------|
+| V0.51.x.1 | sanity dry-run pass (0 files default 90d), **真删 --apply** 仍 user 红线 (ttl 决策 + 真删授权) |
+| V0.42.x.1 | autonomous infra OK (V0.53.0 startup hook 触发 schema), **真测 cache hit %** 仍 user 红线 (ANTHROPIC_API_KEY 真 key) |
+
+### Changed (~0 src LOC, ~100 doc LOC)
+
+- `CHANGELOG.md` V0.54.0 entry (本)
+- `pyproject.toml` / `__init__.py` 0.53.0 → 0.54.0
+- `uv.lock` 同步
+- `data/eval/v054_v042_cache_audit/` 创建空目录 (V0.42.x.1 stub, user 真跑写入)
+
+### Verify
+
+- `uv run pytest` → **978 passed, 28 skipped** (V0.53.0 状态 0 src 改 → 0 测变)
+- `uv run web-agent-data-clean` → 0 files report ✅
+
+### V0.55 主题候选 (V0.54 完后, 等用户)
+
+- **代理层接入** (V0.48.2 #26 催生) 首选, **maintainer 红线** (env config + 烧 $)
+- V0.42.x.1 / V0.51.x.1 真测 仍 user env 跑 sample (key/--apply 用户授权)
+- 其他用户提的方向
+
 ## [0.53.0] - 2026-05-11
 
 ### Feat (V0.53 schema startup generalize — V0.52 #28 设计层泛化, trace.db init_db startup hook)
