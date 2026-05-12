@@ -2,6 +2,69 @@
 
 All notable changes to web-agent. 版本号遵循 SemVer 简化形式（V<major>.<minor>.<patch>）。
 
+## [0.49.2] - 2026-05-11
+
+### Doc (V0.49 safety 双修系列收尾 3/3 — V0.34 教训 19 累计 + V0.50 A'' corpus inventory)
+
+V0.49.0 plan + V0.49.1 双修已落 (2 commit). 本提交收尾: 系列总结 + V0.34 教训 19 系列累计 + V0.50
+A'' corpus inventory.
+
+### V0.49 系列回顾 (3 commit autonomous)
+
+| ver | scope | LOC | 状态 |
+|-----|-------|-----|------|
+| V0.49.0 | doc 双修 plan + decision 门槛 | ~150 doc | ✅ |
+| V0.49.1 | safety.py 拆 destructive + send amount + tests update | ~40 src + ~60 test + ~80 doc | ✅ |
+| **V0.49.2** | 系列收尾 + V0.50 inventory | ~50 doc | ✅ 本 |
+
+V0.49 safety 双修闭环, 跟 V0.45/V0.46 节奏一致 (3 commit single 系列).
+
+### V0.49 双修 cleanup map (V0.45 deferred 收割)
+
+| V0.45 deferred 项 | V0.49 实施 | rule 名 |
+|-------------------|-----------|---------|
+| delete/remove 错位 in send-or-pay | 拆出 destructive-action rule | `destructive-action` / `zh-destructive-action` |
+| send 加 amount co-signal | 新 send-amount rule, send standalone 释 | `send-amount` / `zh-send-amount` |
+
+→ `safety:send-or-pay` log 现仅指真支付动词, `safety:destructive-action` 指 destructive 动作, 用户
+log 阅读语义清晰. send 误拦"Send Email"/"Send Notification" 等 generic 释.
+
+### V0.34 教训累计应用至 V0.49 (19 系列贯彻)
+
+| 系列 | 教训应用 |
+|------|---------|
+| V0.45 | 仅修真发现 evidence (留 V0.46+ 其他 cleanup) — conservative |
+| **V0.49** | **V0.45 deferred items 集中收割** (1 系列 2 改, 同 layer 防 list conflict) |
+
+V0.49 教训应用模式: **conservative reframe 后, deferred items 集中清** — V0.45 把"未来 audit
+evidence 出现再做"留作 V0.46+, V0.49 把这些用户授权"按顺序全做"集中清完. 避免散 2-3 系列冗余 retro.
+
+(累计真发现至 V0.49: 26 个不变; V0.49 系列 +0 — V0.45 deferred cleanup, 不催新 catch.)
+
+### V0.50 主题候选 (V0.49 完后 surface, 用户 inventory 续 A'' corpus)
+
+V0.46.2 inventory 用户"按顺序全做" 4 主题节奏:
+- ✅ V0.49 = delete/remove + send amount (合并完成)
+- **V0.50 = A'' V0.40 corpus 再扩 (drag/dialog/upload anti-abuse fixture)**
+- V0.51 = V0.42 housekeeping (V0.36.2 + V0.41 C5 deferred 合并)
+- V0.52 = 系列收尾 + V0.53 inventory
+
+V0.50 design notes (V0.49.2 teaser, 详 V0.50.0 doc):
+- V0.40 已扩 5 task real-world (Mercury + IANA + GitHub + httpbin + Wikipedia)
+- A'' 加 drag/dialog/upload 类 — 需 probe dialog action 真实性 (V0.40.0 Wikipedia missing C2 推翻
+  同模式, V0.50.0 先查 types.py 是否有 DialogAction)
+- 真站 anti-abuse fixture 难找 → 走 demo HTML fixture (跟 V0.23 drag/upload 同模式)
+
+### Changed (~0 src LOC, ~50 doc LOC)
+
+- `CHANGELOG.md` V0.49.2 entry (本)
+- `pyproject.toml` / `__init__.py` 0.49.1 → 0.49.2
+- `uv.lock` 同步
+
+### Verify
+
+- `uv run pytest` → **963 passed, 28 skipped** (V0.49.1 状态 0 src 改 → 0 测变)
+
 ## [0.49.1] - 2026-05-11
 
 ### Feat (V0.49 safety 双修 2/3 — 拆 destructive-action + send amount co-signal)
