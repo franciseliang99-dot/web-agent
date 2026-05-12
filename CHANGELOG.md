@@ -2,6 +2,117 @@
 
 All notable changes to web-agent. 版本号遵循 SemVer 简化形式（V<major>.<minor>.<patch>）。
 
+## [0.51.2] - 2026-05-11
+
+### Doc (V0.51 系列收尾 + V0.46.2 inventory 4 主题"按顺序全做"全闭环 final retrospective)
+
+V0.51.0 plan + V0.51.1 data-clean CLI 已落. 本 = V0.51 收尾 + V0.46.2 inventory 4 主题
+"按顺序全做"全闭环 final retro.
+
+### V0.46.2 inventory 4 主题 sweep 全闭环 (V0.49 → V0.51, 8 commit autonomous)
+
+| 主题 | V 系列 | commit | 状态 | 真发现 |
+|------|--------|--------|------|--------|
+| 1. delete/remove rule cleanup | V0.49 | 3 (.0/.1/.2) | ✅ rule 'destructive-action' 拆出 | 0 |
+| 2. send amount co-signal | V0.49 (合并) | (同上) | ✅ rule 'send-amount' (Send Email 释 / Send $50 拦) | 0 |
+| 3. A'' V0.40 corpus 再扩 | V0.50 | 1 (.0 sink) | ✅ sink (V0.23/V0.24 已 cover) | **#27** |
+| 4. V0.42 housekeeping | V0.51 | 3 (.0/.1/.2) + 1 carry-over | ✅ data-clean CLI 默 dry-run, 真删 user --apply | 0 |
+
+**总**: 8 commit, ~220 src + ~270 test + ~700 doc LOC, 真发现 +1 (#27).
+
+### V0.34 教训累计 V0.49-V0.51 (21 系列贯彻新维度)
+
+- **V0.49**: V0.45 deferred items 集中收割 (1 系列 2 改防 list conflict)
+- **V0.50**: plan agent inventory line stale, 实施前 audit 既有 corpus (跟 V0.39 #20 同模式)
+- **V0.51**: destructive operations 默 dry-run + 显式 --apply 真做 (CLAUDE.md reversibility + V0.48.2 红线)
+
+### conservative reframe 累计 V0.42-V0.51 8 次
+
+1. V0.42 D image cache 拒
+2. V0.43 R3 W5-C.2 cleanup 拒
+3. V0.45 send amount 保守留 (V0.49 收割)
+4. V0.46 type-only detector V0.46.0 拒 + V0.46.1 reframe 5-window
+5. V0.47.3 simplify-judge extract helper 拒
+6. V0.48 fingerprint pool sink (cassette 推翻)
+7. V0.50 A'' corpus 再扩 sink (V0.23/V0.24 已 cover)
+8. **V0.51 destructive 真删 默 dry-run** (--apply 用户显式)
+
+模式: subagent / plan agent / inventory line 推扩, autonomous 数据/边界 sieve 收窄. **V0.34 教训
+核心 = plan 假设必须真测/audit 验证, 任一方向都不能凭假设**.
+
+### V0.52 主题候选 (V0.46.2 inventory 全闭环, 待用户给新方向)
+
+**autonomous 红线**: V0.46.2 inventory 100% 全做. 待用户给 V0.52 新方向:
+- V0.48.2 #26 催生**代理层接入** (env `WEB_AGENT_PROXY` + 烧 $) 首选
+- Captcha Solver / 指纹浏览器 (V0.48 sink 后 ROI 边际)
+- 其他用户提的方向
+
+**累计 deferred maintainer 红线占位**:
+- V0.37.4 / V0.40.x.1 / V0.41.x.1 / V0.42.x.1 / V0.44.x.1 / V0.46.x.1 / V0.47.x.1 / V0.48.x.1
+  真录 cassette + 真测 token 省 % (ANTHROPIC_API_KEY)
+- V0.49.x.1 / V0.51.x.1 真测真访 / 真删 sample (用户 env 跑)
+
+### Changed (~0 src LOC, ~120 doc LOC)
+
+- `CHANGELOG.md` V0.51.2 entry (本) + V0.51.1 carry-over补
+- `pyproject.toml` / `__init__.py` 0.51.1 → 0.51.2 (carry-over 也补)
+- `uv.lock` 同步
+
+### Verify
+
+- `uv run pytest` → **977 passed, 28 skipped** (V0.51.1 状态 0 src 改 → 0 测变)
+
+(累计真发现至 V0.51: 27 个不变; V0.51 系列 +0.)
+
+## [0.51.1] - 2026-05-11
+
+### Feat (V0.51 V0.42 housekeeping 2/3 — data-clean CLI infra 默 --dry-run, 真删 --apply)
+
+V0.51.0 plan 落定. 本提交 autonomous infra: 新建 `src/web_agent/data_clean.py` + console_script
+`web-agent-data-clean`. 默 `--dry-run` 不真删, 真删用户 `--apply` 显式 (CLAUDE.md destructive
++ V0.48.2 maintainer 红线模式).
+
+### Changed (~180 src + ~210 test LOC)
+
+- `src/web_agent/data_clean.py` 新 (~180 LOC): `CleanupStats` dataclass + `find_cleanable_files` /
+  `find_cleanable_trace_rows` + `apply_cleanup_*` + `format_dry_run_report` + `main(argv)` argparse CLI
+- `pyproject.toml` console_scripts: `web-agent-data-clean = web_agent.data_clean:main`
+- `tests/test_data_clean.py` 新 (~210 LOC, 14 fast unit): tmp_path + os.utime mock (autonomous safe)
+  - find_cleanable_files: empty / missing / old-only / sample-cap-5
+  - find_cleanable_trace_rows: no-db / table-missing / old-only
+  - apply_cleanup_files/_trace_rows 真删验证 (mock fs)
+  - format_dry_run_report total bytes + sample empty
+  - main dry-run 默不删 / --apply 真删
+- `pyproject.toml` / `__init__.py` 0.51.0 → 0.51.1 (carry-over 5.4f9e6a 补完整)
+- `uv.lock` 同步
+
+### Cleanup targets (默 90d ttl)
+
+- `data/screenshots/` (74M, mtime > ttl unlink)
+- `data/downloads/` (21M)
+- `data/replays/` (168K)
+- `data/trace.db tasks` (DELETE WHERE started_at < cutoff, schema 不动)
+
+### 保留 (长期价值, hardcoded exclude)
+
+- `data/stealth_probes/` / `data/bench/` / `data/eval/` / `data/memory.db` / `data/upwork.db`
+
+### Decision 门槛 (V0.51.0 先写) 全 honored
+
+| 指标 | target | 真测结果 |
+|------|--------|---------|
+| Dry-run 默 → 0 真删 | ✅ | test_main_dry_run_default_no_real_delete |
+| --apply 真删 mtime > ttl | ✅ | test_main_apply_truly_deletes |
+| trace.db DELETE 不动 schema | ✅ | apply_cleanup_trace_rows fixture |
+| 保留路径 hardcoded 排除 list | ✅ | targets list 不含 stealth_probes/bench/eval/memory.db/upwork.db |
+| pytest | ≥ 963 | **977** ✅ (963 + 14 V0.51.1) |
+| mypy / ruff | clean | clean (54 src, +1 data_clean.py) |
+
+### 不可逆操作仍 user 红线
+
+真跑 `web-agent-data-clean --apply` 等用户在自己 env 执行, autonomous 不在 sandbox /data/ 真删
+(跟 V0.48.2 / V0.47.x.1 同模式).
+
 ## [0.51.0] - 2026-05-11
 
 ### Doc (V0.51 V0.42 housekeeping 系列开篇 1/3 — data-clean CLI plan + retention 90d 决策)
