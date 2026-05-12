@@ -402,6 +402,73 @@ def test_recall_protection_different_domains_isolated(tmp_path):
     assert recall_protection_by_domain(db, "c.test") is None
 
 
+# ---------- V0.47.3: format_protection_for_trace + build_inject_string prepend ----------
+
+
+def test_format_protection_for_trace_none_returns_empty():
+    """V0.47.3: obs=None (无记录) 返 "" (caller if-truthy skip inject)."""
+    from web_agent.memory import format_protection_for_trace
+    assert format_protection_for_trace(None) == ""
+
+
+def test_format_protection_for_trace_unknown_returns_empty():
+    """V0.47.3: level=unknown (信号不足) 返 "" (planner 看到 unknown 无 actionable info)."""
+    from web_agent.memory import ProtectionObservation, format_protection_for_trace
+    obs = ProtectionObservation(ts=0.0, domain="x.test", level="unknown", signals_json="{}")
+    assert format_protection_for_trace(obs) == ""
+
+
+@pytest.mark.parametrize("level,expected_contains", [
+    ("low", "low"),
+    ("medium", "medium"),
+    ("high", "high"),
+])
+def test_format_protection_for_trace_returns_1line_signal(level: str, expected_contains: str):
+    """V0.47.3: low/medium/high 返 1 行 "[protection] <domain> 上次保护等级: <level>"."""
+    from web_agent.memory import ProtectionObservation, format_protection_for_trace
+    obs = ProtectionObservation(ts=0.0, domain="cloudflare.com", level=level, signals_json="{}")
+    result = format_protection_for_trace(obs)
+    assert "[protection]" in result
+    assert "cloudflare.com" in result
+    assert expected_contains in result
+
+
+def test_build_inject_string_prepends_protection_when_recorded(tmp_path):
+    """V0.47.3: build_inject_string 含 protection prepend (跟 V0.41 stats prepend 同 chain)."""
+    from web_agent.memory import (
+        build_inject_string,
+        record_protection,
+        record_task,
+    )
+    db = tmp_path / "memory.db"
+    record_protection(
+        db_path=db, domain="cloudflare.com", level="high",
+        signals_json='{"server":"cloudflare","status":403,"cookies":["cf_clearance"]}',
+    )
+    # 加 1 条 memory 让 build_inject_string 不返 None
+    record_task(db_path=db, domain="cloudflare.com", goal="g", result="r", success=True)
+    s = build_inject_string(db, "cloudflare.com")
+    assert s is not None
+    assert "[protection]" in s
+    assert "high" in s
+    # protection 在最 high-level 位置 — 在 stats / memories 之前
+    prot_idx = s.find("[protection]")
+    mem_idx = s.find("[recent")  # memories format prefix (跟 format_memories_for_trace 对照)
+    if mem_idx > 0:
+        assert prot_idx < mem_idx, "V0.47.3 protection 应在 memories 之前 (most-high-level signal)"
+
+
+def test_build_inject_string_no_protection_record_skips_prepend(tmp_path):
+    """V0.47.3: 无 protection record (新 domain) → 不 prepend (None → "" 在 format 已 skip)."""
+    from web_agent.memory import build_inject_string, record_task
+    db = tmp_path / "memory.db"
+    record_task(db_path=db, domain="newdomain.test", goal="g", result="r", success=True)
+    s = build_inject_string(db, "newdomain.test")
+    # memories 应有, 但无 [protection] prefix
+    if s is not None:
+        assert "[protection]" not in s
+
+
 # ---------- V0.28.2 W6-B: format_reflections_for_trace (W5-D.2 平行) ----------
 
 

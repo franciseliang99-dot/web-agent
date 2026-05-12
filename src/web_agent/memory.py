@@ -241,6 +241,18 @@ def record_protection(
         conn.close()
 
 
+def format_protection_for_trace(obs: ProtectionObservation | None) -> str:
+    """V0.47.3: 1 行精炼 protection level signal 给 planner inject (跟 V0.41 stats_str 同精炼).
+
+    None / unknown 返 "" (caller if-truthy skip). low/medium/high 返 "[protection] <domain>
+    上次保护等级: <level>" — planner 看到等级自决重 retry / 换 task / 调整 plan.
+    不暴露 signals_json 细节 (planner 不需 raw header, signals 留 audit dump 看).
+    """
+    if obs is None or obs.level == "unknown":
+        return ""
+    return f"[protection] {obs.domain} 上次保护等级: {obs.level}"
+
+
 def recall_protection_by_domain(
     db_path: Path,
     domain: str,
@@ -521,6 +533,16 @@ def build_inject_string(
     """
     parts: list[str] = []
     if include_memories:
+        # V0.47.3 主题: prepend domain protection level (1 行 most-high-level 信号 — planner 先看
+        # "本 domain 有没有 CF/Akamai 高防护" 再看 trend / failure markers / raw memories).
+        # recall 失败 silent skip.
+        try:
+            prot_obs = recall_protection_by_domain(db_path, domain)
+            prot_str = format_protection_for_trace(prot_obs)
+            if prot_str:
+                parts.append(prot_str)
+        except Exception:
+            pass
         # V0.41.0 C1 主题: prepend domain success rate aggregate (1 行 cross-task signal 让
         # planner 先看 high-level pass rate, 再看 raw 5 条 task). aggregate 失败 silent skip.
         try:

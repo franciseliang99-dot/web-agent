@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import json
 import logging
 import os
 import sys
@@ -138,6 +139,30 @@ async def run_task(
                 record_task(mem_db, domain, goal, result, is_success(result))
             except Exception as e:
                 logger.warning("memory record failed (non-fatal): %r", e)
+
+            # V0.47.3: 同 cli-layer 写入 protection observation (latest snapshot 性质).
+            # 从 ctx._web_agent_protection_signals (V0.47.1 listener 累积) 拿最近 main-frame
+            # response 信号 → classify → record. 失败 silent (跟 record_task 同档).
+            try:
+                from web_agent.memory import record_protection
+                from web_agent.protection import classify
+                signals = getattr(ctx, "_web_agent_protection_signals", [])
+                if signals:
+                    latest = signals[-1]
+                    level = classify(latest)
+                    signals_json = json.dumps({
+                        "server": latest.server,
+                        "status": latest.status,
+                        "cookies": sorted(latest.cookies),
+                        "cf_ray": latest.cf_ray,
+                        "captcha_vendor": latest.captcha_vendor,
+                    })
+                    record_protection(mem_db, domain, level, signals_json)
+                    logger.info(
+                        "protection record: domain=%r level=%r", domain, level,
+                    )
+            except Exception as e:
+                logger.warning("protection record failed (non-fatal): %r", e)
 
         return result
 

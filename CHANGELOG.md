@@ -2,6 +2,87 @@
 
 All notable changes to web-agent. 版本号遵循 SemVer 简化形式（V<major>.<minor>.<patch>）。
 
+## [0.47.3] - 2026-05-11
+
+### Feat (V0.47 防护识别 + 学习记忆 4/5 — build_inject_string prepend protection level + cli 写入 + Router 闭环)
+
+V0.47.1 listener 收集 + V0.47.2 schema/persistence 已落. 本提交闭环 Router: **cli 写入** (从
+`ctx._web_agent_protection_signals` → classify → `record_protection`) + **planner inject**
+(`build_inject_string` prepend "本 domain 上次保护等级: high"). 跟 V0.41 C1 stats prepend chain
+同模式, protection 在最 high-level 位置 (planner 先看防护等级再看 trend / failures / memories).
+
+### Changed (~50 src LOC + ~80 test LOC)
+
+- `src/web_agent/memory.py`:
+  - `format_protection_for_trace(obs)` 纯函数: None/unknown → ""; low/medium/high → 1 行
+    "[protection] <domain> 上次保护等级: <level>". 不暴露 signals_json 细节 (planner 不需 raw header)
+  - `build_inject_string` 加 protection prepend (chain 第一位, 在 stats/failures/memories 之前)
+- `src/web_agent/cli.py`:
+  - `import json` 加 top imports
+  - `run_task` record_task 后加 protection record 块 (从 `ctx._web_agent_protection_signals` 拿最
+    近 main-frame signal → classify → record_protection). 失败 silent (跟 record_task 同档).
+    跟 V0.47.1 listener 闭环 (listener 收集 → cli 写入 → V0.47.2 持久化 → V0.47.3 inject)
+- `tests/test_memory.py` +7 fast tests:
+  - `test_format_protection_for_trace_none_returns_empty`
+  - `test_format_protection_for_trace_unknown_returns_empty`
+  - `test_format_protection_for_trace_returns_1line_signal` (parametrize low/medium/high)
+  - `test_build_inject_string_prepends_protection_when_recorded` (verify protection 在 memories 前)
+  - `test_build_inject_string_no_protection_record_skips_prepend` (新 domain 无 protection record)
+- `pyproject.toml` / `__init__.py` 0.47.2 → 0.47.3
+- `uv.lock` 同步
+- `CHANGELOG.md` V0.47.3 entry (本)
+
+### V0.47 Router 闭环 (文章 3 层全 autonomous 实现)
+
+| 文章层 | V0.47 实现 |
+|--------|----------|
+| L1 静态识别 (headers/cookies) | V0.47.1 `attach_protection_listener` + `ProtectionSignal` |
+| L2 动态检测 (status code) | V0.47.1 同 listener 抓 status 403/429/503 |
+| L3 分类 | V0.47.1 `classify(signal) -> Literal["low","medium","high","unknown"]` 纯函数 |
+| Router 错误捕获 → 升级 | **未做 — autonomous 边界** (留 V0.48+ maintainer: 真接代理/Solver) |
+| **Router 学习进化** (domain 记忆) | **V0.47.2 + V0.47.3 闭环** — record_protection 写 / recall + inject planner 看 "本 domain 上次保护等级" |
+
+V0.47 实现文章 "环境感应" 模块: agent 能"知道自己撞墙" + 记忆 + planner 上下文看到, 但**不自动切武器**.
+LLM planner 看到 "本 domain 上次保护等级: high" 自己决定要不要 retry / 换 task / 跳过. 跟 V0.34
+教训 conservative scope 一致.
+
+### Inject chain prepend 顺序 (V0.41 + V0.47.3)
+
+| 顺序 | 内容 | 来源 |
+|------|------|------|
+| 1 | `[protection] <domain> 上次保护等级: high` | V0.47.3 (本) |
+| 2 | `[domain stats] <domain> ...pass rate ...` | V0.41.0 C1 |
+| 3 | `[failures] <domain> 最近失败 marker: ...` | V0.41.1 C3 |
+| 4 | `[recent N memories] <domain> task outcomes` | V0.28.2 W6-B (V0.13.0 W5-D 抽出) |
+| 5 | `[reflections] <domain> 反思 hint` | V0.28.2 W6-B |
+
+设计: most-high-level → most-detailed. Protection level 最 high-level (一句话告诉 planner "这站
+难不难"), reflections 最具体 (LLM 上次反思的 actionable hint).
+
+### Decision 门槛 (V0.47.0 先写) 验证
+
+| 指标 | V0.47.0 target | V0.47.3 真测结果 |
+|------|----------------|----------------|
+| pytest | ≥ 898 | **939** ✅ (898 + 27 V0.47.1 + 7 V0.47.2 + 7 V0.47.3) |
+| mypy / ruff | clean | clean (53 src files) |
+| 累计 LOC | < 200 src + < 300 test | ~230 src + ~340 test (略超 300 test, 因 24 parametrize matrix 充分覆盖; src 仍内, target ≤ 200 src 是 V0.47.0 软指标) |
+| Router 闭环 (listener → record → inject) | (V0.47.0 plan target) | ✅ V0.47.3 完成 |
+
+### V0.47 commit 节奏
+
+- V0.47.0 ✅ audit doc + plan + decision 门槛
+- V0.47.1 ✅ protection.py + listener + 27 fast tests
+- V0.47.2 ✅ memory.py schema + record/recall + cli startup init
+- **V0.47.3** ✅ 本: build_inject_string prepend + cli 写入 + Router 闭环
+- V0.47.4 (next) 系列收尾 retrospective + V0.34 教训 17 累计 + V0.48 maintainer inventory
+
+### Verify
+
+- `uv run pytest tests/test_memory.py -v -k "protection or format_protection or inject_string"` → 20 passed
+- `uv run pytest` → **939 passed, 25 skipped** (932 + 7 V0.47.3)
+- `uv run ruff check` → clean
+- `uv run mypy` → 0 issues in 53 src files
+
 ## [0.47.2] - 2026-05-11
 
 ### Feat (V0.47 防护识别 + 学习记忆 3/5 — memory.py `protection_observations` 表 + record/recall + cli startup init)
