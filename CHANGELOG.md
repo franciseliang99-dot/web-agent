@@ -2,6 +2,131 @@
 
 All notable changes to web-agent. 版本号遵循 SemVer 简化形式（V<major>.<minor>.<patch>）。
 
+## [0.47.4] - 2026-05-11
+
+### Doc (V0.47 防护识别 + 学习记忆系列收尾 5/5 — V0.34 教训 17 系列累计 + V0.48 maintainer inventory)
+
+V0.47.0 plan + V0.47.1 listener + V0.47.2 schema + V0.47.3 inject Router 闭环已落 (4 commit
+autonomous). 本提交收尾: 系列总结 + V0.34 教训 17 系列累计 + V0.48 主题 inventory (含 maintainer
+红线: 代理 / Solver / 指纹浏览器). 跟 V0.33.4 → V0.46.2 系列收尾同骨架.
+
+### V0.47 系列回顾 (5 commit autonomous, 文章 3 层全实现)
+
+| ver | scope | LOC | 状态 |
+|-----|-------|-----|------|
+| V0.47.0 | audit doc + plan + decision 门槛 + autonomous scope 划界 | ~200 doc | ✅ |
+| V0.47.1 | protection.py 新模块 + ctx.on("response") listener + 27 fast tests | ~110 src + ~150 test | ✅ |
+| V0.47.2 | memory.py protection_observations 表 + record/recall + cli startup init | ~70 src + ~110 test | ✅ |
+| V0.47.3 | build_inject_string prepend protection level + cli 写入 + Router 闭环 | ~50 src + ~80 test | ✅ |
+| **V0.47.4** | 系列收尾 retrospective + V0.48 maintainer inventory | ~100 doc | ✅ 本提交 |
+
+V0.47 防护识别 + 学习记忆系列闭环 (5 commit). 跟 V0.43 R / V0.44 W6-A / V0.45 / V0.46 节奏一致.
+**autonomous scope 全实现** — 文章 L1+L2+L3+Router 学习, 不接 L3 武器切换 (V0.48+ maintainer).
+
+### 文章 3 层能力 vs V0.47 实现对照
+
+| 文章层 | V0.47 实现 | autonomous? |
+|--------|-----------|-------------|
+| L1 静态识别 (response headers / cookies / WAF 指纹) | ✅ V0.47.1 `attach_protection_listener` + 12 高防 server/cookie 指纹 | ✅ |
+| L2 动态检测 (状态码 403/429/503) | ✅ V0.47.1 同 listener | ✅ |
+| L3 自动分类 (Low/Medium/High) | ✅ V0.47.1 `classify(signal)` 纯函数 (跟 CLAUDE.md 模型 vs 代码边界 — 不需 LLM) | ✅ |
+| Router 错误捕获 → **武器升级** (代理 / Solver / 指纹浏览器) | ❌ V0.48+ maintainer 红线 | ❌ (第三方付费) |
+| **Router 学习进化** (domain 记忆 + 下次直接用) | ✅ V0.47.2 + V0.47.3 (record / recall / inject planner) | ✅ |
+
+→ V0.47 = **autonomous "环境感应" 模块** (agent 知道自己撞墙 + 记忆 + planner 上下文看到), 不自动
+切武器. LLM planner 看到 "[protection] cloudflare.com 上次保护等级: high" 自决 retry / 换 task / 跳过.
+
+### V0.34 教训累计应用至 V0.47 (17 系列贯彻)
+
+| 系列 | commit | 教训应用 | 真发现 |
+|------|--------|---------|--------|
+| V0.34 F1 | 6 | 真测被动 catch | #15 #16 #17 |
+| V0.35 A | 4 | fixture micro experiment | 0 |
+| V0.36 I | 4 | 现状叙事推翻 | #18 |
+| V0.37 B' | 4 | infra 准备 | 0 (deferred) |
+| V0.38 F2 | 4 | retrospective 预测 | #19 |
+| V0.39 G | 2 | baseline 即时 withdraw | #20 |
+| V0.40 A' | 3 | 每 fixture probe | 0 (deferred) |
+| V0.41 C | 3 | 真测 db schema → reframe | #21 |
+| V0.42 D | 4 | 真测 SDK + image cache miss → reframe | 0 (待 maintainer) |
+| V0.43 R | 3 | audit ARCHITECTURE 先于 cleanup + per-fixture 双向数据 | #22 + #23 |
+| V0.44 W6-A | 4 | 历史 plan subagent 假设 audit + 真测双端推翻 | #24 + #25 |
+| V0.45 | 3 | 数据驱动 conservative fix scope, 拒 subagent 激进 plan | 0 (#24 fix) |
+| V0.46 | 3 | plan 假设双向真测 (V0.45 拒激进, V0.46 真测发现保守不够) | 0 (#25 sub fix) |
+| **V0.47** | **5** | **第三方付费 / API key 类武器在 autonomous scope 边界停手, 列 maintainer inventory** | 0 (新能力实现) |
+
+**V0.47 教训应用新维度**: **autonomous vs maintainer 红线分层 implementation pattern**:
+1. autonomous 做 L1+L2+L3 分类 + Router 学习 (代码层, 0 第三方, 0 烧 $)
+2. maintainer 做 L3 武器切换 (代理 / Solver / 指纹浏览器, 需用户授权 + env + $)
+3. 跟 V0.40.x.1 / V0.42.x.1 / V0.44.x.1 / V0.46.x.1 真录 cassette + ANTHROPIC_API_KEY 红线同模式
+
+跟 V0.42 D 拒"image + text 都 cache" + V0.43 R3 拒 W5-C.2 cleanup + V0.45 拒 Send amount + V0.46
+拒 type-only detector 同 conservative reframe 模式. 累计 V0.42-V0.47 = **5 次 conservative reframe**
+(subagent 推全, 数据 sieve 收窄).
+
+(累计真发现至 V0.47: 25 个不变; V0.47 系列 +0 新, 是文章 3 层 autonomous scope 全新能力实现而非
+真发现 catch.)
+
+### V0.48 主题候选 (V0.47 完后 surface, **含 maintainer 红线**)
+
+V0.47 audit 直接催生 maintainer 红线 V0.48+:
+- **数据中心代理 / 住宅代理接入** (env `WEB_AGENT_PROXY` + 烧 $ + 测 protection_level=high
+  domain 自动切代理验证, 也接 chromium `--proxy-server` flag)
+- **Captcha Solver API** (2Captcha 等第三方, captcha.py V0.16 立场反向, 需用户重审)
+- **指纹浏览器 CDP launch** (Multilogin / AdsPower, 改 chrome_launcher.py)
+- **动态 fingerprint pool by domain** (autonomous 边界, V0.30.0 96.8% ceiling 评估)
+- **V0.47.x.1 maintainer cassette 真测** (10 真站 chromium 真跑 record response → fixture
+  replay, 验 classify accuracy ≥ 80%; 不烧 LLM token 但需真 chromium + 网络)
+
+V0.47 完前其他候选:
+- delete/remove rule name cleanup (V0.45 catch: 拆 'destructive-action' 单独 rule)
+- send 加 amount co-signal (V0.45 plan 保守留)
+- type-only anti_loop detector (V0.46 DEFER, 仍 V0.47+ 候选若未来 evidence)
+- A'' V0.40 corpus 再扩 (drag/dialog/upload anti-abuse fixture)
+- V0.42 housekeeping (V0.36.2 + V0.41 C5 deferred 合并)
+- 其他用户提的方向
+
+**已闭环主题** (V0.47 后):
+- F sub-route (F1+F2 ROI 推翻; V0.43 R 加固 #17 物理限)
+- G stealth (96.8% 接近 ceil; V0.47 加 network 侧 protection sense 互补)
+- A/A' real-world corpus (13 task)
+- C 长期记忆 cross-task 学习
+- D LLM cache 优化 (4 维矩阵)
+- R re-investigation (V0.43, spp 真测 sink #23)
+- W6-A reflect path audit (V0.44, #24/#25 双向真发现 + #21 真 fix)
+- safety predicate fix (V0.45, #24 真 fix)
+- anti_loop detector signal 扩 (V0.46, #25 sub-finding 真 fix)
+- **防护识别 + 学习记忆 (V0.47, 文章 3 层 autonomous scope 全实现 + Router 闭环)**
+
+**未推** (deferred maintainer):
+- V0.37.4 / V0.40.x.1 / V0.41.x.1 / V0.42.x.1 / V0.44.x.1 / V0.46.x.1 / V0.47.x.1: 真录 cassette
+  + 真测验证 (ANTHROPIC_API_KEY 红线 / chromium 真跑)
+- V0.36.2 / V0.41 C5: housekeeping retention 决策红线
+
+(不带 ROI 估算 — V0.34 教训第 17 次应用: 项目方向 ROI 假设需 user 输入而非 Claude 自决.)
+
+### Changed (~0 src LOC, ~100 doc LOC)
+
+- `CHANGELOG.md` V0.47.4 retrospective entry (本)
+- `pyproject.toml` / `__init__.py` 0.47.3 → 0.47.4
+- `uv.lock` 同步
+
+### V0.47.3 simplify-judge 反馈 (conservative reframe)
+
+V0.47.3 commit 后启 simplify-judge subagent. Subagent 推 /simplify (理由: 命中 ① 新增公共函数 +
+③ 改动 ~50 src LOC + cli.py ~20 LOC inline block 可抽 helper). **我 conservative 拒**:
+- cli.py 内 protection record 块跟 record_task 同 cli-layer 同 try/except 同 logger.warning 模式
+- 抽出 `record_protection_from_signals` helper 增 memory.py 公共 API 表面 + 跨文件 1 跳间接性
+- 拒 helper extract 跟 V0.46.1 subagent 推 type-only detector 真测推翻 同 conservative 模式
+
+跟 V0.42 D / V0.43 R3 / V0.45 / V0.46 拒 subagent 激进 plan 同模式. **累计 V0.42-V0.47 6 次
+conservative reframe** (subagent 推全, 数据/边界 sieve 收窄).
+
+### Verify
+
+- `uv run pytest` → **939 passed, 25 skipped** (V0.47.3 状态 0 src 改 → 0 测变)
+- 0 src 改 → 0 ruff/mypy 重检需求
+
 ## [0.47.3] - 2026-05-11
 
 ### Feat (V0.47 防护识别 + 学习记忆 4/5 — build_inject_string prepend protection level + cli 写入 + Router 闭环)
