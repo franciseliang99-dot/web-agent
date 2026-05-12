@@ -121,24 +121,28 @@ def test_upload_auto_approve_wildcard(monkeypatch):
 # --- click 按钮文本黑名单 ---
 
 @pytest.mark.parametrize("text,should_block", [
-    ("Send", True),
-    ("Send Email", True),
+    # V0.49.1: send standalone + Send Email 释 (amount co-signal 缺失 → 不拦)
+    ("Send", False),
+    ("Send Email", False),
+    # V0.49.1 新: send 加 amount co-signal → 仍拦 (rule="send-amount")
+    ("Send $50", True),
+    ("Send 100 USD", True),
+    ("Send Money $99", True),
     ("Pay Now", True),
-    ("Delete", True),
+    ("Delete", True),  # V0.49.1: rule 改为 'destructive-action' (rule 名验在 v044_regression)
     ("Confirm Payment", True),
     ("Place Order", True),
-    ("Withdraw $500", True),
+    ("Withdraw $500", True),  # V0.49.1: rule 'destructive-action'
     ("Subscribe", False),  # 订阅 ≠ unsubscribe
     ("Unsubscribe", True),
     ("Cancel Subscription", True),
     ("Search", False),
     ("Sender Name", False),  # word boundary 防 "sender" 误撞 "send"
     ("Login", False),
-    # V0.45.1: 真发现 #24 fix — 'Submit' generic 动词不再 over-block (V0.44.0 audit 8/8
-    # SAFETY_BLOCK 全是 generic 'Submit'/'Publish'/'Submit order' 假阳性).
+    # V0.45.1: 真发现 #24 fix — 'Submit' generic 动词不再 over-block
     ("Submit", False),
-    ("Publish", False),  # V0.45.1: demo 'Publish' button 不再误拦
-    ("Post", False),  # V0.45.1: forum/blog post 按钮释放
+    ("Publish", False),
+    ("Post", False),
 ])
 def test_click_button_text_english(text, should_block, monkeypatch):
     monkeypatch.delenv("WEB_AGENT_AUTO_APPROVE", raising=False)
@@ -151,11 +155,15 @@ def test_click_button_text_english(text, should_block, monkeypatch):
 
 
 @pytest.mark.parametrize("text,should_block", [
-    ("发送", True),
+    # V0.49.1: 发送 standalone 释 (amount co-signal 缺失)
+    ("发送", False),
+    # V0.49.1 新: 发送 加 amount co-signal → 仍拦 (rule="zh-send-amount")
+    ("发送 ¥50", True),
+    ("发送 100 元", True),
     ("立即支付", True),
-    ("删除", True),
+    ("删除", True),  # V0.49.1: rule 'zh-destructive-action'
     ("确认订单", True),
-    ("转账", True),
+    ("转账", True),  # V0.49.1: rule 'zh-destructive-action'
     ("注销账号", True),
     ("搜索", False),
     ("登录", False),
@@ -221,15 +229,17 @@ def test_type_into_search_input_allowed(monkeypatch):
 # --- auto_approve env ---
 
 def test_auto_approve_single_rule(monkeypatch):
+    """V0.49.1: 'Pay Now' 命中 send-or-pay rule, auto_approve env 放行."""
     monkeypatch.setenv("WEB_AGENT_AUTO_APPROVE", "send-or-pay")
-    d = check(_click(), _btn("Send"), [])
+    d = check(_click(), _btn("Pay Now"), [])
     assert d.allow
 
 
 def test_auto_approve_csv_multiple(monkeypatch):
+    """V0.49.1: 多 rule 放行 (Pay Now / 立即支付 / password)."""
     monkeypatch.setenv("WEB_AGENT_AUTO_APPROVE", "send-or-pay,zh-send-or-pay,input-type-sensitive")
-    assert check(_click(), _btn("Send"), []).allow
-    assert check(_click(), _btn("发送"), []).allow
+    assert check(_click(), _btn("Pay Now"), []).allow
+    assert check(_click(), _btn("立即支付"), []).allow
     assert check(_click(), _input(input_type="password"), []).allow
 
 
@@ -242,8 +252,9 @@ def test_auto_approve_wildcard(monkeypatch):
 
 
 def test_auto_approve_unset_blocks(monkeypatch):
+    """V0.49.1: env 未设 → 命中 rule 的真支付动词仍拦 (用 Pay Now, Send standalone V0.49.1 已释)."""
     monkeypatch.delenv("WEB_AGENT_AUTO_APPROVE", raising=False)
-    d = check(_click(), _btn("Send"), [])
+    d = check(_click(), _btn("Pay Now"), [])
     assert not d.allow
 
 
@@ -273,10 +284,11 @@ def test_empty_text_button_allowed(monkeypatch):
 
 
 def test_case_insensitive_match(monkeypatch):
+    """V0.49.1: IGNORECASE flag 对真支付动词 (Pay) 大小写不敏感. Send standalone V0.49.1 已释, 改用 Pay."""
     monkeypatch.delenv("WEB_AGENT_AUTO_APPROVE", raising=False)
-    assert not check(_click(), _btn("SEND"), []).allow
-    assert not check(_click(), _btn("send"), []).allow
-    assert not check(_click(), _btn("SeNd"), []).allow
+    assert not check(_click(), _btn("PAY"), []).allow
+    assert not check(_click(), _btn("pay"), []).allow
+    assert not check(_click(), _btn("PaY"), []).allow
 
 
 # --- V0.19.0: paste / keyboard_shortcut ---

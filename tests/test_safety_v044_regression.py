@@ -62,38 +62,59 @@ def test_v044_false_positive_releases_allow_true(text: str, monkeypatch: pytest.
 
 # --- True-positive still blocks (V0.45 保守保留真支付) ---
 
-@pytest.mark.parametrize("text", [
-    "Pay Now",          # pay verb
-    "Confirm Payment",  # confirm[ -]?payment
-    "Place Order",      # place[ -]order specific
-    "Withdraw $500",    # withdraw verb
-    "Checkout",         # checkout verb
-    "Buy Now",          # buy verb
-    "Authorize Payment", # authorize verb
-    "Approve Transfer", # approve + transfer
+@pytest.mark.parametrize("text,expected_rule", [
+    # V0.49.1: send-or-pay rule 收窄到明确支付动词
+    ("Pay Now", "send-or-pay"),
+    ("Confirm Payment", "send-or-pay"),
+    ("Place Order", "send-or-pay"),
+    ("Checkout", "send-or-pay"),
+    ("Buy Now", "send-or-pay"),
+    ("Authorize Payment", "send-or-pay"),
+    ("Approve Transfer", "send-or-pay"),  # approve 优先命中 send-or-pay (transfer 也在 destructive 但顺序后)
+    # V0.49.1 新 destructive-action rule
+    ("Withdraw $500", "destructive-action"),
+    ("Delete Account", "destructive-action"),
+    ("Wire Transfer", "destructive-action"),
+    # V0.49.1 新 send-amount rule
+    ("Send $50", "send-amount"),
+    ("Send 100 USD", "send-amount"),
 ])
-def test_v045_true_positive_english_still_blocks(text: str, monkeypatch: pytest.MonkeyPatch) -> None:
-    """V0.45.1: 真支付动词仍 allow=False (false-neg 防回归)."""
+def test_v045_true_positive_english_still_blocks(
+    text: str, expected_rule: str, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """V0.45.1 + V0.49.1: 真支付/destructive/send-amount 动词仍 allow=False (false-neg 防回归)."""
     monkeypatch.delenv("WEB_AGENT_AUTO_APPROVE", raising=False)
     decision = check(_click(), _btn(text), [])
-    assert not decision.allow, f"V0.45.1: {text!r} 真支付应 allow=False 但放行 (false-neg 回归)"
-    assert decision.rule == "send-or-pay", f"{text!r} 应触发 send-or-pay 规则 (got {decision.rule!r})"
+    assert not decision.allow, f"V0.49.1: {text!r} 应 allow=False 但放行 (false-neg 回归)"
+    assert decision.rule == expected_rule, (
+        f"{text!r} 应触发 {expected_rule!r} 规则 (got {decision.rule!r})"
+    )
 
 
-@pytest.mark.parametrize("text", [
-    "立即支付",      # 立即(支付|购买|提现|结算)
-    "下单",         # 下单 specific
-    "确认订单",      # 确认订单 specific
-    "转账",         # 转账 verb
-    "立即购买",      # 立即(支付|购买|...)
-    "确认支付",      # 确认支付 specific
+@pytest.mark.parametrize("text,expected_rule", [
+    # V0.49.1: zh-send-or-pay rule 收窄
+    ("立即支付", "zh-send-or-pay"),
+    ("下单", "zh-send-or-pay"),
+    ("确认订单", "zh-send-or-pay"),
+    ("立即购买", "zh-send-or-pay"),
+    ("确认支付", "zh-send-or-pay"),
+    # V0.49.1 新 zh-destructive-action
+    ("转账", "zh-destructive-action"),
+    ("删除文件", "zh-destructive-action"),
+    ("提款", "zh-destructive-action"),
+    # V0.49.1 新 zh-send-amount
+    ("发送 ¥50", "zh-send-amount"),
 ])
-def test_v045_true_positive_chinese_still_blocks(text: str, monkeypatch: pytest.MonkeyPatch) -> None:
-    """V0.45.1: 中文真支付动词仍 allow=False (false-neg 防回归)."""
+def test_v045_true_positive_chinese_still_blocks(
+    text: str, expected_rule: str, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """V0.45.1 + V0.49.1: 中文真支付/destructive/send-amount 动词仍 allow=False (false-neg 防回归)."""
     monkeypatch.delenv("WEB_AGENT_AUTO_APPROVE", raising=False)
     decision = check(_click(), _btn(text), [])
-    assert not decision.allow, f"V0.45.1: {text!r} 中文真支付应 allow=False 但放行"
-    assert decision.rule == "zh-send-or-pay", f"{text!r} 应触发 zh-send-or-pay 规则 (got {decision.rule!r})"
+    assert not decision.allow, f"V0.49.1: {text!r} 应 allow=False 但放行"
+    assert decision.rule == expected_rule, (
+        f"{text!r} 应触发 {expected_rule!r} 规则 (got {decision.rule!r})"
+    )
 
 
 # --- 中文 generic 动词释放 (V0.45.1 删 发布|提交) ---

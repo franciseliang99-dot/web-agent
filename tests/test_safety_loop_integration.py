@@ -22,7 +22,8 @@ from web_agent.perceiver import Mark
 
 
 _SEND_BUTTON = Mark(
-    id=1, tag="button", role="button", text="Send",
+    # V0.49.1: Send standalone 释 (无 amount co-signal), 改用 "Pay Now" 触发 send-or-pay rule
+    id=1, tag="button", role="button", text="Pay Now",
     bbox={"x": 0, "y": 0, "w": 80, "h": 30},
     input_type="", name="", href="",
 )

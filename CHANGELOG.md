@@ -2,6 +2,61 @@
 
 All notable changes to web-agent. 版本号遵循 SemVer 简化形式（V<major>.<minor>.<patch>）。
 
+## [0.49.1] - 2026-05-11
+
+### Feat (V0.49 safety 双修 2/3 — 拆 destructive-action + send amount co-signal)
+
+V0.49.0 plan 落定双修合并. 本提交闭环: safety.py 拆 `destructive-action` 单独 rule + 加
+`send-amount` rule (send 仅在 amount 词 nearby 时拦). 6 entry _DANGER_BUTTON_PATTERNS (英文 3 +
+中文 3, 跟 V0.47.1 protection.py 12 server/cookie 指纹 同模式).
+
+### Changed (~40 src LOC + ~60 test LOC)
+
+- `src/web_agent/safety.py` `_DANGER_BUTTON_PATTERNS`:
+  - 英文 send-or-pay 收窄 (V0.49.1): 删 `send|delete|remove|withdraw|transfer|wire`, 保留
+    `pay|paypal|checkout|buy|purchase|place[ -]order|confirm[ -]?order|authorize|approve|...`
+  - 新 `destructive-action` rule: `\b(delete|remove|withdraw|transfer|wire)\b` IGNORECASE
+  - 新 `send-amount` rule: `\bsend\b.{0,30}([\$¥€£]|\d+\s*(USD|CNY|EUR|GBP|元))` IGNORECASE
+  - 中文 zh-send-or-pay 收窄: 删 `发送|删除|提款|转账`, 保留 `支付|付款|确认订单|下单|结算|...`
+  - 新 `zh-destructive-action`: `(删除|提款|转账)`
+  - 新 `zh-send-amount`: `发送.{0,30}([¥$€£]|\d+\s*(元|USD|CNY|EUR))`
+- `tests/test_safety.py`:
+  - `test_click_button_text_english` parametrize 改: Send True → False, Send Email True → False,
+    新加 Send $50 / Send 100 USD / Send Money $99 → True
+  - `test_click_button_text_chinese` parametrize: 发送 True → False, 新加 发送 ¥50 / 发送 100 元 → True
+  - `test_auto_approve_single_rule` / `test_auto_approve_csv_multiple` / `test_auto_approve_unset_blocks` /
+    `test_case_insensitive_match` 改 fixture 用 "Pay Now" / "立即支付" 替 "Send" (Send standalone V0.49.1 已释)
+- `tests/test_safety_v044_regression.py`:
+  - `test_v045_true_positive_english_still_blocks` 改 parametrize 加 `expected_rule` (验 specific
+    rule name): Pay Now/Confirm Payment/Place Order/Checkout/Buy Now/Authorize Payment/Approve Transfer
+    → send-or-pay; Withdraw $500/Delete Account/Wire Transfer → destructive-action; Send $50/Send
+    100 USD → send-amount
+  - 中文同模式: 立即支付/下单/确认订单/立即购买/确认支付 → zh-send-or-pay; 转账/删除文件/提款 →
+    zh-destructive-action; 发送 ¥50 → zh-send-amount
+- `tests/test_safety_loop_integration.py`: `_SEND_BUTTON` text "Send" → "Pay Now" (V0.49.1 Send
+  standalone 释, 改 fixture 触发 send-or-pay rule)
+- `pyproject.toml` / `__init__.py` 0.49.0 → 0.49.1
+- `uv.lock` 同步
+- `CHANGELOG.md` V0.49.1 entry (本)
+
+### Decision 门槛 (V0.49.0 先写) 验证
+
+| 指标 | V0.49.0 target | V0.49.1 真测结果 |
+|------|----------------|----------------|
+| False-pos 释放 (Send Email / Send Message / Send Notification) | allow=True | ✅ Send / Send Email parametrize 全 allow=True |
+| True-pos 保留 (destructive: Delete/Wire Transfer/Withdraw) | allow=False + rule="destructive-action" | ✅ 3 fixture 全 destructive-action |
+| True-pos 保留 (send-amount: Send $50 / Send 100 USD) | allow=False + rule="send-amount" | ✅ 3 fixture 全 send-amount |
+| True-pos 保留 (send-or-pay: Pay Now/Checkout/Place Order/Buy Now/Authorize/Approve) | allow=False + rule="send-or-pay" | ✅ 7 fixture 全 send-or-pay |
+| V0.44 regression (8/8 Publish/Submit/Submit order) | allow=True | ✅ 0 破 |
+| pytest | ≥ 951 | **963** ✅ (+12 V0.49.1 new fixture) |
+
+### Verify
+
+- `uv run pytest tests/test_safety.py tests/test_safety_v044_regression.py tests/test_safety_loop_integration.py` → 107 passed
+- `uv run pytest` → **963 passed, 28 skipped** (951 + 12 V0.49.1)
+- `uv run ruff check` → clean
+- `uv run mypy` → 0 issues in 53 src files
+
 ## [0.49.0] - 2026-05-11
 
 ### Doc (V0.49 safety 双修系列开篇 1/3 — delete/remove 拆 + send amount co-signal plan)
