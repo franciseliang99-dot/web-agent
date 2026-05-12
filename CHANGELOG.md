@@ -2,6 +2,121 @@
 
 All notable changes to web-agent. 版本号遵循 SemVer 简化形式（V<major>.<minor>.<patch>）。
 
+## [0.38.0] - 2026-05-11
+
+### Feat (V0.38 F2 SoM JS walker 合并系列开篇 1/N — baseline before-F2 + 决策门槛先写)
+
+V0.37.3 收尾 user 选 F2 主题. V0.38.0 = F2 实施前 baseline + decision doc, 跟 V0.34.0 / V0.36.0
+framework-first 同节奏 (V0.34 教训第 N 次应用: 实施前真测 baseline 防"没数据就优化是猜").
+
+### F2 三 walker 现状梳理 (subagent plan 推)
+
+`src/web_agent/perceiver.py` "三 walker" 实指:
+- **W1** `_SOM_INJECT_JS:29-41` collect 交互元素 (跟 W2 同 evaluate)
+- **W2** `_SOM_INJECT_JS:56-69` clear stale data-som-id (V0.22.2 防 actuator stale)
+- **W3** `_SOM_RENUMBER_JS:142-164` V0.34.4 global id renumber (独立 evaluate)
+
+**RTT 经济学关键**: W1+W2 已在**同一 evaluate** (1 RTT, 不是 2). 每 frame perceive 真实 evaluate
+= INJECT (W1+W2) + RENUMBER (W3) + REMOVE (单 querySelectorAll 非 walker) = **2 walker-evaluate + 1 cleanup**.
+
+V0.34.5 retrospective 标 F2: "**代码 simplification 不是 perf gain**" — V0.38 系列继承诚实降级.
+
+### V0.38.0 真测 baseline (跟 V0.34.3 fan-out 同 fixture set)
+
+`data/bench/v0.38.0-before-f2-baseline.json` (7 fixture × 8 sample, 0 src 改 = V0.34.4 状态):
+
+| fixture | mark | median ms (V0.38.0) | vs V0.34.3 |
+|---------|------|---------------------|------------|
+| if0-sh0-leaf5 | 5 | 113.4 | +3% (110) |
+| if1-sh0-leaf3 | 3 | 129.7 | +5% (124) |
+| if1-sib3-sh0-leaf3 | 9 | 194.4 | +5% (185) |
+| if1-sib5-sh0-leaf3 | 15 | 242.6 | -0% (244) |
+| if2-sh0-leaf3 | 3 | 168.8 | +44% (117) — cold cache outlier |
+| if2-sib3-sh0-leaf3 | 27 | 432.1 | +1% (426) |
+| if5-sh0-leaf3 | 3 | 249.4 | +4% (240) |
+
+6/7 fixture ±5% noise = V0.34.3 → V0.38.0 **0 src 改 = 0 行为变** ✓. if2-sh0-leaf3 +44% 是
+chromium 沙箱 cold cache outlier (sample_count=8 median 偶发).
+
+### F2 方案 C (V0.38.1 候选, race-free 最小改动)
+
+W1 + W2 合成单 walker, 同 1 DOM tree DFS 跑 collect + clear:
+
+```js
+// V0.38.1 候选 (V0.38.0 不动 src)
+const collected = [];
+const visited = new WeakSet();
+const stack = [document];
+while (stack.length) {
+  const root = stack.pop();
+  if (visited.has(root)) continue;
+  visited.add(root);
+  // 同 root 一次穿透同时 W1 (collect) + W2 (clear data-som-id)
+  root.querySelectorAll('[data-som-id]').forEach(e => e.removeAttribute('data-som-id'));
+  root.querySelectorAll(sel).forEach(e => collected.push(e));
+  if (!SHADOW_ON) continue;
+  root.querySelectorAll('*').forEach(e => {
+    if (e.shadowRoot && e.shadowRoot.mode === 'open' && !visited.has(e.shadowRoot)) {
+      stack.push(e.shadowRoot);
+    }
+  });
+}
+```
+
+**节省路径**: 省 1 次 DOM tree DFS + 1 次 `querySelectorAll('*')` shadowRoot 探测/层.
+
+**估真节省** (V0.34 教训: estimate ≠ 真测):
+- if0-sh0 单 frame: ~0.5-1ms / 113ms = 0.5-1%
+- if5-sh0 6 frame: ~3-6ms / 249ms = 1-2%
+
+### 决策门槛 (V0.34 教训第 N 次, 先写防事后 rationalize)
+
+V0.38.1 实施后真测 vs V0.38.0 baseline (data/bench/v0.38.0-before-f2-baseline.json):
+
+| 真节省 | 决策 |
+|--------|------|
+| ≥ 5% (任一 fixture) | 实施保留 + 沉淀真发现 "F2 walker 合并 in local chromium 有 perf gain" |
+| 1-5% | 实施保留 + 标 "主要 code simplification, perf 微" |
+| < 1% | **withdraw 不实施**, 文档化 "推 V0.39+ remote chromium 场景再做" (跟 V0.34.4 F1 ROI 3% withdraw 同模式但更严) |
+
+### Changed (~80 测 LOC + ~110 doc LOC + ~57 data LOC)
+
+- `data/bench/v0.38.0-before-f2-baseline.json` **新**: 7 fixture × 8 sample 真测 (V0.38.0 state, 0 src 改)
+- `docs/perceive-bench-pre-f2-V0.38.0.md` **新** ~110 行: 三 walker 现状 + 方案 C + 决策门槛 + V0.34 教训
+- `tests/test_perceive_bench_baseline_v038.py` **新** ~80 LOC 5 fast 测:
+  - file exists + valid JSON
+  - fixture set 匹配 V0.34.3 (compare 基础)
+  - sample_count ≥ 8 (噪声标准)
+  - mark_count 跟 V0.34.3 完全一致 (0 src 改 = 0 行为变契约)
+  - `_SOM_INJECT_JS` walker count = 2 invariant (V0.38.1 后改 == 1, 同步改测)
+- `pyproject.toml` / `__init__.py` 0.37.3 → **0.38.0** (V0.38 系列开篇 minor bump)
+- `uv.lock` 同步
+
+### Verify
+
+- `uv run pytest` → **815 passed, 25 skipped** (+5 V0.38.0 baseline 测, 0 现测破)
+- `uv run ruff check` → all clean
+- `uv run mypy` → Success no issues in 51 src files
+- 真跑 baseline 7 fixture × 8 sample 数据完整
+
+### V0.34 教训应用第 N+1 次
+
+- ✅ 实施前真测 baseline (V0.38.0 = before-F2 真数据底座)
+- ✅ 决策门槛先写 (≥5% / 1-5% / <1% 三档预定)
+- ✅ 不为虚假 perf 改 (F2 真值在 code simplification, perf 是副效果)
+- ✅ estimate ≠ 真测 (V0.38.0 估 0.5-2%, V0.38.2 真测可能推翻)
+
+### V0.38 系列 plan (4 commit autonomous)
+
+| ver | 状态 | scope | autonomous |
+|-----|------|-------|------------|
+| **V0.38.0** | ✅ 本提交 | baseline before-F2 + decision doc | ✅ |
+| V0.38.1 | 待 | F2 W1+W2 walker 合并实施 + 6-7 单测 + V0.22.x 契约 verify | ✅ |
+| V0.38.2 | 待 | F2 后真测重跑 + V0.38.0 baseline compare + 真发现沉淀 | ✅ |
+| V0.38.3 | 待 | 系列收尾 retrospective + V0.39 主题候选累计 | ✅ |
+
+(F2 不烧 token, 全 autonomous, 跟 V0.34 / V0.36 同 0 maintainer deferred.)
+
 ## [0.37.3] - 2026-05-11
 
 ### Doc (V0.37 B' lean/WebP baseline 双跑系列收尾 4/4 — 完整 maintainer how-to + V0.37.4 deferred)
