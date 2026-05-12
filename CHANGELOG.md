@@ -2,6 +2,125 @@
 
 All notable changes to web-agent. 版本号遵循 SemVer 简化形式（V<major>.<minor>.<patch>）。
 
+## [0.41.2] - 2026-05-11
+
+### Doc (V0.41 C 长期记忆 cross-task 学习系列收尾 3/3 — C1+C3 双 inject 完成 + V0.42 inventory)
+
+V0.41.0 落 C1 domain success-rate + V0.41.1 落 C3 failure root-cause cache. 本提交收尾:
+系列总结 + V0.34 教训 11 系列累计 + 真发现 #21 沉淀 + V0.42 主题 inventory. 跟 V0.33.4
+/ V0.34.5 / V0.35.3 / V0.36.3 / V0.37.3 / V0.38.3 / V0.39.1 / V0.40.2 系列收尾同骨架.
+
+### V0.41 系列回顾 (3 commit autonomous + 1 deferred + 1 skip)
+
+| ver | scope | 状态 | autonomous |
+|-----|-------|------|------------|
+| V0.41.0 | C1 domain success-rate aggregator + 真发现 #21 | ✅ | ✅ |
+| V0.41.1 | C3 failure root-cause cache (reframe 用 memories.result 避 #21 dead path) | ✅ | ✅ |
+| **V0.41.2** | 系列收尾 retrospective + V0.42 inventory | ✅ 本提交 | ✅ |
+| ~~V0.41.x C5 housekeeping~~ | memory.db 测试污染 audit + clear-domain CLI | ⏭ **skip** (留 V0.42+ housekeeping 主题或 maintainer 真用时) | — |
+| V0.41.x.1 (skip) | maintainer 真测 V0.40 5 task corpus before/after pass rate | 🛑 红线 |
+
+**V0.41 C 长期记忆 cross-task 学习系列闭环** (3 commit autonomous, 1 housekeeping skip,
+1 maintainer 真测 deferred).
+
+### V0.41 inject 通道 layout (cross-task 学习层 4 维聚合)
+
+```
+build_inject_string(db, domain) 现 prepend 4 段 (cross-task 学习 → raw):
+
+1. V0.41.0 C1 domain success rate:
+   "本 domain 最近 30 天历史 6 task, 67% pass rate (last seen 2026-05-08)"
+
+2. V0.41.1 C3 failure root-cause cache:
+   "本 domain 最常 fail 因: SAFETY_BLOCK (3, 50%), LOOP_DETECTED (2, 33%)"
+
+3. V0.13.0 W5-D + V0.14.0 W5-D.2 memories raw (5 条):
+   "过去在该 domain 跑过 5 个任务 (newest first):
+    [2026-05-08T...] OK 搜量子纠缠 -> 量子纠缠是粒子之间的关联
+    [2026-05-07T...] FAIL 改签机票 -> SAFETY_BLOCK at step 4: ..."
+
+4. V0.28.3 W6-B reflections (3 条, 但生产 db reflections 表不存在 → 空):
+   "上次在该 domain 失败教训 (newest first, 共 N 条):
+    [2026-05-09T...] 页面加载慢 → 下次先 wait_for_selector('.results') 再 click"
+```
+
+**inject signal 维度演进** (V0.13 → V0.41):
+- V0.13.0: raw memories (5 条 task 结果)
+- V0.28.3: + reflections (失败教训)
+- **V0.41.0**: + domain success rate (cross-task 学习 1: 高 level pass rate signal)
+- **V0.41.1**: + failure root-cause cache (cross-task 学习 2: 最常 fail marker pattern)
+
+planner 现见**4 维聚合**: 数字 success rate / fail pattern / raw task 结果 / 经验教训 — V0.13
+仅 raw row 阶段进化到 V0.41 多维聚合 + raw 混合层.
+
+### 真发现 #21 沉淀 (V0.41.0 catch, V0.41.1 reframe avoid)
+
+V0.28 W6-A `reflections` 表在生产 memory.db 上**从未建过** (850 行 memory 里没人撞过
+`should_reflect`). 跟 #20 README 24-month-stale 同模式 — 实施层"以为有"实际"几乎不触发":
+
+- V0.28 设计时假设 reflect path 频繁触发, V0.41.0 真测 0 行 reflect 数据
+- V0.41.1 reframe 用 memories.result 抽 FAILURE_MARKERS 而非 V0.28 reflections 表, 才有真信号
+- V0.41.x 后续 audit V0.28 W6-A `_maybe_reflect_on_failure` 实际触发率
+
+**教训扩展**: V0.34 "stamp 数据版本号" 不止数值, **路径触发率**也要 stamp. V0.28 docstring 应
+注明 "should_reflect 触发率历史 0% / 5% / ..." 让后人 audit. V0.42+ 沉淀 "代码路径触发率 stamp"
+规则.
+
+(累计真发现至 V0.41: 21 个; V0.41 系列 +1: #21.)
+
+### V0.34 教训累计应用至 V0.41 (11 系列贯彻)
+
+| 系列 | commit 数 | 教训应用模式 |
+|------|----------|------------|
+| V0.34 F1 | 6 | 真测被动 catch |
+| V0.35 A | 4 | fixture 选型 micro experiment |
+| V0.36 I | 4 | 现状叙事推翻 |
+| V0.37 B' | 4 | infra 准备 (--dry-run) |
+| V0.38 F2 | 4 | retrospective 预测对, plan agent 重蹈 |
+| V0.39 G | 2 | baseline 真测即时 withdraw |
+| V0.40 A' | 3 | 每 fixture 单独 curl probe |
+| **V0.41 C** | **3** | **真测 db schema + 数据真发现 reframe plan** |
+
+**V0.34 教训进化新模式 (V0.41 沉淀)**: 真测 db schema 现状决定**实现路径 reframe**, 跟 V0.39
+真测 sannysoft 推翻 README "72%" 同模式. plan agent V0.41 推 C3 用 reflections 表是合理设计假设,
+真测推翻 → reframe 用 memories.result. 这是 V0.34 教训 "实施前真测验" 在 **plan 实现选型层** 的
+应用 (V0.39 在 baseline 数值层, V0.41 在 schema/path 层).
+
+### Changed (~0 src LOC, ~110 doc LOC)
+
+- `CHANGELOG.md` V0.41.2 retrospective entry (本)
+- `pyproject.toml` / `__init__.py` 0.41.1 → 0.41.2
+- `uv.lock` 同步
+
+### Verify
+
+- `uv run pytest` → **839 passed, 25 skipped** (V0.41.1 状态, 0 src 改 → 0 测变)
+- 0 src 改 → 0 ruff/mypy 重检需求
+
+### V0.42 主题路径 inventory (留 user 选)
+
+跟历次系列收尾同句式. autonomous 红线 = 项目方向决策需 user 输入.
+
+候选路径:
+- **D LLM cache / retry 优化** (V0.25.0 transient retry 已落, 加 token 级 cache 减重复 LLM 调用)
+- **新真发现 sub-route** (基于真站点 corpus 找新 bottleneck)
+- **A'' V0.40 corpus 再扩** (drag/dialog/upload 真站点轴未覆盖, anti-abuse fixture 难找)
+- **V0.28 W6-A reflect path audit** (#21 真发现催生: should_reflect 实际触发率 0% 调研 + fix)
+- **V0.42 housekeeping** (V0.36.2 / V0.41 C5 deferred housekeeping 合并 — memory.db 测试污染清 + data-clean CLI retention 决策)
+- 其他用户提的方向
+
+**已闭环主题** (V0.41 后):
+- F sub-route (F1+F2 全 ROI 推翻)
+- G stealth (96.8% 接近 ceil)
+- A/A' real-world corpus (13 task, 4 站家)
+- **C 长期记忆 cross-task 学习 (V0.41 完, 4 维聚合 inject)**
+
+**未推** (deferred):
+- V0.37.4 / V0.40.x.1 / V0.41.x.1: maintainer 真录 cassette (产 ANTHROPIC_API_KEY + ~$1-2 token)
+- V0.36.2 / V0.41 C5: data-clean / memory housekeeping (retention 决策红线)
+
+(不带 ROI 估算 — V0.34 教训第 N 次应用: 项目方向 ROI 假设需 user 输入而非 Claude 自决.)
+
 ## [0.41.1] - 2026-05-11
 
 ### Feat (V0.41 C 长期记忆 cross-task 学习 2/N — failure root-cause cache, reframe 避 #21 dead path)
