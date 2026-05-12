@@ -95,11 +95,22 @@ class AnthropicClient:
             }
         ]
         tool_choice: ToolChoiceAnyParam = {"type": "any"}
+        # V0.42.1 D: tools 末位加 cache_control: ephemeral, 让 tools schema (~1-2K tok 跨 step 不变)
+        # 进入 cache 范围 (Anthropic 设 cache breakpoint, breakpoint 前所有内容 cache).
+        # 顺序: system (V0.15 已 cache) → tools (本 commit 加 breakpoint) → user_content (每 step 变,
+        # 不 cache, 含 image base64 + marks + trace).
+        # image / user_text 每 step 变 cache miss 概率高, 不加 breakpoint 防 cache_creation cost 1.25×.
+        tools_with_cache = list(self._tools)
+        if tools_with_cache:
+            # mutable copy 防共享 dict mutate
+            last_tool = dict(tools_with_cache[-1])
+            last_tool["cache_control"] = {"type": "ephemeral"}
+            tools_with_cache[-1] = last_tool
         resp = await self._client.messages.create(
             model=self.model,
             max_tokens=2048,
             system=system,
-            tools=cast(list[ToolParam], self._tools),
+            tools=cast(list[ToolParam], tools_with_cache),
             tool_choice=tool_choice,
             messages=cast(list[MessageParam], [{"role": "user", "content": user_content}]),
         )

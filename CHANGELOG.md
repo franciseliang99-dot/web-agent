@@ -2,6 +2,77 @@
 
 All notable changes to web-agent. 版本号遵循 SemVer 简化形式（V<major>.<minor>.<patch>）。
 
+## [0.42.1] - 2026-05-11
+
+### Feat (V0.42 D LLM cache 2/N — tools schema cache_control extension)
+
+V0.42.0 落 cache hit/miss telemetry. V0.42.1 真实施 — 给 anthropic.py tools 末位加
+`cache_control: ephemeral`, 让 tools schema (~1-2K tok 跨 step 不变) 进入 cache 范围.
+跟 V0.42.0 telemetry 配合, V0.42.x.1 maintainer 真测可验真节省.
+
+### V0.42.1 reframe (plan agent V0.42.1 原推 image + text 也加 cache_control 推翻)
+
+Plan agent V0.42.1 原推: image + text block 都加 cache_control.
+
+**真分析推翻** (V0.34 教训第 N 次):
+- **image base64** 每 step 不同 (新截图) → cache 必 miss + cache_creation 1.25× cost (反成本)
+- **text block** (含 marks 列表 + trace 历史) 每 step 变 → cache 必 miss
+- **tools schema** 跨 step **不变** (V0.17.0 落 11 dataclass discriminated union, 启动后固定)
+  → 加 cache_control 让 system + tools 都进 cache 范围, breakpoint 前内容稳定 cache
+
+V0.42.1 reframe 仅 tools 末位加 cache_control (~10 src LOC vs plan agent 推 ~50 LOC),
+**低 risk + 真省 token** (system + tools ~3-4K tok cache hit 在第 2+ step).
+
+### Anthropic prompt cache 工作机制 (V0.42.1 sink)
+
+Anthropic API cache breakpoint **是 per-block 标 cache_control 触发**, breakpoint 前的所有
+内容 (system + tools 排在 user_content 前) 都被 cache. 顺序:
+
+```
+1. system prompt (V0.15.x 已 cache_control: ephemeral) ←  cache 1
+2. tools schema (V0.42.1 末位加 cache_control) ←  cache 2 (本 commit 实施)
+3. user_content (image + text, 每 step 变, 不加 breakpoint) — cache miss
+```
+
+V0.42.1 后 cache hit 范围 = system + tools ≈ 3-4K tokens (跨 step 不变).
+原 V0.15.x 仅 system ~2K tokens.
+
+### Changed (~15 src LOC + ~95 测 LOC)
+
+- `src/web_agent/llm/anthropic.py:97-110`: tools 末位加 cache_control (mutable copy 防 mutate
+  `self._tools` 跨 plan() 累积)
+- `tests/test_llm_anthropic.py` +2 fast 测:
+  - `test_v042_1_plan_adds_cache_control_to_last_tool`: 验 messages.create call_kwargs tools[-1]
+    含 cache_control: ephemeral; 其他 tool 不应有 (single breakpoint)
+  - `test_v042_1_plan_tools_not_mutated_across_calls`: 跑 3 次 plan() 后 client._tools 原 list
+    末位**不被 mutate** (防 cross-call 累积 cache_control 字段, Anthropic API 拒重复)
+- `pyproject.toml` / `__init__.py` 0.42.0 → 0.42.1
+- `uv.lock` 同步
+
+### 解耦审查
+
+- `client._tools` 原 list 不被 mutate, 走 `list(self._tools) + dict(tools_with_cache[-1])`
+  shallow copy (V0.42.1 测验)
+- 0 改 V0.42.0 telemetry 路径; cache_control 后 cache_read_input_tokens 会被 SDK 真填, V0.42.0
+  telemetry 自动 capture
+- system + user_content 不动 (system V0.15.x 已 cache; user_content image 每 step 变不该 cache)
+
+### Verify
+
+- `uv run pytest` → **845 passed, 25 skipped** (+2 V0.42.1 fast 测, 0 现测破)
+- `uv run ruff check` → all clean
+- `uv run mypy` → Success no issues in 52 src files
+
+### V0.42 系列进度
+
+| ver | 状态 | scope |
+|-----|------|-------|
+| V0.42.0 | ✅ | cache hit-rate audit telemetry |
+| **V0.42.1** | ✅ 本提交 | tools schema cache_control extension (reframe 仅 tools, image/text 推翻) |
+| V0.42.2 | 待 | token budget guard (`WEB_AGENT_TOKEN_BUDGET_USD` env, runaway loop 守护) |
+| V0.42.3 | 待 | 系列收尾 retrospective + V0.43 inventory |
+| V0.42.x.1 (skip) | maintainer 真测 V0.40 5 task corpus, 看 V0.42.1 cache_read_input_tokens 占比 + 真省 token % | 🛑 红线 |
+
 ## [0.42.0] - 2026-05-11
 
 ### Feat (V0.42 D LLM cache / retry 优化系列开篇 1/N — cache hit-rate audit telemetry, 观测先于优化)
