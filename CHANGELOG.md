@@ -2,6 +2,91 @@
 
 All notable changes to web-agent. 版本号遵循 SemVer 简化形式（V<major>.<minor>.<patch>）。
 
+## [0.48.0] - 2026-05-11
+
+### Doc (V0.48 动态 fingerprint pool 系列开篇 1/N — cassette 真测先于 pool 实施 + plan + decision 门槛)
+
+V0.47.4 推荐 "V0.48 先做 cassette 真测证 reuse 检测在 V0.30 之上仍真问题, 再 V0.48.x 实施 pool".
+用户授权 "按推荐做" = 走 conservative 顺序 (跟 V0.43-V0.47 6 次 reframe 同模式).
+
+### Audit (现有 V0.39 真测 pattern)
+
+| 文件 | pattern |
+|------|---------|
+| `tests/test_stealth_probe_sannysoft.py` (V0.39.0) | `WEB_AGENT_RUN_SLOW=1` gate + 额外 PROBE env + `chromium.launch(headless=True, args=["--no-sandbox"])` + `data/stealth_probes/<json>` dump |
+| `tests/test_perceive_bench_real.py` (V0.34.1) | module-level `pytestmark = [slow, skipif(RUN_SLOW)]` + async chromium real |
+| `data/stealth_probes/` | V0.39 sannysoft baseline JSON 4 个已在 |
+
+V0.48 cassette test 复用 V0.39 范式 + V0.47.1 `ProtectionSignal` + `classify`.
+
+### V0.48 cassette 真测设计 (3 真站 × 10 visit)
+
+| 站 | 检测目标 | 期望 baseline | level |
+|----|---------|--------------|-------|
+| `https://www.cloudflare.com/` | cf-ray 变化 + `cf_clearance` cookie 是否 N 次复访后 absent → present | medium → high? | medium |
+| `https://bot.sannysoft.com/` | 同 fingerprint 复访 detection 是否 escalate (V0.39 已知 96.8% 单次) | low (无 WAF) | low |
+| `https://www.akamai.com/` | `server: AkamaiGHost` + `ak_bmsc`/`akamai_bot` cookie 是否 N 次后注入 | medium → high? | medium |
+
+**测法**: 单 chromium browser + 单 context (固定 fingerprint), `for i in range(10)` `await page.goto(url, wait_until="domcontentloaded")` → 抓 `ctx._web_agent_protection_signals[-1]` (V0.47.1 listener) → record `(visit_idx, status, level, cookies, cf_ray)` → dump `data/stealth_probes/v0.48-reuse-cassette-{domain}_{date}.json`.
+
+**关键**: 复用 single context = 同 fingerprint 反复打 (不是每次新 context). visit 间 2s `wait_for_timeout` 模拟真人节奏 (避免 burst 触发 rate-limit 干扰 reuse 信号, 跟 V0.16.21 `scripts/run_w5c2_spike.py` `_kill_chrome_and_respawn` 15s sleep 同思路).
+
+### Decision 门槛 (V0.48.0 先写, 防 rationalize)
+
+| 真测结果 | 决策 | 沉淀 |
+|---------|------|------|
+| **≥ 1 站 10 次复访内 escalate** (level 升级 / status 200→403/503 / captcha vendor 从空→命中 / cookies 集合扩) | **retain pool** + V0.48.x 实施 preset + seed-by-domain | 真发现 #N: reuse 检测真存在 |
+| **3 站 × 10 次全 stable** (level/status/cookies 全 invariant) | **sink pool** + V0.48 doc 收尾 + 转 V0.49 别主题 | 真发现 #N: V0.30 之上 fingerprint pool ROI 边际 |
+
+`escalated(visits: list[dict]) -> bool` 纯函数自动判, 不靠人眼看 JSON.
+
+### V0.48 plan (autonomous + maintainer 分层)
+
+| commit | scope | autonomous? |
+|--------|-------|-------------|
+| V0.48.0 (本) | doc audit + plan + decision 门槛 | ✅ |
+| V0.48.1 | cassette test infra (test file + escalated 决策函数 + 3 fast unit, 不真跑 chromium) | ✅ |
+| **V0.48.2** | **真跑 cassette 10 visits × 3 站 + 数据 commit** | ❌ **maintainer 红线** (真站 IP-level footprint 应人审) |
+| V0.48.3 | (retain 路径) preset JSON 5-10 个自洽 fingerprint + seed-by-domain 跟 V0.47 protection record 联动 | ✅ |
+| V0.48.4 | 系列收尾 retrospective + V0.49 inventory | ✅ |
+
+V0.48.0-1 autonomous 落完后 **停下等 maintainer 跑 V0.48.2**, 真测结果后再 V0.48.3+ TBD.
+
+### autonomous vs maintainer 红线 (跟 V0.47 同模式)
+
+- **autonomous (V0.48.0-1, V0.48.3-4)**: 写 test 文件 + 决策函数 + fast unit + preset JSON + 代码层 seed-by-domain. **不真访外网**.
+- **maintainer 红线 (V0.48.2)**: 真跑 chromium 访 cloudflare/akamai/sannysoft × 10 次. 跟 V0.47.x.1 / V0.44.x.1 / V0.46.x.1 真录 cassette 同模式 (autonomous 不真访外网, maintainer 决定红线).
+
+### V0.34 教训累计应用至 V0.48 (18 系列预期)
+
+| 系列 | commit | 教训应用 |
+|------|--------|---------|
+| V0.43-V0.47 | 3-5 各 | 累计 6 次 conservative reframe (subagent 推全, 数据 sieve 收窄) |
+| **V0.48** | **TBD (sink 3 / retain 4-5)** | **conservative 顺序: 先 cassette 真测证 ROI, 再 pool 实施** (拒 V0.47.4 "直接 pool" 隐式假设, 跟 V0.45 拒 send amount / V0.46 拒 type-only 同) |
+
+V0.48 教训应用新维度: **plan agent 推 implementation, 真测先于 implementation 验证 ROI** —
+跟 V0.34 F1 plan 估 67-74% 真测 ~3% 同模式, 防 implementation 烧 LOC + 测时间 in hypothetical ROI.
+
+(累计真发现至 V0.48: 25 个; V0.48.0 +0 暂时, V0.48.2 真跑后 catch.)
+
+### Changed (~0 src LOC, ~180 doc LOC)
+
+- `CHANGELOG.md` V0.48.0 entry (本)
+- `pyproject.toml` / `__init__.py` 0.47.4 → 0.48.0
+- `uv.lock` 同步
+
+### Verify
+
+- `uv run pytest` → **939 passed, 25 skipped** (V0.47.4 状态 0 src 改 → 0 测变)
+- 0 src 改 → 0 ruff/mypy 重检需求
+
+### V0.48 commit 节奏 (预计)
+
+- V0.48.0 ✅ 本: doc audit + plan + decision 门槛
+- V0.48.1 (next): cassette test infra + escalated() decision 纯函数 + 3 fast unit
+- V0.48.2 maintainer 红线占位 (autonomous 停下等真跑)
+- V0.48.3+ TBD (真测结果决定 retain pool 实施 or sink 收尾)
+
 ## [0.47.4] - 2026-05-11
 
 ### Doc (V0.47 防护识别 + 学习记忆系列收尾 5/5 — V0.34 教训 17 系列累计 + V0.48 maintainer inventory)
