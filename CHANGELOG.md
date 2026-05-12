@@ -2,6 +2,87 @@
 
 All notable changes to web-agent. 版本号遵循 SemVer 简化形式（V<major>.<minor>.<patch>）。
 
+## [0.49.0] - 2026-05-11
+
+### Doc (V0.49 safety 双修系列开篇 1/3 — delete/remove 拆 + send amount co-signal plan)
+
+V0.46.2 inventory 用户授权 "按顺序全做", 起 V0.49 = safety 双修合并 (V0.45 catch + V0.45 plan
+保守留). 跟 V0.45 单修 #24 同 layer (safety.py regex), 合 1 系列 2 改防 list conflict.
+
+### Audit (V0.45 留 V0.46+ 两 deferred)
+
+**delete/remove rule name 错位** (V0.45.0 doc):
+```
+safety.py:41-46 _DANGER_BUTTON_PATTERNS[0]:
+\b(send|pay|paypal|checkout|delete|remove|withdraw|transfer|wire|...)\b → rule="send-or-pay"
+```
+`delete|remove|withdraw|transfer|wire` 是 **destructive 动词** (删除 / 转账 / 提款 / 电汇), rule
+"send-or-pay" 名 vs 内涵错位. 用户看 `safety:send-or-pay` log 误以为是支付拦, 实是 destructive
+动作拦.
+
+**send 加 amount co-signal 缺失** (V0.45.0 plan 保守留):
+- V0.45 仅删 `submit|publish|post|order` standalone (修 #24 真发现 8/8 假阳性)
+- 没动 `send` — V0.45.0 cite "V0.44 audit 无 Send false-pos evidence, 留 V0.46+ scope"
+- 但 V0.45 没动 = `Send Email` / `Send Message` 仍拦 (test_safety.py:125 期望 True)
+- 业界做法: `send` 仅在 amount 词 nearby (`$`/`¥`/`\d+ ?(USD|CNY|元)`) 时拦 ("Send $50" 拦, "Send Email" 释)
+
+### V0.49 fix plan (合并双修, 跟 V0.45 节奏一致 3 commit)
+
+| commit | scope |
+|--------|-------|
+| V0.49.0 (本) | doc audit + 双修 plan + decision 门槛 |
+| V0.49.1 | safety.py 双修 (拆 destructive + send amount) + test_safety.py update + 新 regression tests |
+| V0.49.2 | 系列收尾 retrospective + V0.50 A'' corpus inventory |
+
+### 双修 scope
+
+**修 1: 拆 destructive-action rule**:
+- `_DANGER_BUTTON_PATTERNS[0]` (英): 删 `delete|remove|withdraw|transfer|wire` from "send-or-pay" → 加 新 entry `(re.compile(r"\b(delete|remove|withdraw|transfer|wire)\b", IGNORECASE), "destructive-action")`
+- 中文 [1]: `删除|提款|转账` 移出 "zh-send-or-pay" → 新 "zh-destructive-action"
+- 保留: `place[ -]order|confirm[ -]?order|...` 在 send-or-pay (specific 支付动作)
+- test_safety.py: `Delete/Remove/Withdraw $500/Transfer` 期望 rule=`destructive-action` 不 `send-or-pay`
+
+**修 2: send 加 amount co-signal**:
+- 英: 删 `send` from `_DANGER_BUTTON_PATTERNS[0]` (因 Send Email/Send Message 等 generic 释)
+- 加新 entry: `(re.compile(r"\bsend\b.*[\$¥€£]|\bsend\b.*\d+\s*(USD|CNY|EUR|GBP|元)", IGNORECASE), "send-amount")`
+- 中文: 同模式 `发送.{0,3}[¥$]|发送.{0,3}\d+\s*(元|USD)`
+- 释: Send Email / Send Message / Sender Name (V0.45 已 OK)
+- 拦: Send $50 / Send 100 USD / 发送 ¥50 / Send Money $99
+
+### Decision 门槛 (V0.49.0 先写, 跟 V0.34 教训 18 次"先写防 rationalize" 同模式)
+
+| 指标 | target |
+|------|--------|
+| **False-pos 释放** (V0.49.1 验) | Send Email / Send Message / Send Notification 等 generic send → allow=True |
+| **True-pos 保留 (destructive)** | Delete / Remove / Withdraw $500 / Transfer / Wire → allow=False, rule="destructive-action" |
+| **True-pos 保留 (send amount)** | Send $50 / Send 100 USD / Send Money → allow=False, rule="send-amount" |
+| **True-pos 保留 (pay/checkout/place-order)** | Pay Now / Checkout / Place Order / Confirm Payment → allow=False, rule="send-or-pay" |
+| **V0.44 regression** | V0.44 audit 8/8 case (Publish/Submit/Submit order) 仍 allow=True (V0.45.1 fix 不破) |
+| **pytest** | ≥ 951 (V0.48.2 baseline) + V0.49.1 新 tests |
+
+### V0.34 教训累计应用至 V0.49 (19 系列贯彻)
+
+| 系列 | commit | 教训应用 |
+|------|--------|---------|
+| V0.45 | 3 | 数据驱动 conservative — 仅修真发现 evidence (留 V0.46+ 其他 cleanup) |
+| **V0.49** | **3** | **V0.45 留的 cleanup 集中清理** — 按 V0.46.2 inventory 顺序 + 同 layer 合并防 list conflict |
+
+V0.49 教训应用模式: **conservative reframe sink 后, deferred items 集中收割**. V0.45 保守仅删
+generic, 留 destructive + amount co-signal 给 V0.46+ — V0.49 把这两项合 1 系列做完 (避免 V0.49 +
+V0.50 分 2 系列冗余 retro).
+
+(累计真发现至 V0.49: 26 个; V0.49 系列预计 +0 新 — 是 V0.45 deferred cleanup, 不催新 catch.)
+
+### Changed (~0 src LOC, ~150 doc LOC)
+
+- `CHANGELOG.md` V0.49.0 entry (本)
+- `pyproject.toml` / `__init__.py` 0.48.2 → 0.49.0
+- `uv.lock` 同步
+
+### Verify
+
+- `uv run pytest` → **951 passed, 28 skipped** (V0.48.2 状态 0 src 改 → 0 测变)
+
 ## [0.48.2] - 2026-05-11
 
 ### Feat (V0.48 动态 fingerprint pool 系列收尾 3/3 — cassette 真测 sink + 真发现 #26 + V0.49 inventory)
