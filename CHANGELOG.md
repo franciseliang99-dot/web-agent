@@ -2,6 +2,73 @@
 
 All notable changes to web-agent. 版本号遵循 SemVer 简化形式（V<major>.<minor>.<patch>）。
 
+## [0.47.2] - 2026-05-11
+
+### Feat (V0.47 防护识别 + 学习记忆 3/5 — memory.py `protection_observations` 表 + record/recall + cli startup init)
+
+V0.47.1 protection.py 模块 + listener 已落 (signal 收集但未持久化). 本提交加 memory.py schema:
+`protection_observations` 表 + `record_protection` + `recall_protection_by_domain` (跟 V0.28.1
+reflections / V0.41.0 stats / V0.41.1 failures 同 sqlite 演进模式) + cli startup invariant init.
+
+### Changed (~70 src LOC + ~110 test LOC)
+
+- `src/web_agent/memory.py` (+~70 LOC, 在 reflections 块后并列):
+  - `ProtectionObservation` dataclass: `ts / domain / level / signals_json`
+  - `init_protections_db(db_path)`: `CREATE TABLE IF NOT EXISTS protection_observations` +
+    `idx_protections_domain_ts` 索引. 跟 `init_reflections_db` 同模式
+  - `record_protection(db_path, domain, level, signals_json)`: try/finally close (跟 record_reflection 同)
+  - `recall_protection_by_domain(db_path, domain) -> ProtectionObservation | None`: latest-snapshot
+    (比 reflections 3 条更紧, 因 protection level 是 latest 性质不需 trend; domain trend 走 V0.41 stats 表)
+  - 表/db 不存在 silent → None (跟 recall_reflections_by_domain 同模式)
+- `src/web_agent/cli.py`:
+  - import `init_protections_db`
+  - `run_task` mem_db 后调 `init_protections_db(mem_db).close()` (跟 V0.44.1 init_reflections_db
+    同 startup invariant fix — schema 总在, 防未来 audit 误判 dead path)
+- `tests/test_memory.py` +7 fast tests:
+  - `test_init_protections_db_creates_table_and_index_when_missing`
+  - `test_record_protection_round_trip`
+  - `test_recall_protection_returns_latest_only` (3 record → 拉最新 high)
+  - `test_recall_protection_db_missing_returns_none`
+  - `test_recall_protection_table_missing_returns_none` (V0.47.2 前老 db 兼容)
+  - `test_record_protection_truncates_long_signals_json` (RESULT_TRUNC=200)
+  - `test_recall_protection_different_domains_isolated`
+- `pyproject.toml` / `__init__.py` 0.47.1 → 0.47.2
+- `uv.lock` 同步
+- `CHANGELOG.md` V0.47.2 entry (本)
+
+### Latest-snapshot vs Trend 设计决策
+
+| 维度 | 表 | Why |
+|------|-----|-----|
+| Latest snapshot (上次见 domain 啥等级) | `protection_observations` (V0.47.2) | LLM planner 需的是 "now-state", 不需历史 |
+| Domain trend (success rate / fail markers) | `memories` (V0.13.0 W5-D) + V0.41 `aggregate_domain_stats` / `summarize_domain_failures` | 跨任务 stats 已 cover, 不重复 |
+
+→ V0.47.2 仅记最新一条 + recall=1 默, 不存 trend (避 V0.41 与本表 schema 冗余).
+
+### Decision 门槛验证 (V0.47.0 先写)
+
+| 指标 | V0.47.0 target | V0.47.2 真测结果 |
+|------|----------------|----------------|
+| memory.db schema migration 0 breakage | 0 breakage on existing 898 rows | ✅ (CREATE IF NOT EXISTS 幂等, 既有 V0.13.0 memories + V0.28.1 reflections + V0.47.2 protection 三表并列) |
+| pytest | ≥ 898 | **932** ✅ (898 + 27 V0.47.1 + 7 V0.47.2) |
+| mypy / ruff | clean | clean |
+| LOC | < 200 src + < 300 test | 累计 ~180 src + ~260 test ✅ |
+
+### V0.47 commit 节奏
+
+- V0.47.0 ✅ audit doc + plan + decision 门槛
+- V0.47.1 ✅ protection.py + listener + 27 fast tests
+- **V0.47.2** ✅ 本: memory.py schema + record/recall + cli startup init
+- V0.47.3 (next) build_inject_string prepend protection level (跟 V0.41 C1 pass_rate 同 chain)
+- V0.47.4 系列收尾 + V0.48 maintainer inventory
+
+### Verify
+
+- `uv run pytest tests/test_memory.py -v -k protection` → 7 passed
+- `uv run pytest` → **932 passed, 25 skipped** (925 + 7 V0.47.2)
+- `uv run ruff check` → clean
+- `uv run mypy` → 0 issues in 53 src files
+
 ## [0.47.1] - 2026-05-11
 
 ### Feat (V0.47 防护识别 + 学习记忆 2/5 — protection.py 新模块 + ctx.on("response") listener + classify 纯函数)

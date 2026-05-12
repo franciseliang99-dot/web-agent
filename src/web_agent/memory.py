@@ -185,6 +185,90 @@ def record_reflection(
         conn.close()
 
 
+# V0.47.2: protection_observations 表 — 跟 reflections 表分开 (schema 演进独立, 同模式).
+# 同 db 文件 (data/memory.db). V0.47.3 cli inject 时 recall_protection_by_domain 拉最近 1 条
+# inject 给 planner ("本 domain 上次保护等级: high").
+
+
+@dataclass
+class ProtectionObservation:
+    """V0.47.2: 单次防护识别记录, V0.47.3 cli inject 时 recall 最近一条注入 planner."""
+
+    ts: float
+    domain: str
+    level: str  # protection.ProtectionLevel literal value (low/medium/high/unknown)
+    signals_json: str  # JSON of ProtectionSignal (server/status/cookies/cf_ray/captcha_vendor)
+
+
+def init_protections_db(db_path: Path) -> sqlite3.Connection:
+    """V0.47.2: 建 protection_observations 表 + index. 跟 init_reflections_db 同模式."""
+    db_path.parent.mkdir(parents=True, exist_ok=True)
+    conn = sqlite3.connect(db_path)
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS protection_observations (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            ts REAL NOT NULL,
+            domain TEXT NOT NULL,
+            level TEXT NOT NULL,
+            signals_json TEXT NOT NULL
+        )
+        """
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_protections_domain_ts "
+        "ON protection_observations(domain, ts DESC)"
+    )
+    conn.commit()
+    return conn
+
+
+def record_protection(
+    db_path: Path,
+    domain: str,
+    level: str,
+    signals_json: str,
+) -> None:
+    """V0.47.2: 写一条 protection observation. 跟 record_reflection 同 try/finally 模式."""
+    conn = init_protections_db(db_path)
+    try:
+        conn.execute(
+            "INSERT INTO protection_observations (ts, domain, level, signals_json) VALUES (?,?,?,?)",
+            (time.time(), domain, level, signals_json[:RESULT_TRUNC]),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def recall_protection_by_domain(
+    db_path: Path,
+    domain: str,
+) -> ProtectionObservation | None:
+    """V0.47.2: 查 domain 最近 1 条 protection 记录. db / 表不存在返 None.
+
+    比 reflections (3 条) 更紧 — protection level 是 latest-snapshot 性质 (上次见此 domain 啥等级),
+    不需历史 trend (那是 stats 表的事, V0.41 C1 已 cover domain_stats).
+    """
+    if not db_path.exists():
+        return None
+    conn = sqlite3.connect(db_path)
+    try:
+        try:
+            row = conn.execute(
+                "SELECT ts, domain, level, signals_json FROM protection_observations "
+                "WHERE domain = ? ORDER BY ts DESC LIMIT 1",
+                (domain,),
+            ).fetchone()
+        except sqlite3.OperationalError:
+            return None  # 表不存在 (V0.47.2 部署前 db) — silent (跟 recall_reflections 同模式)
+    finally:
+        conn.close()
+    if not row:
+        return None
+    return ProtectionObservation(ts=row[0], domain=row[1], level=row[2], signals_json=row[3])
+
+
 def recall_reflections_by_domain(
     db_path: Path,
     domain: str,

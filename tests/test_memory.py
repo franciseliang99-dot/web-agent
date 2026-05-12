@@ -296,6 +296,112 @@ def test_record_reflection_truncates_long_fields(tmp_path):
     assert len(r.hint) == 200
 
 
+# ---------- V0.47.2: protection_observations 表 (跟 reflections 同模式) ----------
+
+
+def test_init_protections_db_creates_table_and_index_when_missing(tmp_path):
+    """V0.47.2: db 不存在时 init_protections_db 自动建表 + idx_protections_domain_ts."""
+    from web_agent.memory import init_protections_db
+
+    db = tmp_path / "fresh.db"
+    assert not db.exists()
+    conn = init_protections_db(db)
+    try:
+        rows = conn.execute(
+            "SELECT name FROM sqlite_master WHERE type='table' AND name='protection_observations'"
+        ).fetchall()
+        assert len(rows) == 1
+        rows = conn.execute(
+            "SELECT name FROM sqlite_master WHERE type='index' AND name='idx_protections_domain_ts'"
+        ).fetchall()
+        assert len(rows) == 1
+    finally:
+        conn.close()
+
+
+def test_record_protection_round_trip(tmp_path):
+    """V0.47.2: record_protection 写 → recall_protection_by_domain 读对称."""
+    from web_agent.memory import record_protection, recall_protection_by_domain
+
+    db = tmp_path / "memory.db"
+    record_protection(
+        db_path=db, domain="cloudflare.com", level="high",
+        signals_json='{"server":"cloudflare","status":403,"cookies":["cf_clearance"]}',
+    )
+    obs = recall_protection_by_domain(db, "cloudflare.com")
+    assert obs is not None
+    assert obs.domain == "cloudflare.com"
+    assert obs.level == "high"
+    assert "cf_clearance" in obs.signals_json
+
+
+def test_recall_protection_returns_latest_only(tmp_path):
+    """V0.47.2: 同 domain 多次 record_protection, recall 拉最近 1 条 (DESC by ts)."""
+    from web_agent.memory import record_protection, recall_protection_by_domain
+
+    db = tmp_path / "memory.db"
+    for i, level in enumerate(["low", "medium", "high"]):
+        record_protection(
+            db_path=db, domain="x.test", level=level,
+            signals_json=f'{{"observation":{i}}}',
+        )
+        time.sleep(0.001)  # ts 递增防 tie
+    obs = recall_protection_by_domain(db, "x.test")
+    assert obs is not None
+    assert obs.level == "high"  # 最新一条 (high), 不是 low/medium
+    assert '"observation":2' in obs.signals_json
+
+
+def test_recall_protection_db_missing_returns_none(tmp_path):
+    """V0.47.2: db 不存在 → 返 None (跟 recall_reflections_by_domain db 不存在返 [] 同模式)."""
+    from web_agent.memory import recall_protection_by_domain
+
+    db = tmp_path / "nonexistent.db"
+    assert not db.exists()
+    assert recall_protection_by_domain(db, "any.test") is None
+
+
+def test_recall_protection_table_missing_returns_none(tmp_path):
+    """V0.47.2: db 存在但表不存在 (V0.47.2 前老 db) → silent None 不抛 OperationalError."""
+    import sqlite3
+    from web_agent.memory import recall_protection_by_domain
+
+    db = tmp_path / "memory.db"
+    # 建一个只有 memories 表的 db (无 protection_observations)
+    conn = sqlite3.connect(db)
+    conn.execute("CREATE TABLE memories (id INTEGER)")
+    conn.commit()
+    conn.close()
+
+    assert recall_protection_by_domain(db, "any.test") is None
+
+
+def test_record_protection_truncates_long_signals_json(tmp_path):
+    """V0.47.2: RESULT_TRUNC=200 字段防 signals_json 撑爆 db (cookies 多时可能很长)."""
+    from web_agent.memory import record_protection, recall_protection_by_domain
+
+    db = tmp_path / "memory.db"
+    long_json = "x" * 500
+    record_protection(
+        db_path=db, domain="x.test", level="unknown", signals_json=long_json,
+    )
+    obs = recall_protection_by_domain(db, "x.test")
+    assert obs is not None
+    assert len(obs.signals_json) == 200
+
+
+def test_recall_protection_different_domains_isolated(tmp_path):
+    """V0.47.2: 不同 domain 各自 recall 不串域 (跟 recall_by_domain 同模式)."""
+    from web_agent.memory import record_protection, recall_protection_by_domain
+
+    db = tmp_path / "memory.db"
+    record_protection(db_path=db, domain="a.test", level="low", signals_json='{"a":1}')
+    record_protection(db_path=db, domain="b.test", level="high", signals_json='{"b":1}')
+    assert recall_protection_by_domain(db, "a.test").level == "low"  # type: ignore[union-attr]
+    assert recall_protection_by_domain(db, "b.test").level == "high"  # type: ignore[union-attr]
+    assert recall_protection_by_domain(db, "c.test") is None
+
+
 # ---------- V0.28.2 W6-B: format_reflections_for_trace (W5-D.2 平行) ----------
 
 
