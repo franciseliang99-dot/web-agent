@@ -1,3 +1,3 @@
 """web-agent: MultiOn-style 高度拟人 AI web agent."""
 
-__version__ = "0.42.3"
+__version__ = "0.43.0"

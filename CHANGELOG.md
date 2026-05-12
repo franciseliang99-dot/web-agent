@@ -2,6 +2,121 @@
 
 All notable changes to web-agent. 版本号遵循 SemVer 简化形式（V<major>.<minor>.<patch>）。
 
+## [0.43.0] - 2026-05-11
+
+### Doc (V0.43 真发现 sub-route 系列开篇 1/N — chromium --site-per-process #17 re-investigation plan + 真发现 #22 meta)
+
+V0.43 主题选定: **chromium `--site-per-process` flag 对 V0.34 F1 iframe DFS 并发真测**, 真发现
+#17 (V0.34.4 catch chromium same-origin shared renderer serialize) re-investigation. 真发现
+sub-route 选题过程沉淀 **真发现 #22 meta-lesson** (subagent + 自己误判 dead-flag without
+ARCHITECTURE read).
+
+### V0.43 选题 sieve 过程 (透明)
+
+| 候选 | 来源 | 处理 |
+|------|------|------|
+| R1 #21 reflect path | subagent | 与 V0.43 inventory line "V0.28 reflect path audit" 重叠, 排除 |
+| R3 W5-C.2 dead-flag cleanup | subagent | **真发现 #22 推翻** — by design + publishing asset (见下) |
+| **R2 #17 chromium --site-per-process** | **subagent** | **保留** — V0.34.4 catch 后未尝试, 50% 真发现率, 不烧 token 不踩 autonomous 红线 |
+
+### 真发现 #22 meta-lesson — subagent + 自己误判 dead-flag without reading ARCHITECTURE
+
+**Pattern**: V0.43 选题 sieve, subagent (R3 候选) + 自己都在 `WEB_AGENT_SPIKE_W5C2` env grep 0
+命中信号下倾向直接判 dead-flag, **未读 ARCHITECTURE §1.5** 看 by-design intent 就要下 cleanup
+verdict.
+
+**Audit 后真实状态 catch**:
+- W5-C.2 = 永久 DEFER + 触发条件 ③ (V0.16.16 落档, ARCHITECTURE.md §1.5 L115-218)
+- `WEB_AGENT_SPIKE_W5C2=1` instrumentation = 触发条件 ③ 的 reproducible 数据采集 mechanism (V0.16.20)
+- 7-version 闭环 (V0.16.20→V0.16.22) + 3 篇博客 publish (V0.16.24-V0.16.33) + `~/.cache/web-agent/spike-w5c2/` 真存 10+ jsonl V0.16.20-22 跑批数据
+- tests/test_loop_spike_w5c2.py = regex M1-M5 表达模式护栏 (V0.16.21 4 根因修 + V0.16.22 第三轮校准 sink)
+
+**与真发现 #20 反向**:
+- #20 (V0.39 sink) = 文档 stale 误导用户 (README "72%" 24-month-old)
+- #22 (V0.43 sink) = 文档完整 + agent 偷懒不读文档 → false-positive cleanup verdict
+
+**避免重蹈**:
+- "功能未启用" 信号触发的 cleanup verdict, 必须先 grep ARCHITECTURE + CHANGELOG 看 by-design intent
+- env grep 0 命中 ≠ dead, 可能是 opt-in instrumentation by design (跟 trading bot live mode opt-in 同模式)
+
+(累计真发现至 V0.43: 22 个; V0.43 系列 +1: #22 meta-lesson.)
+
+### V0.43 主题决策 — R2 #17 chromium --site-per-process re-investigation
+
+**#17 上下文** (V0.34.4 sink, CHANGELOG L1081):
+- V0.34 F1 plan agent 估算 67-74% iframe DFS 并发 gain, **真测仅 ~3%** → catch chromium same-origin shared renderer serialize 物理限
+- V0.34.4 仅 mitigation (放弃 F1 sub-route), **未尝试** chromium `--site-per-process` flag isolation
+- repo 全文 grep `--site-per-process` 0 命中 — V0.43 真首测
+
+**真测假设**: chromium `--site-per-process` flag 强制 per-frame renderer process isolation →
+理论上应绕过 same-origin shared renderer serialize 限. 真测看真实 gain.
+
+**真测路径** (V0.43.1):
+- 复用 V0.34 F1 baseline (`data/bench/v0.34.3-fanout-baseline.json`)
+- `eval/perceive_bench_adapter.py` L56 `chromium.launch(headless=headless)` 加可选 `extra_args` 注入
+- 真跑 `WEB_AGENT_RUN_SLOW=1 web-agent-perceive-bench run ... --extra-chromium-arg=--site-per-process` 对比 default
+- 输出 `data/bench/v0.43.1-spp-baseline.json`
+
+**Decision 门槛** (先写, 防 rationalize, 跟 V0.41/V0.42 同模式):
+
+| gain | 决策 | 沉淀 |
+|------|------|------|
+| **≥ 10%** | retain + chromium flag opt-in 实施 (V0.43.3-4) | #17 部分推翻 + #23 retain 真发现 |
+| **5-10%** | retain as opt-in env flag (不默) | #23 边际 ROI |
+| **< 5%** | sink + 不实施 | **#23**: chromium `--site-per-process` 也救不了 same-origin serialize → 永久物理限 |
+
+### V0.43 commit 节奏 (预计 3-5 commit)
+
+- **V0.43.0** (本) doc 启动 + #22 meta + plan + decision 门槛 (~150 doc LOC, 0 src)
+- V0.43.1 真测 perceive_bench --site-per-process (~10 src LOC adapter + baseline JSON)
+- V0.43.2 沉淀 #23 + 决策落地
+
+retain 路径 (≥ 10% 或 5-10%):
+- V0.43.3 chromium flag env opt-in 实施 (~20 src LOC browser.py + chrome_launcher.py)
+- V0.43.4 收尾 retrospective + V0.44 inventory
+
+sink 路径 (< 5%):
+- V0.43.2 = 收尾 retrospective + #23 永久 NO-GO 沉淀 + V0.44 inventory (3 commit)
+
+### V0.34 教训累计应用至 V0.43 (13 系列贯彻)
+
+| 系列 | commit | 教训应用 |
+|------|--------|---------|
+| V0.34 F1 | 6 | 真测被动 catch |
+| V0.35 A | 4 | fixture micro experiment |
+| V0.36 I | 4 | 现状叙事推翻 |
+| V0.37 B' | 4 | infra 准备 (--dry-run) |
+| V0.38 F2 | 4 | retrospective 预测 |
+| V0.39 G | 2 | baseline 即时 withdraw |
+| V0.40 A' | 3 | 每 fixture probe |
+| V0.41 C | 3 | 真测 db schema → reframe |
+| V0.42 D | 4 | 真测 SDK + image cache miss → reframe |
+| **V0.43 R** (本) | 启动 | **audit ARCHITECTURE intent 先于 cleanup verdict** (subagent dead-flag 误判 catch) |
+
+**V0.43 教训应用新维度**: audit method 自身的 false-positive 风险. 前 12 系列教训聚焦 "plan 假设 vs
+真测", #22 是 "audit 假设 vs ARCHITECTURE intent" 第二维 — agent 自己 audit 也会偏差, 需护栏:
+**任何 cleanup verdict 必须先 grep ARCHITECTURE + CHANGELOG**.
+
+### Changed (~0 src LOC, ~150 doc LOC)
+
+- `CHANGELOG.md` V0.43.0 entry (本)
+- `pyproject.toml` / `__init__.py` 0.42.3 → 0.43.0
+- `uv.lock` 同步
+
+### Verify
+
+- `uv run pytest` → **848 passed, 25 skipped** (V0.42.3 状态 0 src 改 → 0 测变)
+- 0 src 改 → 0 ruff/mypy 重检需求
+
+### V0.44 主题候选 (留 V0.43 完后再 surface)
+
+跟 V0.42.3 inventory 同 candidates (V0.43 R 推进中, 其他保留):
+- V0.42 housekeeping (V0.36.2 + V0.41 C5 deferred 合并)
+- V0.28 W6-A reflect path audit (#21 催生)
+- A'' V0.40 corpus 再扩 (drag/dialog/upload)
+- V0.42 真测 cassette (maintainer 红线)
+- 其他 user 提的方向
+
 ## [0.42.3] - 2026-05-11
 
 ### Doc (V0.42 D LLM cache 系列收尾 4/4 — 4 维优化矩阵 + V0.34 教训 12 系列累计 + V0.43 inventory)
