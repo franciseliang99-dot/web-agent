@@ -296,6 +296,96 @@ def format_domain_stats_for_trace(stats: DomainStats | None) -> str:
     )
 
 
+@dataclass(frozen=True, slots=True)
+class FailurePattern:
+    """V0.41.1 C3 主题: domain-level failure root-cause 频度.
+
+    跟 DomainStats 平行 (聚合层非 raw row), 但维度从 success rate → failure marker 频度.
+    用例: planner 看到 'wikipedia.org 历史 fail 3/5 因 SAFETY_BLOCK' 后, 在 wiki 上跑前
+    preemptive 准备 safety prompt 或 cassette 已知 fail mode.
+
+    reframe 用 memories.result 抽 FAILURE_MARKERS 而非 V0.28 reflections 表 — 因真发现 #21
+    生产 db reflections 表不存在, memories.result 才有 raw fail 信号 (V0.41.0 真测 36 行真站点
+    数据中 ~10-15 行有 FAILURE_MARKERS prefix).
+    """
+
+    marker: str  # FAILURE_MARKERS 之一 (e.g. "SAFETY_BLOCK", "LOOP_DETECTED")
+    count: int
+    fraction: float  # count / total_failures (在该 domain 内)
+
+
+def summarize_domain_failures(
+    db_path: Path,
+    domain: str,
+    *,
+    recent_days: int = 30,
+    top_n: int = 3,
+    min_failures: int = 2,
+) -> list[FailurePattern]:
+    """V0.41.1 C3 主题: 抽 domain failure root-cause 频度 (跟 aggregate_domain_stats 平行).
+
+    返 [] 条件 (V0.34 教训应用 — 不 inject noise):
+    - db_path 不存在
+    - domain 为空字符串 (跟 V0.41.0 aggregate 同, 避测试污染聚合)
+    - total failures < min_failures (默 2, 1 fail 算不出 pattern)
+
+    db_path: data/memory.db Path
+    domain: extract_domain(start_url) 输出
+    recent_days: 查询窗口 (默 30 天)
+    top_n: 返 top N 个 marker (默 3)
+    min_failures: 信号阈值 (默 2, 低于此返 [])
+
+    Returns:
+        list[FailurePattern] DESC by count, top_n 个 (空 list 表无信号或 db 不存在)
+    """
+    if not db_path.exists() or not domain.strip():
+        return []
+    cutoff_ts = time.time() - recent_days * 86400
+    conn = sqlite3.connect(db_path)
+    try:
+        rows = conn.execute(
+            "SELECT result FROM memories WHERE domain = ? AND success = 0 AND ts >= ?",
+            (domain, cutoff_ts),
+        ).fetchall()
+    finally:
+        conn.close()
+    if len(rows) < min_failures:
+        return []
+    # 抽 FAILURE_MARKERS 频度 (跟 is_success 同 substring 匹配, V0.41.1 reframe 用 memories.result)
+    counts: dict[str, int] = {}
+    for (result,) in rows:
+        for marker in FAILURE_MARKERS:
+            if marker in result:
+                counts[marker] = counts.get(marker, 0) + 1
+                break  # 每 fail 计 1 marker 最先匹配的
+    if not counts:
+        return []
+    total_failures = sum(counts.values())
+    patterns = sorted(
+        (
+            FailurePattern(marker=m, count=c, fraction=c / total_failures)
+            for m, c in counts.items()
+        ),
+        key=lambda p: -p.count,
+    )
+    return patterns[:top_n]
+
+
+def format_domain_failures_for_trace(patterns: list[FailurePattern]) -> str:
+    """V0.41.1 C3 主题: 渲 list[FailurePattern] 为 LLM 可读 1 行 (跟 format_domain_stats 平行).
+
+    格式: '本 domain 最常 fail 因: SAFETY_BLOCK (3, 50%), LOOP_DETECTED (2, 33%), ...'
+    空 list 返 ''. token-budget 友好 (~100 char).
+    """
+    if not patterns:
+        return ""
+    parts = [
+        f"{p.marker} ({p.count}, {p.fraction * 100:.0f}%)"
+        for p in patterns
+    ]
+    return "本 domain 最常 fail 因: " + ", ".join(parts)
+
+
 def recall_by_domain(
     db_path: Path,
     domain: str,
@@ -347,13 +437,22 @@ def build_inject_string(
     """
     parts: list[str] = []
     if include_memories:
-        # V0.41.0 C 主题: prepend domain success rate aggregate (1 行 cross-task signal 让
+        # V0.41.0 C1 主题: prepend domain success rate aggregate (1 行 cross-task signal 让
         # planner 先看 high-level pass rate, 再看 raw 5 条 task). aggregate 失败 silent skip.
         try:
             stats = aggregate_domain_stats(db_path, domain)
             stats_str = format_domain_stats_for_trace(stats)
             if stats_str:
                 parts.append(stats_str)
+        except Exception:
+            pass
+        # V0.41.1 C3 主题: prepend failure root-cause cache (跟 stats 同层级 cross-task 学习,
+        # 但维度从 success rate → fail marker 频度). reframe 用 memories.result 不用 reflections.
+        try:
+            failures = summarize_domain_failures(db_path, domain)
+            failures_str = format_domain_failures_for_trace(failures)
+            if failures_str:
+                parts.append(failures_str)
         except Exception:
             pass
         try:

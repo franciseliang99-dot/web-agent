@@ -532,3 +532,96 @@ def test_v041_build_inject_string_includes_stats_prefix(tmp_path):
     memories_idx = out.find("过去在该 domain")
     assert stats_idx >= 0, "stats prefix 必出现"
     assert memories_idx > stats_idx, "stats 必在 memories raw 前"
+
+
+# ---------- V0.41.1 C3 主题: failure root-cause cache ----------
+
+
+def test_v041_summarize_domain_failures_basic(tmp_path):
+    """V0.41.1: 5 task 3 fail (2 SAFETY_BLOCK + 1 LOOP_DETECTED) → top 2 patterns."""
+    from web_agent.memory import summarize_domain_failures
+
+    db = tmp_path / "memory.db"
+    record_task(db, "wiki.test", "g1", "OK", True)
+    record_task(db, "wiki.test", "g2", "OK", True)
+    record_task(db, "wiki.test", "g3", "SAFETY_BLOCK at step 4: send-or-pay", False)
+    record_task(db, "wiki.test", "g4", "SAFETY_BLOCK at step 2: delete", False)
+    record_task(db, "wiki.test", "g5", "LOOP_DETECTED 在 step 5: ...", False)
+    failures = summarize_domain_failures(db, "wiki.test")
+    assert len(failures) == 2
+    assert failures[0].marker == "SAFETY_BLOCK"
+    assert failures[0].count == 2
+    assert abs(failures[0].fraction - 2 / 3) < 0.01
+    assert failures[1].marker == "LOOP_DETECTED"
+    assert failures[1].count == 1
+
+
+def test_v041_summarize_domain_failures_below_threshold_returns_empty(tmp_path):
+    """V0.41.1: total failures < min_failures (默 2) → [] (1 fail 算不出 pattern)."""
+    from web_agent.memory import summarize_domain_failures
+
+    db = tmp_path / "memory.db"
+    record_task(db, "wiki.test", "g1", "OK", True)
+    record_task(db, "wiki.test", "g2", "SAFETY_BLOCK at step 0", False)  # 1 fail
+    assert summarize_domain_failures(db, "wiki.test") == []
+
+
+def test_v041_summarize_domain_failures_db_not_exist_returns_empty(tmp_path):
+    """V0.41.1: db 不存在 → [] (跟 aggregate_domain_stats 同 None pattern)."""
+    from web_agent.memory import summarize_domain_failures
+
+    assert summarize_domain_failures(tmp_path / "nonexistent.db", "wiki.test") == []
+
+
+def test_v041_summarize_domain_failures_empty_domain_returns_empty(tmp_path):
+    """V0.41.1: domain='' → [] (避真发现 #21 测试污染聚合)."""
+    from web_agent.memory import summarize_domain_failures
+
+    db = tmp_path / "memory.db"
+    for i in range(3):
+        record_task(db, "", f"g{i}", f"SAFETY_BLOCK {i}", False)
+    assert summarize_domain_failures(db, "") == []
+
+
+def test_v041_format_domain_failures_for_trace_renders(tmp_path):
+    """V0.41.1: 格式 '本 domain 最常 fail 因: MARKER (count, %), ...'."""
+    from web_agent.memory import format_domain_failures_for_trace, summarize_domain_failures
+
+    db = tmp_path / "memory.db"
+    record_task(db, "wiki.test", "g1", "SAFETY_BLOCK at step 4", False)
+    record_task(db, "wiki.test", "g2", "SAFETY_BLOCK at step 2", False)
+    record_task(db, "wiki.test", "g3", "LOOP_DETECTED 在 step 5", False)
+    failures = summarize_domain_failures(db, "wiki.test")
+    rendered = format_domain_failures_for_trace(failures)
+    assert "本 domain 最常 fail 因" in rendered
+    assert "SAFETY_BLOCK" in rendered
+    assert "LOOP_DETECTED" in rendered
+    assert "67%" in rendered or "66%" in rendered  # 2/3 ≈ 67%
+
+
+def test_v041_format_domain_failures_empty_returns_empty():
+    """V0.41.1: 空 list → '' (caller if-truthy 跳 inject)."""
+    from web_agent.memory import format_domain_failures_for_trace
+
+    assert format_domain_failures_for_trace([]) == ""
+
+
+def test_v041_build_inject_string_includes_failures_prefix(tmp_path):
+    """V0.41.1: build_inject_string prepend failures 行 (在 stats 后 memories raw 前)."""
+    from web_agent.memory import build_inject_string
+
+    db = tmp_path / "memory.db"
+    # 5 task 3 fail (满足 V0.41.0 stats min_total=3 + V0.41.1 failures min=2)
+    record_task(db, "wiki.test", "g1", "OK", True)
+    record_task(db, "wiki.test", "g2", "OK", True)
+    record_task(db, "wiki.test", "g3", "SAFETY_BLOCK at step 4", False)
+    record_task(db, "wiki.test", "g4", "SAFETY_BLOCK at step 2", False)
+    record_task(db, "wiki.test", "g5", "LOOP_DETECTED 在 step 5", False)
+    out = build_inject_string(db, "wiki.test")
+    assert out is not None
+    stats_idx = out.find("本 domain 最近")
+    failures_idx = out.find("本 domain 最常 fail")
+    memories_idx = out.find("过去在该 domain")
+    assert stats_idx >= 0 and failures_idx >= 0 and memories_idx >= 0
+    # 顺序: stats → failures → memories raw
+    assert stats_idx < failures_idx < memories_idx

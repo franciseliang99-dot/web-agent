@@ -2,6 +2,66 @@
 
 All notable changes to web-agent. 版本号遵循 SemVer 简化形式（V<major>.<minor>.<patch>）。
 
+## [0.41.1] - 2026-05-11
+
+### Feat (V0.41 C 长期记忆 cross-task 学习 2/N — failure root-cause cache, reframe 避 #21 dead path)
+
+V0.41.0 落 C1 domain success-rate aggregator. V0.41.1 加 C3 failure root-cause cache —
+但 **reframe 用 memories.result 抽 FAILURE_MARKERS 而非 V0.28 reflections 表** (避真发现
+#21 生产 reflections 表不存在 dead path).
+
+### V0.41.1 reframe (跟 Plan agent 原推 C3 不同)
+
+**Plan agent V0.41 plan C3 原方案**: `summarize_domain_failures` 用 V0.28 reflections 表.
+
+**reframe 推翻 (V0.41.0 真发现 #21 推)**: 生产 memory.db reflections 表不存在 (V0.28 W6-A
+`should_reflect` 路径几乎不触发). 若 V0.41.1 C3 依赖 reflections 表 → 99% 时间返空 → inject
+prefix 在生产中**永不显示** → 等于做了没用.
+
+**reframe 改方案**: `summarize_domain_failures` 用 `memories.result` 抽 FAILURE_MARKERS 频度.
+memories 表生产 db 真有 850 行, FAILURE_MARKERS prefix 真出现 (SAFETY_BLOCK 7 行, LOOP_DETECTED
+6 行等). 不依赖 V0.28 dead path, V0.41.1 inject 真在生产中显示.
+
+V0.34 教训应用: **真测 db 现状决定实现路径**, 跟 V0.39 README 72% 推翻同模式 (不信 plan 推估,
+信真测).
+
+### Changed (~70 src LOC + ~110 测 LOC)
+
+- `src/web_agent/memory.py`:
+  - `FailurePattern` dataclass (frozen+slots): marker / count / fraction
+  - `summarize_domain_failures(db, domain, *, recent_days=30, top_n=3, min_failures=2) → list[FailurePattern]`
+    - 防 noise: db 不存在 / domain 空 / total failures < 2 都返 [] (跟 V0.41.0 aggregate 同 None pattern)
+    - 抽 memories.result 含 FAILURE_MARKERS 的 row → count by marker → top N DESC by count
+  - `format_domain_failures_for_trace(patterns) → str` 渲 1 行 (token-budget 友好 ~100 char)
+  - `build_inject_string` prepend failures 行 (在 V0.41.0 stats 后, memories raw 前):
+    `stats → failures → memories raw`
+- `tests/test_memory.py` +7 fast 测:
+  - basic (5 task 3 fail → SAFETY_BLOCK 2 + LOOP_DETECTED 1)
+  - below threshold (1 fail) → []
+  - db not exist → []
+  - empty domain → [] (避 #21 测试污染)
+  - format renders (含 "本 domain 最常 fail 因" + marker + %)
+  - format empty → ""
+  - build_inject_string 顺序 stats < failures < memories raw
+- `pyproject.toml` / `__init__.py` 0.41.0 → 0.41.1
+- `uv.lock` 同步
+
+### Verify
+
+- `uv run pytest` → **839 passed, 25 skipped** (+7 V0.41.1 fast 测, 0 现测破)
+- `uv run ruff check` → all clean
+- `uv run mypy` → Success no issues in 52 src files
+
+### V0.41 系列进度
+
+| ver | 状态 | scope |
+|-----|------|-------|
+| V0.41.0 | ✅ | C1 domain success-rate aggregator + 真发现 #21 |
+| **V0.41.1** | ✅ 本提交 | C3 failure root-cause cache (reframe 用 memories.result 避 #21) |
+| V0.41.2 | 待 | C5 memory.db 测试污染 audit + clear-domain CLI (+ backup BC) |
+| V0.41.3 | 待 | 系列收尾 retrospective + V0.42 inventory |
+| V0.41.x.1 (skip) | maintainer 真测 V0.40 5 task corpus before/after | 🛑 红线 |
+
 ## [0.41.0] - 2026-05-11
 
 ### Feat (V0.41 C 长期记忆 cross-task 学习系列开篇 1/N — domain success-rate aggregator + 真发现 #21)
