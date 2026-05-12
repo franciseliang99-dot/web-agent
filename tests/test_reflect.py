@@ -21,15 +21,15 @@ from web_agent.reflect import (
 )
 
 
-# --- should_reflect (subagent A 决: max_steps + LOOP_DETECTED 触发, 外因 + 成功 不触发) ---
+# --- should_reflect (V0.44.2: max_steps + LOOP_DETECTED + WALLCLOCK_EXCEEDED 触发, 外因 + 成功 不触发) ---
 
 
 @pytest.mark.parametrize("final_result,expected", [
-    ("(max_steps 耗尽未完成)", True),  # max_steps marker
-    ("LOOP_DETECTED 在 step 5...", True),  # LOOP_DETECTED marker
-    ("WALLCLOCK_EXCEEDED at step 3", False),  # 外因不触发
-    ("SAFETY_BLOCK at step 2: ...", False),  # 外因不触发
-    ("CAPTCHA detected", False),  # 外因不触发
+    ("(max_steps 耗尽未完成)", True),  # max_steps marker (plan-defect family)
+    ("LOOP_DETECTED 在 step 5...", True),  # LOOP_DETECTED marker (plan-defect family)
+    ("WALLCLOCK_EXCEEDED at step 3", True),  # V0.44.2: #25 真发现 LLM extract loop plan 缺陷, 加 reflect
+    ("SAFETY_BLOCK at step 2: ...", False),  # #24 真发现: predicate 假阳性, 修 predicate (V0.45) 而非 reflect
+    ("CAPTCHA detected", False),  # 真外因不触发
     ("LLM_FAILED: ...", False),  # infra fault 不触发
     ("result: 抓到了答案", False),  # 成功结果不触发
 ])
@@ -38,8 +38,8 @@ def test_should_reflect_trigger_matrix(final_result: str, expected: bool) -> Non
 
 
 def test_triggering_markers_constant():
-    """V0.28.0: 当前 2 marker, V0.28.1 wire 时不应扩 (扩反范围会 over-trigger)."""
-    assert TRIGGERING_FAILURE_MARKERS == frozenset({"max_steps", "LOOP_DETECTED"})
+    """V0.44.2: 当前 3 marker (V0.28 max_steps + LOOP_DETECTED + V0.44.2 加 WALLCLOCK_EXCEEDED #25 真发现)."""
+    assert TRIGGERING_FAILURE_MARKERS == frozenset({"max_steps", "LOOP_DETECTED", "WALLCLOCK_EXCEEDED"})
 
 
 # --- build_reflect_prompt (subagent B 决: 文本 trace + V0.28.1 加 screenshot) ---
@@ -69,6 +69,37 @@ def test_build_reflect_prompt_empty_trace_does_not_raise():
     prompt = build_reflect_prompt(goal="g", trace_steps=[], final_result="(max_steps)")
     assert "g" in prompt
     assert "0 steps" in prompt
+
+
+def test_build_reflect_prompt_wallclock_includes_timeout_family_section() -> None:
+    """V0.44.2: WALLCLOCK_EXCEEDED 触发 timeout family 提示 (LLM extract loop 切换 action 提示)."""
+    prompt = build_reflect_prompt(
+        goal="HN 提取 points 数",
+        trace_steps=[{"step": i, "thought": "t", "action": {"type": "extract"}, "observation": "o"} for i in range(3)],
+        final_result="WALLCLOCK_EXCEEDED at step 11: 已 369.1s 超过 max_wallclock_s=360.0s",
+    )
+    assert "timeout family" in prompt
+    assert "切换" in prompt or "切" in prompt  # family hint actionable
+
+
+def test_build_reflect_prompt_max_steps_includes_plan_defect_family_section() -> None:
+    """V0.44.2: max_steps / LOOP_DETECTED 触发 plan-defect family 提示."""
+    prompt = build_reflect_prompt(
+        goal="goal",
+        trace_steps=[],
+        final_result="(max_steps 耗尽未完成)",
+    )
+    assert "plan-defect family" in prompt
+
+
+def test_build_reflect_prompt_safety_excluded_no_family_section() -> None:
+    """V0.44.2: SAFETY_BLOCK 不在 TRIGGERING_FAILURE_MARKERS, 不应有 family 文案 (理论上 should_reflect 已 short-circuit, 但 build_reflect_prompt 单独调用 safety/防御)."""
+    prompt = build_reflect_prompt(
+        goal="goal",
+        trace_steps=[],
+        final_result="SAFETY_BLOCK at step 2: safety:send-or-pay",
+    )
+    assert "family 提示" not in prompt  # SAFETY 不触发 family section
 
 
 # --- parse_reflection (subagent C 决: structured JSON + fallback 防阻塞 V0.28.1 wire) ---

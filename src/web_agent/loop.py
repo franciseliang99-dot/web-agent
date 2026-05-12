@@ -531,6 +531,11 @@ async def run_react_loop(
                 )
                 logger.warning("wallclock %s", result)
                 end_task(conn, task_id, result)
+                # V0.44.2 W6-A: WALLCLOCK 路径触发 reflect (#25 真发现: 实际 plan 缺陷类
+                # LLM extract loop, V0.28 subagent A "外因不 reflect" 假设双端推翻).
+                await _maybe_reflect_on_failure(
+                    client, goal, trace, result, task_id, domain, _resolved_mem_db,
+                )
                 return result
             # V0.42.2 D: token budget guard 在 step 顶 check, 累计 cost > 阈值 graceful abort.
             # budget=0 disable 不 check (默, 跟 V0.30.1 D opt-in 同).

@@ -2,6 +2,57 @@
 
 All notable changes to web-agent. 版本号遵循 SemVer 简化形式（V<major>.<minor>.<patch>）。
 
+## [0.44.2] - 2026-05-11
+
+### Feat (V0.44 W6-A reflect path audit 3/4 — 扩 should_reflect 加 WALLCLOCK_EXCEEDED + wire + family-aware prompt)
+
+V0.44.0 audit + V0.44.1 startup invariant fix 已落, 本提交 = **真 fix #21 reflect path
+"标榜 production-grade 实际生产 0 触发"**. 加 WALLCLOCK_EXCEEDED 到 TRIGGERING_FAILURE_MARKERS
++ loop.py wallclock abort 路径 wire reflect 调用 + reflect prompt 加 family-aware section
+(timeout vs plan-defect 分流).
+
+### Changed (~25 src LOC + ~30 test LOC)
+
+- `src/web_agent/reflect.py`:
+  - `TRIGGERING_FAILURE_MARKERS` (+1): `WALLCLOCK_EXCEEDED` 加入. V0.28 subagent A "外因 reflect
+    无价值" 假设 **双端推翻** 注释更新 (#24 SAFETY predicate 假阳性 V0.45 修, #25 WALLCLOCK 是
+    LLM extract loop plan 缺陷 reflect 有 ROI)
+  - `should_reflect` docstring 更新: triggering plan-defect family (max_steps/LOOP/WALLCLOCK),
+    skipping #24 SAFETY 假阳性 + CAPTCHA/LLM_FAILED 真外因
+  - `build_reflect_prompt` (+~15 LOC): family-aware hint section — wallclock family 提示 "切换
+    action 类型避 extract loop", plan-defect family 提示 "具体下次跳哪步绕 dead-end"
+- `src/web_agent/loop.py` (+~5 LOC): wallclock abort 路径 (L527-534) end_task 后加
+  `_maybe_reflect_on_failure` 调用 (跟 LOOP_DETECTED/max_steps 路径同模式)
+- `tests/test_reflect.py` (+~30 LOC): 既有 parametrize 更新 (WALLCLOCK True + 注释) + frozenset
+  期望含 WALLCLOCK_EXCEEDED + 3 new family prompt tests (wallclock/max_steps/SAFETY 各验)
+- `pyproject.toml` / `__init__.py` 0.44.1 → 0.44.2
+- `uv.lock` 同步
+- `CHANGELOG.md` V0.44.2 entry (本)
+
+### #21 dead path 真 fix 验证
+
+| 阶段 | reflections 表生产状态 |
+|------|---------------------|
+| V0.41.0 catch | 表不存在 (lazy create 路径未触发, should_reflect 仅 5.7% 覆盖) |
+| V0.44.1 cosmetic fix | 表存在 0 rows (startup init 但 trigger 仍 5.7%) |
+| **V0.44.2 真 fix** | trigger 扩 ~6.8% (max_steps + LOOP + WALLCLOCK); 真生产 WALLCLOCK 触发后 record_reflection 真写入 reflections 表 (真测验证 V0.44.3 收尾 doc) |
+
+V0.44 真 fix 路径: 不是建表 (V0.44.1 cosmetic), 是**扩 trigger marker 让 record_reflection 真触发**.
+
+### Verify
+
+- `uv run pytest tests/test_reflect.py -v` → 19 passed (16 + 3 V0.44.2 family prompt tests)
+- `uv run pytest` → **854 passed, 25 skipped** (851 + 3 V0.44.2)
+- `uv run ruff check` → clean
+- `uv run mypy` → 0 issues in 52 src files
+
+### V0.44 commit 节奏
+
+- V0.44.0 ✅ audit doc + 真发现 #24/#25
+- V0.44.1 ✅ startup init_reflections_db cosmetic + auditability fix
+- **V0.44.2** ✅ 本: 扩 should_reflect + wire + family-aware prompt (#21 真 fix)
+- V0.44.3 (next) 系列收尾 retrospective + V0.34 教训 14 累计 + V0.45 inventory
+
 ## [0.44.1] - 2026-05-11
 
 ### Feat (V0.44 W6-A reflect path audit 2/4 — startup init_reflections_db schema invariant fix)

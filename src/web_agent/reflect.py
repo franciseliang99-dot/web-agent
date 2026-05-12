@@ -40,20 +40,26 @@ class Reflection:
     hint: str
 
 
-# subagent A 决: max_steps + LOOP_DETECTED 触发, 排除 WALLCLOCK/SAFETY/CAPTCHA/LLM_FAILED
-# 外因 (网络慢 / 规则拦 / 人机验证 / SDK fault) reflect 给不出可操作 hint, 烧 token 无价值.
+# V0.28 subagent A 决: max_steps + LOOP_DETECTED 触发, 排除 WALLCLOCK/SAFETY/CAPTCHA/LLM_FAILED
+# 外因. V0.44.0 audit trace.db 87 tasks 真测**双端推翻** subagent A 假设:
+# - SAFETY_BLOCK 8 tasks 实际全是 safety:send-or-pay predicate 假阳性 (#24 真发现), 修 predicate
+#   而非加 reflect — 不加 SAFETY (V0.45 separate scope 修 predicate)
+# - WALLCLOCK_EXCEEDED 1 task 实际是 LLM extract loop plan 缺陷 (#25 真发现), 加 reflect 有 ROI
+# CAPTCHA/LLM_FAILED 当前未 audit 真测, 保留排除 (V0.28 subagent A 决继承).
 # 跟 loop.py FAILURE_MARKERS 子集对齐.
 TRIGGERING_FAILURE_MARKERS: frozenset[str] = frozenset({
-    "max_steps",        # "(max_steps 耗尽未完成)" loop 上限触发, plan 缺陷
-    "LOOP_DETECTED",    # V0.5.0 anti-loop 硬 abort, plan 撞墙
+    "max_steps",            # "(max_steps 耗尽未完成)" loop 上限触发, plan 缺陷
+    "LOOP_DETECTED",        # V0.5.0 anti-loop 硬 abort, plan 撞墙
+    "WALLCLOCK_EXCEEDED",   # V0.44.2 真发现 #25: LLM extract loop 死循环, anti_loop miss
 })
 
 
 def should_reflect(final_result: str) -> bool:
-    """V0.28.0: 决 final_result 是否触发 W6-A reflect (subagent A 决).
+    """V0.28.0/V0.44.2: 决 final_result 是否触发 W6-A reflect.
 
-    triggering: max_steps / LOOP_DETECTED 两类 plan 缺陷.
-    skipping: WALLCLOCK_EXCEEDED / SAFETY_BLOCK / CAPTCHA / LLM_FAILED 外因 / 成功 result.
+    triggering (plan-defect family): max_steps / LOOP_DETECTED / WALLCLOCK_EXCEEDED.
+    skipping: SAFETY_BLOCK (#24 真发现 predicate 假阳性, 修 predicate 而非 reflect) /
+              CAPTCHA / LLM_FAILED 真外因 / 成功 result.
     """
     return any(marker in final_result for marker in TRIGGERING_FAILURE_MARKERS)
 
@@ -77,12 +83,30 @@ def build_reflect_prompt(
         f"[step {s['step']}] thought={s['thought']!r} action={s['action']!r} obs={s['observation']!r}"
         for s in trace_steps
     )
+    # V0.44.2: family-aware hint section — wallclock-timeout 跟 plan-defect 反思角度不同,
+    # 分流让 LLM 看到具体 family 提示, 给出更 actionable hint (真发现 #25 trace 显示
+    # WALLCLOCK 主要是 LLM extract loop 死循环, 反思需切换 action 类型).
+    family_section = ""
+    if "WALLCLOCK_EXCEEDED" in final_result:
+        family_section = (
+            "\n## family 提示 (timeout family)\n"
+            "wallclock 超时常见 root cause: LLM 在同一 action 反复不切换 (e.g. extract 同 query "
+            "多次 'cannot read'). 推荐 hint: 'N 次同 action 无突破后切换 page.evaluate / scroll / "
+            "click 换路径'.\n"
+        )
+    elif "max_steps" in final_result or "LOOP_DETECTED" in final_result:
+        family_section = (
+            "\n## family 提示 (plan-defect family)\n"
+            "plan 步数耗尽 / action 死循环常见 root cause: LLM 路径选错或子任务拆分粗. 推荐 hint: "
+            "具体下次该跳到哪步, 绕开哪条 dead-end.\n"
+        )
     return (
         f"# 失败任务反思 (V0.28 W6-A)\n\n"
         f"## 原任务 goal\n{goal}\n\n"
         f"## 失败 trace ({len(trace_steps)} steps)\n{trace_str}\n\n"
-        f"## 失败 result\n{final_result}\n\n"
-        f"## 请反思\n"
+        f"## 失败 result\n{final_result}\n"
+        f"{family_section}"
+        f"\n## 请反思\n"
         f"返回 JSON 格式 {{\"root_cause\": \"<1-2 句失败根因>\", \"hint\": \"<1-2 句下次同 domain "
         f"task 启动时该注意的 actionable hint>\"}}. 不要返其他内容, 不要 markdown code fence."
     )
