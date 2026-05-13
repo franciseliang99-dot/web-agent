@@ -2,6 +2,92 @@
 
 All notable changes to web-agent. 版本号遵循 SemVer 简化形式（V<major>.<minor>.<patch>）。
 
+## [0.58.0] - 2026-05-11
+
+### Doc (V0.58 代理层接入系列开篇 1/3 — V0.48.2 #26 催生, 2 launch path audit + plan)
+
+V0.48.2 真发现 #26: akamai.com sandbox IP 直接 baseline 403 (跨 10 visit stable) → IP-level
+baseline 拦, fingerprint pool 不能解决, **唯一路径 = 代理层换出口 IP**. V0.58 启代理层接入,
+autonomous env 接入 + maintainer 真接付费代理验证.
+
+### 2 launch path audit (代理注入点)
+
+| 路径 | 文件 | 当前 | proxy 注入点 |
+|------|------|------|-----------|
+| CDP 接管 (cli/mcp prod) | `scripts/start_chrome.sh` ARGS + `chrome_launcher.py:Popen` | 无 proxy flag | **shell ARGS 加** `--proxy-server="$WEB_AGENT_PROXY"` (Chrome spawn time; Playwright `connect_over_cdp` 进程已起无法改) |
+| direct launch (eval/test) | `eval/runner.py:155`, `eval/perceive_bench_adapter.py:56` `chromium.launch(...)` | 无 proxy | **launch kwargs** `proxy={"server": ..., "username": ..., "password": ...}` (Playwright 原生支持 auth) |
+
+**关键分歧**: shell 路径仅支持 `--proxy-server=URL` (auth 编入 URL `http://user:pw@host:port`),
+direct launch 支持结构化 auth. **env schema 须统一**, 两侧解析:
+
+### Env schema (V0.58)
+
+**单一来源**: `WEB_AGENT_PROXY` = `http://user:pw@host:port` / `socks5://host:port` / 空 (默关).
+两路径共用. 防 `WEB_AGENT_PROXY_USER` / `_PASS` 独立 var drift (两侧 schema 不一致).
+
+**Python 侧**: `urllib.parse.urlparse` 拆 URL → `proxy={"server": f"{scheme}://{host}:{port}",
+"username": ..., "password": ...}`. shell 侧直拼 `--proxy-server=$WEB_AGENT_PROXY`.
+
+**Secret**: env-only (CLAUDE.md secrets 处理), log 仅 host:port (无 auth).
+
+### autonomous vs maintainer 红线
+
+- **autonomous (V0.58.1)**: env helper `_parse_proxy_env()` + shell ARGS 条件块 + direct launch
+  proxy kwargs + fast unit tests (urlparse round-trip / 空 env / 含 auth / shell ARGS render).
+  **不真接付费代理, 不真测 akamai 绕过**.
+- **maintainer 红线 (V0.58.x.1)**: 真接 Bright Data / Oxylabs / 自建 residential (烧 $) →
+  `WEB_AGENT_PROXY=<real-url>` env → 跑 V0.48.2 同 cassette 真测 akamai 403 → 200 (跨 5 visit
+  不同 exit IP) → 写 `data/stealth_probes/v0.58-proxy-akamai_*.json` 跟 V0.48.2 同 schema 留证.
+
+### Conservative reframe (eval proxy 默关)
+
+**Subagent V0.58 plan 推一条建议**: `eval/runner.py` 走 cassette 录制路径, proxy 接入须默关
+(防 proxy header 进 cassette → cassette 重放 leak 用户代理 IP / 凭证). V0.58.1 实施 default
+eval **不读 WEB_AGENT_PROXY** (仅 cli prod 读), 或加 eval flag `--proxy` 显式 opt-in. 跟 V0.51
+destructive 默 `--dry-run` 同 conservative 模式.
+
+### V0.58 fix plan (3 commit, autonomous + maintainer 分层)
+
+| commit | scope | autonomous? |
+|--------|-------|-------------|
+| V0.58.0 (本) | doc audit + plan + decision 门槛 + eval cassette 默关 reframe | ✅ |
+| V0.58.1 | env helper + shell ARGS + cli direct launch proxy + fast unit (~80 src + ~80 test LOC) | ✅ |
+| V0.58.2 | 系列收尾 retrospective + maintainer 红线占位 + V0.59 inventory | ✅ |
+| V0.58.x.1 | **真接付费代理** + 真测 akamai 403 → 200 cassette + 写 v0.58-proxy-akamai JSON | ❌ **maintainer 红线** |
+
+### Decision 门槛 (V0.58 验证, V0.51/V0.55 同模式 "先写防 rationalize")
+
+| 指标 | autonomous target | maintainer target |
+|------|------------------|-------------------|
+| `_parse_proxy_env()` 空/含 auth URL → 正确解析 | fast unit pass | n/a |
+| shell ARGS 加 --proxy-server 条件 (env unset 不加) | smoke test (subprocess 不真起 chromium) | n/a |
+| direct launch (eval/perceive_bench) proxy kwargs 接受 | 函数 sig 验 | n/a |
+| Secret 不进 commit / log | grep ".env" / log 仅 host:port | n/a |
+| akamai 403 → 200 真测 | n/a | maintainer 真接代理 5 visit baseline 200+ |
+| 不破既有 985+ tests | regression 全 pass | n/a |
+| pytest | ≥ 986 (V0.57 baseline) | n/a |
+
+### V0.34 教训累计应用至 V0.58 (28 系列贯彻预期)
+
+V0.58 教训应用预期: **autonomous env infra + maintainer 真接付费 = 红线分层 implementation 模式**.
+跟 V0.51 (destructive 默 dry-run + --apply 用户) / V0.47 (autonomous L1+L2+L3 + L3 武器 maintainer)
+同 pattern.
+
+新维度: **schema 单一来源 (URL string)** vs 多 env var drift — 防 `WEB_AGENT_PROXY_USER/_PASS`
+独立 var 两侧 schema 不一致, V0.58 conservative reframe 选 URL 单源.
+
+(累计真发现至 V0.58: 28 个; V0.58 系列 +0 暂时, V0.58.x.1 真测后可能 catch.)
+
+### Changed (~0 src LOC, ~150 doc LOC)
+
+- `CHANGELOG.md` V0.58.0 entry (本)
+- `pyproject.toml` / `__init__.py` 0.57.0 → 0.58.0
+- `uv.lock` 同步
+
+### Verify
+
+- `uv run pytest` → **986 passed, 29 skipped** (V0.57 状态 0 src 改 → 0 测变)
+
 ## [0.57.0] - 2026-05-11
 
 ### Feat (V0.57 pilot 经验 #1 — Monaco hidden textarea SoM walker exempt + bbox override)
