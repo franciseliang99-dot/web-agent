@@ -2,6 +2,31 @@
 
 All notable changes to web-agent. 版本号遵循 SemVer 简化形式（V<major>.<minor>.<patch>）。
 
+## [0.69.2] - 2026-05-12
+
+### Doc (V0.66.5 ticket close + V0.66.6 实测: detail=low 12x 加速假说 2 完全确认)
+
+V0.66.6 加 `WEB_AGENT_VISION_DETAIL` env knob 后跑同 example.com task 对比:
+
+| 配置 | step 0→1 间隔 | 任务结果 | SoM 识别 |
+|------|---------------|---------|----------|
+| `detail=high` (V0.66.4 baseline) | **103.9s** | ✅ 正确 | ✅ 准 |
+| **`detail=low` (V0.66.6 实测)** | **8.9s** | ✅ 正确 | ✅ 准 (中文 OCR 完整 "页面标题: Example Domain") |
+| 加速倍数 | **~12x** | — | — |
+
+**V0.66.5 假说 verdict**:
+- 假说 2 (`detail="high"` vision encoding) — ✅ **确认是主要慢因** (12x ≈ 95% 的 ~104s)
+- 假说 1 (OpenRouter 路由抖动) — 🟡 **不需验证** (假说 2 已解释 95% 的慢, OpenRouter 路由开销在剩余 9s 内)
+- 假说 3 (DOM dump 长) — 🟡 **不需验证** (同上, 剩余 9s 含 LLM compute + 网络 + DOM, 已可接受)
+
+**Recommendation** (cost-sensitive dogfood):
+- Default 保 `high` (V0.66.4 SoM 红线已验, 复杂页面如 Supabase Dashboard 数字密布时 `low` 风险未测)
+- 简单 task (example.com / hn / bing) → 加 `WEB_AGENT_VISION_DETAIL=low` env 跑, 30min/task → 3min/task
+- 复杂 task (Supabase / Gmail 多 mark + 中英混排小字) → 跑前先 smoke 一次 detail=low 看 SoM 编号识别是否糊, 不糊再切.
+
+V0.66.5 ticket 状态: ✅ **CLOSED** (假说 2 确认, knob 已上, 实测数据归档). DashScope 对照 (Path B)
+不再需要 — wallclock 已不是瓶颈.
+
 ## [0.69.1] - 2026-05-12
 
 ### Feat (V0.66.6 — V0.66.5 假说 2 验证 instrumentation: `WEB_AGENT_VISION_DETAIL` env knob)
