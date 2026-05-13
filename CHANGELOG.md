@@ -2,6 +2,45 @@
 
 All notable changes to web-agent. 版本号遵循 SemVer 简化形式（V<major>.<minor>.<patch>）。
 
+## [0.68.2] - 2026-05-12
+
+### Doc (V0.66.5 ticket — OpenRouter Qwen3-VL real-task wallclock 10-100x 慢于 smoke, 待 DashScope 直连对照)
+
+V0.66.4 dogfood 真测通后跑 example.com 真 task (`uv run web-agent ... --url
+https://example.com --max-steps 3`) 暴露真负载下 wallclock 显著降速:
+
+| 场景 | 单步 wallclock | 真测数据点 |
+|------|---------------|-----------|
+| smoke (dummy 16×16 PNG, 空 marks) | **3.08s** | V0.66.4 commit `f748480` |
+| 真 task example.com (1 mark, 真 screenshot + DOM) | **~104s** (step 0→1 间隔) | V0.66.5 ticket |
+
+**慢 30-40 倍**, 跟 V0.66.2 plan 表里 Kimi 的 4-24 min 单步比相对仍快, 但跟
+DashScope 直连 (国内节点 + 中文 OCR 直通) 对照尚缺数据.
+
+### V0.66.5 ticket 假说候选 (待数据驱动验证, 不预修)
+
+1. **OpenRouter 路由抖动**: OpenRouter 不同上游 provider (Cerebras / Together /
+   Fireworks / 阿里直连) Qwen3-VL 速度差异大, 实际 routing 可能命中慢 provider.
+   → 加 `provider/order` 强制锁 provider 测.
+2. **真 screenshot 大 + `detail: "high"`** (openai.py:86): 16×16 dummy vs 真页面
+   screenshot (1280×800 = 1M+ pixel), Qwen3-VL vision encoder 处理时间正比像素数.
+   → 切 `detail: "low"` 测 (省 token + 快), 但 SoM 编号识别可能糊.
+3. **DOM dump 长**: 真 page DOM serialized 几 KB-几十 KB, input token 数翻倍.
+   → 看 `usage.prompt_tokens` baseline (V0.66.5 真 task 未记 — 需补 instrumentation).
+
+### V0.66.5 验证 plan (待用户授权 DashScope 直连)
+
+1. 用户贴 DashScope API key (modelstudio.aliyun.com), `.env` 切 `OPENAI_BASE_URL=https://dashscope.aliyuncs.com/compatible-mode/v1` +
+   `WEB_AGENT_MODEL=qwen3-vl-32b-instruct` (无 `qwen/` 前缀, DashScope 直连).
+2. 跑同 example.com task, 量 step 0→1 间隔, 同条件对比 OpenRouter.
+3. 若 DashScope < 10s/step → 推荐切默认; 若同样 ~100s → 问题在 vision payload 不在路由,
+   切 `detail: "low"` 再测.
+
+### V0.66.5 状态: ⏳ 等用户决定下一步 (DashScope key 提供 / 继续观察 / 排队)
+
+不阻塞 V0.66.3/V0.66.4 release. 真 task 跑得通 (extract + done, HTTP 200, 中文 OCR
+准确), 只是 wallclock 偏慢. autonomous 红线: ❌ 不可自动推进 (待用户决定路径).
+
 ## [0.68.1] - 2026-05-12
 
 ### Fix (V0.66.4 OpenRouter tool_choice 兼容 + V0.66.3 dogfood 闭环 vision unblock 真测通)
