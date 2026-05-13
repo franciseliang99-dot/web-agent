@@ -2,6 +2,99 @@
 
 All notable changes to web-agent. 版本号遵循 SemVer 简化形式（V<major>.<minor>.<patch>）。
 
+## [0.59.0] - 2026-05-11
+
+### Doc (V0.59 pilot V0.55-V0.57.x.1 cassette sweep 1/1 — 关单 V0.57.x.1 + defer V0.55/V0.56.x.1 LLM 红线)
+
+用户授权 "pilot V0.55-V0.57.x.1 cassette 真站测". autonomous sweep 后 1 commit doc: V0.57.x.1
+**关单** (V0.57.0 chromium real fixture autonomous 已 cover), V0.55/V0.56.x.1 **defer maintainer**
+(LLM-driven 烧 token user 红线, 跟 V0.54 V0.42.x.1 同模式). **拒 subagent V0.59.1 stub cassette infra**
+(V0.55-V0.57 既有 fast unit + chromium real 已 max cover, 加 stub 重复).
+
+### Sweep audit (3 pilot fix 既有 test 覆盖度)
+
+| pilot fix | V 系列 | 既有 cover | 真测 gap |
+|----------|--------|----------|---------|
+| #3 跨页 sig | V0.55.0 | **5 fast unit** (`test_action_signature_url_prefix_separates_cross_page` + ping-pong/false-pos guard + default 兼容 + truncate) | LLM-driven 真站 ping-pong 真测 — 需真 web-agent task 烧 ~$0.05 |
+| #2 多字段 type 协议 | V0.56.0 | **1 invariant test** (`test_system_prompt_includes_multi_field_type_protocol` 验 严格交错/click[5]/✅/❌ keywords) | LLM 真测多字段 form 是否真 follow click→type 严格交错 — 需真 web-agent + 真 form 烧 ~$0.05 |
+| #1 Monaco SoM exempt | V0.57.0 | **3 tests (2 fast unit + 1 chromium real fixture autonomous)** — `test_monaco_textarea_in_marks_via_walker_exempt` 真 chromium 跑 Monaco minimal fixture verify bbox parent override | 真站 vscode.dev cassette (各 Monaco 版本变体) — 可选, V0.57.0 fixture 已最小可控 cover |
+
+→ V0.57.x.1 **关单** (V0.57.0 已 chromium real autonomous cover, vscode.dev 版本变体边际 ROI).
+V0.55/V0.56.x.1 **defer** maintainer (LLM 烧, 跟 V0.42.x.1 同).
+
+### Subagent V0.59.1 stub cassette infra 拒 (conservative reframe)
+
+Subagent V0.59 plan 推 3 commit (V0.59.0 doc + V0.59.1 stub cassette infra ~150 LOC + V0.59.2 retro).
+我**拒 V0.59.1 stub**:
+- V0.55 跨页 sig fast unit 已 5 case (含 ping-pong + false-pos guard) — 再加 fixture stub
+  test 重复, 不解决"真测 LLM 是否真陷 ping-pong"问题 (那需要 LLM 烧)
+- V0.56 SYSTEM_PROMPT 静态 lint 已 1 invariant — 再加静态 lint 同重复
+- V0.57.x.1 V0.57.0 chromium real fixture 已 autonomous cover
+
+→ **autonomous infra 无多余可加**, LLM 真测仅在 user 红线后才有 marginal value.
+
+跟 V0.42 D / V0.43 R3 / V0.45 / V0.46 / V0.48 / V0.50 / V0.51 / V0.58 拒 subagent 激进 plan
+同 conservative 模式 — autonomous 数据/边界 sieve 收窄 plan agent 推扩.
+
+### V0.34 教训累计应用至 V0.59 (29 系列贯彻)
+
+| 系列 | 教训应用 |
+|------|---------|
+| V0.50 | plan agent inventory line stale, 实施前 audit 既有 corpus (#27) |
+| V0.52 | autonomous schema migrate 0 烧 + 关 V0.46/V0.47/V0.48/V0.49.x.1 sweep |
+| V0.54 | autonomous 真跑 sample 验 .env key 空 + V0.51 dry-run 0 files 真测 |
+| **V0.59** | **autonomous sweep audit 既有 test cover, 拒 subagent stub 重复 infra** (跟 V0.50 #27 推翻"再扩"同模式) |
+
+**V0.59 教训应用新维度**: **subagent infra plan 真测推翻 = 既有 cover 已 max, 不再加 stub**. 跟
+V0.50 A'' corpus 真测推翻 (V0.23/V0.24 已 cover) 同模式 — autonomous 实施前必 audit 既有 test
+cover, 防 subagent 推扩 infra 重复.
+
+累计 **conservative reframe V0.42-V0.59 9 次**: image cache / W5-C.2 cleanup / send amount /
+type-only detector / simplify extract / fingerprint pool / A'' corpus / destructive 真删 / pilot
+cassette stub infra.
+
+(累计真发现至 V0.59: 28 个不变; V0.59 系列 +0 — sweep audit-only 拒 stub infra.)
+
+### V0.59 状态更新 (3 pilot fix maintainer 占位)
+
+| Deferred | V0.59 后状态 |
+|---------|------------|
+| V0.55.x.1 | autonomous 5 fast unit 已 cover, 真站 ping-pong 真测 LLM 烧 ~$0.05 user 红线 stay |
+| V0.56.x.1 | autonomous 1 invariant 已 cover, 真测多字段 form follow LLM 烧 ~$0.05 user 红线 stay |
+| **V0.57.x.1** | **✅ 关单** (V0.57.0 chromium real fixture autonomous 已 cover, vscode.dev 版本变体边际 ROI defer 至发现 evidence 时再做) |
+
+### V0.55-V0.57.x.1 user env 真测跑法 (跟 V0.42.x.1 同模式)
+
+```bash
+export ANTHROPIC_API_KEY=sk-ant-...  # 真 key, autonomous .env 空 placeholder
+# V0.55 跨页 ping-pong 真测 (用户构造 2 真 URL 交替 click 类 task)
+WEB_AGENT_MEMORY_DISABLE=1 web-agent "依次 click [A 站 mark] → click [B 站 mark] → 重复 5 次"
+# 看 trace.db tasks.result 是否 LOOP_DETECTED 在 V0.55 url prefix 后真 catch (V0.55 之前 miss)
+
+# V0.56 多字段 form 真测 (httpbin /forms/post 或 demo form)
+WEB_AGENT_MEMORY_DISABLE=1 web-agent "填 httpbin pizza form: 姓名 Alice / 邮箱 alice@x.com / size medium → submit"
+# 看 LLM 是否严格 click→type 交错 (V0.56 SYSTEM_PROMPT example 改善 follow rate)
+```
+
+### V0.60 主题候选 (V0.59 完后, 等用户)
+
+V0.46.2 inventory 全 + pilot 经验 3 项全 + 代理层接入 + V0.59 sweep 完. 剩:
+- V0.58.x.1 maintainer 真接付费代理 (真测 akamai 403→200 主验)
+- V0.55/V0.56.x.1 真测 (跟 V0.42.x.1 同 user env LLM 烧)
+- V0.42.x.1 / V0.51.x.1 真测 sample
+- eval direct launch proxy (V0.58 conservative defer)
+- 其他用户提的方向
+
+### Changed (~0 src LOC, ~130 doc LOC)
+
+- `CHANGELOG.md` V0.59.0 entry (本)
+- `pyproject.toml` / `__init__.py` 0.58.2 → 0.59.0
+- `uv.lock` 同步
+
+### Verify
+
+- `uv run pytest` → **999 passed, 29 skipped** (V0.58.2 状态 0 src 改 → 0 测变)
+
 ## [0.58.2] - 2026-05-11
 
 ### Doc (V0.58 代理层接入系列收尾 3/3 — V0.34 教训 28 累计 + V0.58.x.1 maintainer 占位 + V0.59 inventory)
