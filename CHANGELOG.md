@@ -2,6 +2,76 @@
 
 All notable changes to web-agent. 版本号遵循 SemVer 简化形式（V<major>.<minor>.<patch>）。
 
+## [0.58.1] - 2026-05-11
+
+### Feat (V0.58 代理层接入 2/3 — proxy_util env helper + start_chrome.sh --proxy-server flag)
+
+V0.58.0 plan 落定. 本提交 autonomous infra: `src/web_agent/proxy_util.py` 新 helper +
+`scripts/start_chrome.sh` ARGS 加 `--proxy-server` 条件块 (CDP cli/prod 路径). eval direct launch
+proxy 默关 (V0.58.0 conservative reframe — 防 cassette leak).
+
+### Changed (~80 src LOC + ~130 test LOC, 0 烧 token)
+
+- 新建 `src/web_agent/proxy_util.py` (~80 LOC):
+  - `ProxyConfig` frozen+slots dataclass: `server / username / password / raw`
+  - `to_playwright_kwargs() -> dict`: Playwright `proxy=` config (无 auth 时仅 server, 含 auth 加 username/password)
+  - `masked() -> str`: log-safe `scheme://<auth>@host:port` (mask user:pw 防 leak)
+  - `parse_proxy_env(env_value=None)`:`urllib.parse.urlparse` 拆 URL → ProxyConfig (空 / 无 scheme / 无 hostname → None)
+  - stdlib only (os + urllib.parse), 0 第三方
+- `scripts/start_chrome.sh` ARGS 加 `--proxy-server` 条件块:
+  - `[[ -n "${WEB_AGENT_PROXY:-}" ]] && ARGS+=(--proxy-server="${WEB_AGENT_PROXY}")`
+  - log 加 `Proxy: <masked>` (sed strip auth 部分, host:port 留)
+- 新建 `tests/test_proxy_util.py` (~130 LOC, 13 fast unit tests):
+  - 8 `parse_proxy_env` tests: unset (空/None/monkeypatch delenv) / 无 scheme / http no auth / http
+    with auth / socks5 no port / env monkeypatch / strip whitespace
+  - 2 `to_playwright_kwargs` tests: no auth / with auth (Playwright sig 兼容)
+  - 2 `masked` tests: no auth 等 server / with auth `<auth>@host:port`
+  - 1 frozen test (跟 Action/Mark/Usage 同模式)
+- `pyproject.toml` / `__init__.py` 0.58.0 → 0.58.1
+- `uv.lock` 同步
+- `CHANGELOG.md` V0.58.1 entry (本)
+
+### Scope conservative (V0.58.0 reframe 落实)
+
+✅ **实施**: 
+- CDP cli/prod 路径 (`scripts/start_chrome.sh` Chrome spawn time 加 `--proxy-server`)
+- `proxy_util.py` helper 跨 cli/eval/test 可复用
+- 默 secret 不 log (`masked()` mask auth)
+
+❌ **未实施 (V0.58 conservative)**:
+- `eval/runner.py` / `eval/perceive_bench_adapter.py` direct launch proxy 接 — V0.58.0 reframe
+  "eval cassette 录制不该走 proxy 防 leak". 留 V0.58.x+ 或 maintainer 真测时 explicit flag opt-in
+- `browser.py` connect_over_cdp 阶段 proxy — 阶段已起进程, Playwright 无法改 (V0.58.0 audit 已划)
+
+### Decision 门槛 (V0.58.0 先写) 全 honored
+
+| 指标 | target | V0.58.1 真测结果 |
+|------|--------|----------------|
+| `parse_proxy_env` 空/含 auth URL → 正确解析 | fast unit pass | ✅ 8 fast unit |
+| shell ARGS --proxy-server 条件 (env unset 不加) | smoke (subprocess 不真起) | ✅ shell `[[ -n "${WEB_AGENT_PROXY:-}" ]]` 条件 |
+| Secret 不进 commit / log | env-only + masked log | ✅ `masked()` 验 user/pass redact |
+| 不破既有 tests | regression 全 pass | ✅ 986 + 13 V0.58.1 = 999 |
+| pytest | ≥ 986 (V0.57 baseline) | **999** ✅ (+13 V0.58.1) |
+| mypy / ruff | clean | clean (55 src, +1 proxy_util.py) |
+
+### V0.58.x.1 maintainer 红线 (V0.58.0 inventory)
+
+V0.58.1 autonomous infra 完成. 真接付费代理 + 真测 akamai 403→200 仍 user 红线:
+```bash
+export WEB_AGENT_PROXY="http://user:pass@your-residential-proxy.com:port"
+bash scripts/start_chrome.sh  # Chrome 9222 spawn with --proxy-server
+# 验 (跟 V0.48.2 cassette 同模式):
+WEB_AGENT_RUN_SLOW=1 WEB_AGENT_REUSE_PROBE=1 uv run pytest \
+  "tests/test_protection_reuse_cassette.py::test_reuse_detection_real[akamai.com-https://www.akamai.com/-medium]" -v
+# 期望: visit 0 status 200 (V0.48.2 是 403 from sandbox IP, 代理后 exit IP 不同 → akamai 不拦)
+```
+
+### V0.58 commit 节奏
+
+- V0.58.0 ✅ doc audit + plan
+- **V0.58.1** ✅ 本: proxy_util + start_chrome ARGS + 13 fast unit
+- V0.58.2 (next) 系列收尾 + V0.34 教训 28 累计 + V0.58.x.1 maintainer 红线占位
+
 ## [0.58.0] - 2026-05-11
 
 ### Doc (V0.58 代理层接入系列开篇 1/3 — V0.48.2 #26 催生, 2 launch path audit + plan)

@@ -70,6 +70,16 @@ ARGS=(
   --window-size=1920,1080
 )
 
+# V0.58.1: 代理层接入 (V0.48.2 #26 催生). env WEB_AGENT_PROXY=http://user:pw@host:port (或
+# socks5://host:port / 空默关) → --proxy-server flag. Chrome spawn time 加, connect_over_cdp
+# 阶段已无法改. 用户授权 + 真接付费代理 = maintainer 红线 (V0.58.x.1).
+if [[ -n "${WEB_AGENT_PROXY:-}" ]]; then
+  ARGS+=(--proxy-server="${WEB_AGENT_PROXY}")
+  # 日志仅 host:port (无 auth, 防 leak): 简单 sed strip credentials @host:port 前 prefix
+  PROXY_MASKED=$(echo "${WEB_AGENT_PROXY}" | sed -E 's|://[^@]+@|://<auth>@|')
+  echo "Proxy:         ${PROXY_MASKED}"
+fi
+
 echo "Chrome:        ${CHROME_BIN}"
 echo "User data dir: ${USER_DATA}"
 echo "Debug port:    ${PORT}"
