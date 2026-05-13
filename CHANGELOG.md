@@ -2,6 +2,89 @@
 
 All notable changes to web-agent. 版本号遵循 SemVer 简化形式（V<major>.<minor>.<patch>）。
 
+## [0.67.0] - 2026-05-12
+
+### Doc (V0.67 V0.66.x.1 数据等用户 audit sweep 1/1 — Kimi maintainer 真测红线 + autonomous baseline 红线双叠 stay + V0.66.2 plan locked + V0.34 教训 35 累计)
+
+V0.66.0 (`b8c5a32`) 锁分阶段 plan, V0.66.1 (`4faa60f`) instrumentation TDD-first 红绿 ✅.
+现状 = **工具就位等数据**中段, V0.66.2 Provider-aware wallclock dict 表初值需 V0.66.1 数据
+回流定 baseline (`max(p95, 2×median)` 经验取整). autonomous audit 后 1 commit doc, 0 src 改:
+**V0.66.x.1 双红线全击** (autonomous baseline 数据红线 + Kimi prod 真测 \$ 红线), stay
+maintainer 跟 V0.61.0 / V0.64.0 同骨架.
+
+### V0.66.x 进度 audit (Step 2 三方)
+
+| 阶段 | 状态 | commit |
+|------|------|--------|
+| V0.66.0 | ✅ | `b8c5a32` audit doc + 分阶段 plan 锁 |
+| V0.66.1 | ✅ | `4faa60f` plan_elapsed_s instrumentation TDD-first 红绿 (8 测试 + 净 +20 src) |
+| **V0.66.2** | ⏳ **等数据** | Provider-aware wallclock dict (`{"anthropic": ?, "openai-kimi": ?, "openai": ?}`) |
+| V0.66.x.1 maintainer | 🔒 双红线 | Kimi prod sandbox 网络真测 (烧 \$) |
+
+### 双红线 audit (autonomous 不可推进)
+
+| 红线 | 现状 | autonomous 可做? |
+|------|------|----------------|
+| `ANTHROPIC_API_KEY` | `.env` placeholder 空 (V0.61.0 audit 同状态 stale) | ❌ (V0.66.0 plan 表 "anthropic" 必跑) |
+| Kimi prod sandbox 网络 baseline | OPENAI_API_KEY 配 Moonshot 可跑但烧用户 \$ | ❌ (V0.66.0 明确 maintainer 红线) |
+| trace.db `plan_elapsed_s` 数据 | `SELECT COUNT(plan_elapsed_s) FROM steps` = **0** (V0.66.1 commit 后未跑任务) | ❌ (无 baseline 表初值凭感觉 = 违 V0.62-V0.63 教训) |
+
+→ 跟 V0.61.0 (`f0bcfb7` "3 user 红线全击 stay maintainer") 同模式. autonomous 跑 OpenAI/Kimi
+替 Anthropic 数据**无效** (不同 provider name + 不同 sandbox 网络路径 + V0.66.0 plan 表明确分
+三 provider 各自 baseline).
+
+### V0.66.x.1 user env 跑法 (V0.66.2 落地前置)
+
+```bash
+# 1. .env 配 ANTHROPIC_API_KEY 真值
+# 2. 跑 1-2 个 task (Anthropic provider):
+WEB_AGENT_MODEL=claude-sonnet-4-6 web-agent run "<任意 task>"
+# 3. (用户授权 + 烧 $) 配 Moonshot endpoint 跑 Kimi 同样 1-2 task:
+OPENAI_BASE_URL=https://api.moonshot.ai/v1 WEB_AGENT_MODEL=kimi-k2.6 web-agent run "<同 task>"
+# 4. 查 plan_elapsed_s 真分布:
+sqlite3 data/trace.db <<'SQL'
+SELECT
+  CASE WHEN action_args LIKE '%kimi%' THEN 'kimi'
+       WHEN action_args LIKE '%claude%' THEN 'anthropic'
+       ELSE 'openai' END as provider,
+  COUNT(*), AVG(plan_elapsed_s), MIN(plan_elapsed_s), MAX(plan_elapsed_s)
+FROM steps WHERE plan_elapsed_s IS NOT NULL
+GROUP BY provider;
+SQL
+# 5. 用户贴回分布 → V0.66.2 表初值 = max(p95, 2×median) 经验取整
+```
+
+### V0.66.2 plan locked (等数据后落地)
+
+落地点 (V0.66.0 plan 表 + V0.66.1 instrumentation 已 enables):
+- `cli.py:60` `WEB_AGENT_MAX_WALLCLOCK_S` default 改 dict 查表
+- `llm/__init__.py:25-52` `provider_from_model()` + `client.name` 复用现成
+- 表骨架: `_PROVIDER_DEFAULT_WALLCLOCK_S = {"anthropic": ?, "openai-kimi": ?, "openai": ?, "*": ?}`
+- 表值待 V0.66.x.1 真测数据回流 (不凭感觉 1800/480/600)
+
+### V0.34 教训累计应用至 V0.67 (35 系列贯彻)
+
+| 系列 | 教训应用 |
+|------|---------|
+| V0.61 (31) | autonomous 红线 audit 不止 1 项, 多项叠加 stay 概率 100% |
+| V0.64 (32) | autonomous 同根因 3 次失败必触失败恢复线 → stay + 用户 traceback 数据收集 |
+| V0.65.1 (33) | 报告纪律 — pytest 必跑 ≥ 单次, 不凭推断写 "cover unchanged" |
+| V0.66 (34) | 数据驱动观测前置 — 没 per-call latency 不盲冲 wallclock/retry 调参, 加 instrumentation |
+| **V0.67 (35 新维度)** | **工具就位等数据 = 中段状态, 显式 maintainer-stay doc 占位防 stale (跟 V0.61.0/V0.64.0 同骨架). autonomous 不擅自跑用户 \$ 真测产 baseline.** |
+
+累计 conservative reframe V0.42-V0.67 14 次: image cache / W5-C.2 / send amount / type-only
+detector / simplify extract / fingerprint pool / A'' corpus / destructive 真删 / pilot cassette
+stub / V0.61 真测 stub / V0.64 三连失败 stay / V0.65.1 报告纪律 / V0.66 LLM 慢观测前置 /
+V0.67 V0.66.x.1 数据等用户 stay.
+
+### Tests
+
+V0.67.0 = doc only (~70 doc LOC, 0 src). pytest tests/ → 1011 passed + 29 skipped (跟 V0.66.1
+baseline 0 regression). 4 处同步 bump (CHANGELOG + pyproject + __init__ + uv.lock self-ref)
+防 `76bcce3` carry-over 坑.
+
+(累计真发现至 V0.67: 28 个不变; V0.67 系列 +0 — sweep audit-only.)
+
 ## [0.66.1] - 2026-05-12
 
 ### Fix (V0.66.1 plan_elapsed_s instrumentation — V0.66.0 plan 锁阶段 1/3 落地, TDD-first 红绿 + V0.66.2 数据驱动 baseline)
