@@ -2,6 +2,86 @@
 
 All notable changes to web-agent. 版本号遵循 SemVer 简化形式（V<major>.<minor>.<patch>）。
 
+## [0.57.0] - 2026-05-11
+
+### Feat (V0.57 pilot 经验 #1 — Monaco hidden textarea SoM walker exempt + bbox override)
+
+Pilot 真测 #1 weak: "Monaco editor 焦点 (SoM 看不到隐藏 textarea)". Monaco editor (vscode.dev /
+CodeSandbox / Replit 等 in-browser IDE 主流) 用 `.monaco-editor` 外壳 + 内部隐藏 `<textarea
+class="inputarea">` (`1×1px + opacity 0`) 接收 keystroke. V0.x SoM walker 现有 zero-size +
+opacity filter (perceiver.py:51-60) 把 Monaco textarea **双重过滤** → SoM 看不到 → LLM 无法
+click/type.
+
+V0.57.0 narrow fix: walker 加 `.monaco-editor` descendant exempt, bbox override 用 parent
+`.monaco-editor` outer rect (LLM 视觉化看到 mark 框, actuator 仍走 V0.22.2 data-som-id selector
+点 textarea 本身).
+
+### Changed (~15 src LOC + ~100 test LOC)
+
+- `src/web_agent/perceiver.py` `_SOM_INJECT_JS` walker JS:
+  - Line 51-60 filter 加 `monacoParents` WeakMap 追踪 `.monaco-editor` descendant
+  - `r.width <= 1 || r.height <= 1` check 改 `!monacoParent && (...)` (Monaco exempt)
+  - `opacity < 0.05` check 同 `!monacoParent && (...)` (Monaco exempt)
+  - **Keep**: `display:none / visibility:hidden / viewport-clip` (honeypot 仍拦)
+  - map() 阶段: `const r = monacoParent ? monacoParent.getBoundingClientRect() : el.getBoundingClientRect();`
+    bbox override 用 parent .monaco-editor outer rect
+- `tests/test_perceiver_monaco.py` 新 (3 tests):
+  - `test_som_inject_js_contains_monaco_exempt_keywords` fast unit (防回归 string invariant)
+  - `test_som_inject_js_monaco_exempt_skips_zero_size_filter` fast unit (filter pattern 验)
+  - `test_monaco_textarea_in_marks_via_walker_exempt` chromium real (RUN_SLOW gate, ~5s 不烧 token):
+    - data URI 加载 Monaco minimal fixture (`.monaco-editor` + `<textarea class="inputarea">` 1×1 opacity 0 + canvas + control button)
+    - assert Monaco textarea 出现 marks (exempt 生效)
+    - assert bbox > 100 (= parent .monaco-editor 400×200 rect, 不是 textarea 1×1)
+    - assert control button 仍出现 (regression-free)
+- `pyproject.toml` / `__init__.py` 0.56.0 → 0.57.0
+- `uv.lock` 同步
+- `CHANGELOG.md` V0.57.0 entry (本)
+
+### Decision 门槛 (V0.57 验证) — autonomous + maintainer 分层
+
+| 指标 | target | autonomous 真测结果 |
+|------|--------|-------------------|
+| Monaco textarea 出现 marks (exempt 生效) | 1+ mark | ✅ chromium real test pass |
+| bbox override parent rect | bbox.w > 100, bbox.h > 50 | ✅ 真测 400×200 parent rect |
+| control button regression | 仍出现 marks | ✅ |
+| 既有 perceiver tests | 42 全 pass | ✅ 0 regression |
+| pytest | ≥ 984 | **986** ✅ (+2 V0.57 fast, +1 slow chromium gated) |
+| mypy / ruff | clean | clean (54 src) |
+| **真站 vscode.dev cassette** | **真 LLM click+type 输入成功** | **❌ maintainer 红线** (烧 token + 真访 + 各 IDE 版本变体) |
+
+### Pilot 经验 #1 → 真发现链路 (不沉淀 #N — autonomous narrow filter exempt)
+
+| 阶段 | SoM Monaco coverage |
+|------|---------------------|
+| V0.38 F2 walker merge | 不照顾 Monaco, zero-size + opacity filter 默拦 |
+| Pilot 真测 #1 | Monaco editor click/type 真测 fail (SoM 看不到 hidden textarea) |
+| **V0.57.0 fix** (本) | `.monaco-editor` exempt + bbox parent override, fast unit + chromium real test verify |
+| V0.57.x.1 (maintainer 红线) | 真 vscode.dev cassette 真测 LLM click+type 真输入成功 |
+
+### V0.34 教训累计应用至 V0.57 (27 系列贯彻)
+
+| 系列 | 教训应用 |
+|------|---------|
+| V0.55 | pilot 真测沉淀 → narrow sig 跨页维度 |
+| V0.56 | pilot 真测沉淀 → SYSTEM_PROMPT example-driven 重写 |
+| **V0.57** | **pilot 真测沉淀 → SoM walker narrow Monaco selector exempt + chromium real fast test 验** |
+
+**V0.57 教训应用新维度**: **filter exempt narrow path** — Monaco 是单一 component family, 不
+generalize 到所有 zero-size/opacity 元素 (那会引入 honeypot 风险). closest('.monaco-editor')
+是 precise whitelist, 防 false-positive 仍拦 honeypot. 跟 V0.49 conservative scope (仅修真发现
+evidence) 同模式 — narrow exempt over broad change.
+
+(累计真发现至 V0.57: 28 个不变; V0.57 系列 +0 — pilot narrow filter exempt, 不催 catch.)
+
+### V0.58 主题候选 (V0.57 完后, 等用户)
+
+Pilot 经验 3 项全完 (V0.55/V0.56/V0.57). 累计:
+- 代理层接入 (V0.48.2 #26 催生)
+- V0.57.x.1 真站 vscode.dev cassette 真测 (user 红线 + 烧 token)
+- V0.56.x.1 多字段 form cassette 真测 (user 红线 + ~$0.05)
+- V0.42.x.1 / V0.51.x.1 真测 sample
+- 其他用户提的方向
+
 ## [0.56.0] - 2026-05-11
 
 ### Feat (V0.56 pilot 经验 #2 — SYSTEM_PROMPT 多字段 type 协议 example-driven 重写)

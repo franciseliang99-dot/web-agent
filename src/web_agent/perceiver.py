@@ -48,20 +48,30 @@ _SOM_INJECT_JS = """
       }
     });
   }
+  // V0.57.0 pilot #1: Monaco editor 隐藏 textarea (.monaco-editor .inputarea) 通常 1×1px +
+  // opacity 0, 旧 filter 把 Monaco textarea 双重过滤掉 → SoM 看不到. exempt 让 Monaco descendant
+  // 通过 zero-size + opacity 检查 (keep display:none/visibility:hidden/viewport — honeypot 仍拦).
+  // bbox override 用 parent .monaco-editor outer rect 让 LLM 视觉看到 mark (Monaco textarea 1×1
+  // 视觉无用). actuator V0.22.2 data-som-id selector 仍点 textarea 元素本身, 不依赖 bbox 坐标.
+  const monacoParents = new WeakMap();
   const els = collected.filter(e => {
     const r = e.getBoundingClientRect();
-    if (r.width <= 1 || r.height <= 1) return false;
+    const monacoParent = (e.closest && e.closest('.monaco-editor')) || null;
+    if (monacoParent) monacoParents.set(e, monacoParent);
+    if (!monacoParent && (r.width <= 1 || r.height <= 1)) return false;
     if (r.bottom < 0 || r.top > window.innerHeight) return false;
     if (r.right < 0 || r.left > window.innerWidth) return false;
     const style = window.getComputedStyle(e);
     if (style.visibility === 'hidden' || style.display === 'none') return false;
-    if (parseFloat(style.opacity) < 0.05) return false;
+    if (!monacoParent && parseFloat(style.opacity) < 0.05) return false;
     return true;
   });
   document.querySelectorAll('[data-som-mark]').forEach(e => e.remove());
   const colors = ['#FF3B30', '#34C759', '#007AFF', '#AF52DE', '#FF9500', '#5AC8FA'];
   return els.map((el, i) => {
-    const r = el.getBoundingClientRect();
+    // V0.57.0 pilot #1: Monaco textarea bbox 用 parent .monaco-editor outer rect (LLM 视觉化).
+    const monacoParent = monacoParents.get(el);
+    const r = monacoParent ? monacoParent.getBoundingClientRect() : el.getBoundingClientRect();
     const id = i + 1 + ID_OFFSET;  // V0.22.1: iframe 路径下 offset>0
     // V0.22.2: 给元素挂 data-som-id 让 actuator iframe 路径走 frame.locator(`[data-som-id="N"]`)
     el.setAttribute('data-som-id', String(id));
