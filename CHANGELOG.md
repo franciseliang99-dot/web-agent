@@ -2,6 +2,34 @@
 
 All notable changes to web-agent. 版本号遵循 SemVer 简化形式（V<major>.<minor>.<patch>）。
 
+## [0.69.1] - 2026-05-12
+
+### Feat (V0.66.6 — V0.66.5 假说 2 验证 instrumentation: `WEB_AGENT_VISION_DETAIL` env knob)
+
+V0.66.5 ticket OpenRouter Qwen3-VL real-task wallclock 假说 2: `image_url.detail="high"`
+硬编码 (openai.py:86) 让 Qwen3-VL 对 1280×800 真 screenshot 跑全 vision encoding,
+比 `low` (内部 downscale 512×512) 慢一个数量级.
+
+`src/web_agent/llm/openai.py`:
+- 加 `import os`.
+- `plan()` 内 user_content 构造前读 `WEB_AGENT_VISION_DETAIL` env (default `"high"`),
+  验证 in `("low", "high", "auto")` 否则 fallback `"high"` 防 OpenAI 400.
+
+Default 不变 (保 V0.66.4 SoM 编号识别红线). `low` 仅 opt-in 给 V0.66.5 假说 2 真测对比.
+
+TDD red→green (3 新测试 in `tests/test_llm_openai.py`):
+- `test_openai_client_plan_vision_detail_default_high`: env 未设 → "high"
+- `test_openai_client_plan_vision_detail_low_via_env`: env=low → "low"
+- `test_openai_client_plan_vision_detail_invalid_falls_back_to_high`: typo → "high"
+
+红 (assert 'high' == 'low' AssertionError) → 绿 (18/18 tests/test_llm_openai.py 过).
+
+### V0.66.5 decision tree (实测对比待跑后填)
+
+- wallclock < 20s/step + SoM 编号识别仍准 → 假说 2 ✅, recommend `low` for cost dogfood
+- wallclock 大降 + 编号识别糊 → 假说 2 部分确认, `low` 不可用 → 升级 Path B (DashScope)
+- wallclock 不变 (~100s) → 排除假说 2, 落到假说 1 (OpenRouter 路由) 或 3 (DOM 长)
+
 ## [0.69.0] - 2026-05-12
 
 ### Feat (V0.69 navigation side-effect detection — Step.url_before/after 让 LLM 因果归因 nav)

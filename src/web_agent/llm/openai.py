@@ -15,6 +15,7 @@ Kimi 也是自动 cache，命中后 ~6× 折扣。
 from __future__ import annotations
 
 import json
+import os
 from typing import TYPE_CHECKING, Any
 
 from openai import AsyncOpenAI
@@ -84,12 +85,18 @@ class OpenAIClient:
         # OpenAI vision 原生支持 png/jpeg/gif/webp; data URL scheme 无关 OpenAI Kimi/Moonshot 兼容层.
         from web_agent.perceiver import current_screenshot_format
         _mime = f"image/{current_screenshot_format()}"
+        # V0.66.6 (Path A — V0.66.5 ticket 假说 2 验证): WEB_AGENT_VISION_DETAIL env var
+        # opt-in 切 "low" 给真 task wallclock 实测; default "high" 保 V0.66.4 SoM 识别红线.
+        # 非法值 (typo / future variant) → fallback "high" 防 OpenAI 400.
+        _detail = os.environ.get("WEB_AGENT_VISION_DETAIL", "high").lower().strip()
+        if _detail not in ("low", "high", "auto"):
+            _detail = "high"
         user_content: list[dict[str, Any]] = [
             {
                 "type": "image_url",
                 "image_url": {
                     "url": f"data:{_mime};base64,{screenshot_b64}",
-                    "detail": "high",  # 'low' 省 token 但 SoM 编号易看不清；'high' 更稳
+                    "detail": _detail,
                 },
             },
             {"type": "text", "text": build_user_text(

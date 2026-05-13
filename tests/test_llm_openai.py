@@ -124,6 +124,90 @@ def test_openai_client_kimi_detection_via_base_url(monkeypatch):
     assert client._is_kimi is True
 
 
+@pytest.mark.asyncio
+async def test_openai_client_plan_vision_detail_default_high(monkeypatch):
+    """V0.66.6 (Path A): WEB_AGENT_VISION_DETAIL 未设 → image_url.detail = 'high' (默认)."""
+    from collections import deque
+    from unittest.mock import AsyncMock, MagicMock
+
+    from web_agent.perceiver import Mark
+    from web_agent.trace import Trace
+
+    monkeypatch.setenv("OPENAI_API_KEY", "sk-test")
+    monkeypatch.delenv("OPENAI_BASE_URL", raising=False)
+    monkeypatch.delenv("WEB_AGENT_VISION_DETAIL", raising=False)
+    client = OpenAIClient()
+    mock_resp = MagicMock()
+    mock_resp.choices = [MagicMock()]
+    mock_resp.choices[0].message.tool_calls = [
+        MagicMock(function=MagicMock(name="done", arguments='{"thought":"t","result":"r"}'))
+    ]
+    mock_resp.choices[0].message.tool_calls[0].function.name = "done"
+    mock_resp.usage = None
+    client._client.chat.completions.create = AsyncMock(return_value=mock_resp)
+    trace = Trace(task_id="t", goal="g", steps=deque())
+    await client.plan(goal="g", screenshot_b64="b", marks=[Mark(id=1, tag="a", role="a", text="a", bbox={"x":0,"y":0,"w":1,"h":1})], trace=trace)
+    kwargs = client._client.chat.completions.create.call_args.kwargs
+    image_block = kwargs["messages"][1]["content"][0]
+    assert image_block["image_url"]["detail"] == "high"
+
+
+@pytest.mark.asyncio
+async def test_openai_client_plan_vision_detail_low_via_env(monkeypatch):
+    """V0.66.6 (Path A): WEB_AGENT_VISION_DETAIL=low → image_url.detail = 'low' (省 token + 快)."""
+    from collections import deque
+    from unittest.mock import AsyncMock, MagicMock
+
+    from web_agent.perceiver import Mark
+    from web_agent.trace import Trace
+
+    monkeypatch.setenv("OPENAI_API_KEY", "sk-test")
+    monkeypatch.delenv("OPENAI_BASE_URL", raising=False)
+    monkeypatch.setenv("WEB_AGENT_VISION_DETAIL", "low")
+    client = OpenAIClient()
+    mock_resp = MagicMock()
+    mock_resp.choices = [MagicMock()]
+    mock_resp.choices[0].message.tool_calls = [
+        MagicMock(function=MagicMock(name="done", arguments='{"thought":"t","result":"r"}'))
+    ]
+    mock_resp.choices[0].message.tool_calls[0].function.name = "done"
+    mock_resp.usage = None
+    client._client.chat.completions.create = AsyncMock(return_value=mock_resp)
+    trace = Trace(task_id="t", goal="g", steps=deque())
+    await client.plan(goal="g", screenshot_b64="b", marks=[Mark(id=1, tag="a", role="a", text="a", bbox={"x":0,"y":0,"w":1,"h":1})], trace=trace)
+    kwargs = client._client.chat.completions.create.call_args.kwargs
+    image_block = kwargs["messages"][1]["content"][0]
+    assert image_block["image_url"]["detail"] == "low"
+
+
+@pytest.mark.asyncio
+async def test_openai_client_plan_vision_detail_invalid_falls_back_to_high(monkeypatch):
+    """V0.66.6 (Path A): 非法值 (typo / future variant) → fallback 'high' 防止 OpenAI 400."""
+    from collections import deque
+    from unittest.mock import AsyncMock, MagicMock
+
+    from web_agent.perceiver import Mark
+    from web_agent.trace import Trace
+
+    monkeypatch.setenv("OPENAI_API_KEY", "sk-test")
+    monkeypatch.delenv("OPENAI_BASE_URL", raising=False)
+    monkeypatch.setenv("WEB_AGENT_VISION_DETAIL", "ultra-high-typo")
+    client = OpenAIClient()
+    mock_resp = MagicMock()
+    mock_resp.choices = [MagicMock()]
+    mock_resp.choices[0].message.tool_calls = [
+        MagicMock(function=MagicMock(name="done", arguments='{"thought":"t","result":"r"}'))
+    ]
+    mock_resp.choices[0].message.tool_calls[0].function.name = "done"
+    mock_resp.usage = None
+    client._client.chat.completions.create = AsyncMock(return_value=mock_resp)
+    trace = Trace(task_id="t", goal="g", steps=deque())
+    await client.plan(goal="g", screenshot_b64="b", marks=[Mark(id=1, tag="a", role="a", text="a", bbox={"x":0,"y":0,"w":1,"h":1})], trace=trace)
+    kwargs = client._client.chat.completions.create.call_args.kwargs
+    image_block = kwargs["messages"][1]["content"][0]
+    assert image_block["image_url"]["detail"] == "high"
+
+
 def test_openai_client_openrouter_detection_via_base_url(monkeypatch):
     """V0.66.4: base_url 含 "openrouter.ai" → _is_openrouter=True, 走 tool_choice="auto"
     (OpenRouter Qwen3-VL 等上游不支持 "required" 直接 404, 跟 Kimi 同 quirks)."""
