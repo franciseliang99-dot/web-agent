@@ -169,6 +169,86 @@ def test_5window_does_not_trigger_with_only_2_same() -> None:
         window.append(sig)
 
 
+# --- V0.55.0 pilot #3: _action_signature 加 url prefix (跨页 ping-pong catch) ---
+
+
+def test_action_signature_url_prefix_separates_cross_page() -> None:
+    """V0.55.0: 同 mark_id (5) 在 page-A 跟 page-B sig 不同 (cross-page 区分)."""
+    action = ClickAction(thought="t", mark_id=5)
+    sig_a = _action_signature(action, url="https://a.test/page1")
+    sig_b = _action_signature(action, url="https://b.test/page2")
+    assert sig_a != sig_b, "V0.55.0: 跨页同 action sig 应不同 (url prefix 区分)"
+    assert "a.test" in sig_a
+    assert "b.test" in sig_b
+
+
+def test_action_signature_default_empty_url_backward_compat() -> None:
+    """V0.55.0: url="" (default) 保 V0.46.1 既有行为 (sig 不含 @url# prefix)."""
+    action = ClickAction(thought="t", mark_id=5)
+    sig_default = _action_signature(action)
+    sig_empty = _action_signature(action, url="")
+    assert sig_default == sig_empty
+    assert not sig_default.startswith("@")  # 无 @url# prefix
+
+
+def test_action_signature_url_truncated_80_char() -> None:
+    """V0.55.0: long URL prefix 截 80 char 防 query string noise + 仍区分 path."""
+    action = ClickAction(thought="t", mark_id=1)
+    long_url_a = "https://example.com/path/a?query=" + "x" * 200
+    long_url_b = "https://example.com/path/b?query=" + "x" * 200
+    sig_a = _action_signature(action, url=long_url_a)
+    sig_b = _action_signature(action, url=long_url_b)
+    # 前 80 char 含 path 区分 (path/a vs path/b 在 33-40 char 位)
+    assert sig_a != sig_b
+
+
+def test_v055_cross_page_ping_pong_caught_by_5window() -> None:
+    """V0.55.0: 跨页 ping-pong [A_click:5, B_click:5, A_click:5, B_click:5, A_click:5] →
+    5-window count(any sig) ≥ 3 catch. V0.46.1 detector 经 V0.55 url prefix 后能 catch cross-page.
+    """
+    action_5 = ClickAction(thought="t", mark_id=5)
+    url_a = "https://a.test/"
+    url_b = "https://b.test/"
+    sigs = [
+        _action_signature(action_5, url_a),  # step 0: A
+        _action_signature(action_5, url_b),  # step 1: B
+        _action_signature(action_5, url_a),  # step 2: A
+        _action_signature(action_5, url_b),  # step 3: B
+        _action_signature(action_5, url_a),  # step 4: A → window=[A,B,A,B,A] A=3 catch
+    ]
+    window: deque[str] = deque(maxlen=5)
+    triggered_at = None
+    for i, sig in enumerate(sigs):
+        candidate = (list(window) + [sig])[-5:]
+        if len(candidate) >= 5 and Counter(candidate).most_common(1)[0][1] >= 3:
+            triggered_at = i
+            break
+        window.append(sig)
+    assert triggered_at == 4, (
+        f"V0.55.0: 跨页 ping-pong 应 by step 4 trigger (A 出现 3 次), 实际 step {triggered_at}"
+    )
+
+
+def test_v055_cross_page_no_ping_pong_no_trigger() -> None:
+    """V0.55.0: 合理跨页 navigation (各 url 唯一访) 不 trigger (false-pos guard)."""
+    action_5 = ClickAction(thought="t", mark_id=5)
+    sigs = [
+        _action_signature(action_5, f"https://page{i}.test/")
+        for i in range(5)
+    ]
+    window: deque[str] = deque(maxlen=5)
+    for sig in sigs:
+        candidate = (list(window) + [sig])[-5:]
+        triggered = (
+            len(candidate) >= 5 and Counter(candidate).most_common(1)[0][1] >= 3
+        )
+        assert not triggered, f"V0.55.0: 5 唯一 url 不应 trigger, sigs={sigs}"
+        window.append(sig)
+
+
+# --- V0.46.1 5-window pattern matrix (continued from above) ---
+
+
 @pytest.mark.parametrize("pattern,should_trigger,expected_step", [
     (["A", "B", "A", "B", "A"], True, 4),       # A=3, B=2 at step 4 (alternation)
     # 注: 3-连续相同 [A,A,A,...] 由 V0.5.0 detector at step 2 catch (本测仅覆盖 V0.46.1 5-window,

@@ -91,16 +91,26 @@ def _normalize_extract_query(query: str) -> str:
     return re.sub(r"\s+", " ", s).strip()
 
 
-def _action_signature(action: Action) -> str:
+def _action_signature(action: Action, url: str = "") -> str:
     """归一化 action 用于死循环检测. V0.17.0: dataclass action 用 _action_args_only 取字段.
 
     V0.46.1 真发现 #25 follow-up: ExtractAction 特殊处理 — 删 answer (LLM 生成 noise) +
     normalize query (lowercase / punctuation / whitespace). 修 V0.44 HN WALLCLOCK task
     11 step extract loop anti_loop miss.
+
+    V0.55.0 pilot 经验沉淀 #3: 加可选 `url` prefix 让 cross-page ping-pong 分开 sig. 同 mark_id
+    在 page-A 跟 page-B 是不同 DOM 节点, 旧 sig 不区分 → V0.46.1 5-window count detector miss
+    跨页 ping-pong [A_click:5, B_click:5, A_click:5, ...]. V0.55 加 url[:80] prefix 后 5-window
+    detector 互补 catch. url="" (default) 保 V0.46.1 既有行为 (跟 V0.5.0 + V0.46.1 既有 tests 向
+    后兼容). truncate 80 char 防 long-URL noise + 仍可区分 path-level navigation.
     """
     if isinstance(action, ExtractAction):
-        return f"extract:{_normalize_extract_query(action.query)}"
-    return f"{action.type}:{json.dumps(_action_args_only(action), sort_keys=True, ensure_ascii=False)}"
+        base = f"extract:{_normalize_extract_query(action.query)}"
+    else:
+        base = f"{action.type}:{json.dumps(_action_args_only(action), sort_keys=True, ensure_ascii=False)}"
+    if url:
+        return f"@{url[:80]}#{base}"
+    return base
 
 
 def _page_fingerprint(url: str, marks: list[Mark], active_idx: int = 0) -> str:
@@ -736,7 +746,9 @@ async def run_react_loop(
             # - V0.5.0: 连续 3 次完全相同 action（type + args）→ V0.25.2 backtrack 或 abort
             # - V0.46.1 真发现 #25 follow-up: 5-window 内任意 sig 出现 ≥ 3 次 → alternation abort
             #   (V0.5.0 catch 不到 [A,B,A,B,B] 交替, V0.46.1 reframe 加 5-window count detector)
-            sig = _action_signature(action)
+            # - V0.55.0 pilot 经验 #3: sig 加 page.url[:80] prefix, 跨页 ping-pong 分开 sig.
+            #   getattr defensive — test fixture FakePage 可能无 url attr (跟 V0.21+ test stub 兼容).
+            sig = _action_signature(action, getattr(page, "url", "") or "")
             # V0.5.0 detector 优先 (早 step 触发)
             if len(recent_actions) == 3 and all(s == sig for s in recent_actions):
                 # V0.25.2: 第 1 次 trigger → page.go_back + reset 状态 + 注入 hint + retry once

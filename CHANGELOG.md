@@ -2,6 +2,72 @@
 
 All notable changes to web-agent. 版本号遵循 SemVer 简化形式（V<major>.<minor>.<patch>）。
 
+## [0.55.0] - 2026-05-11
+
+### Feat (V0.55 pilot 经验 #3 — _action_signature 加 url prefix 跨页 ping-pong catch)
+
+用户 pilot 真测沉淀 3 对强/弱 pattern, V0.55 实施 #3 (高 ROI autonomous): `_action_signature` 加
+可选 `url` 参数, cross-page ping-pong (`[A_click:5, B_click:5, A_click:5, B_click:5, A_click:5]`)
+现可被 V0.46.1 5-window count detector catch. 互补 V0.46.1 alternation 的跨页维度.
+
+### Changed (~10 src LOC + ~70 test LOC)
+
+- `src/web_agent/loop.py`:
+  - `_action_signature(action, url="")` 加可选 url 参数, 非空时 prefix `@{url[:80]}#` 加 sig 前
+    (default "" 保 V0.46.1/V0.5.0 既有 tests 向后兼容)
+  - caller L739: `sig = _action_signature(action, getattr(page, "url", "") or "")` defensive
+    getattr 兼容 test fixture FakePage 缺 url attr
+- `tests/test_anti_loop_extract.py` +5 fast tests:
+  - `test_action_signature_url_prefix_separates_cross_page` (跨页同 mark_id sig 不同)
+  - `test_action_signature_default_empty_url_backward_compat` (default "" 跟 V0.46.1 same)
+  - `test_action_signature_url_truncated_80_char` (long URL 截 + path 仍区分)
+  - `test_v055_cross_page_ping_pong_caught_by_5window` (核心: 跨页 [A,B,A,B,A] step 4 catch)
+  - `test_v055_cross_page_no_ping_pong_no_trigger` (false-pos guard: 5 唯一 url 不 trigger)
+- `pyproject.toml` / `__init__.py` 0.54.0 → 0.55.0
+- `uv.lock` 同步
+- `CHANGELOG.md` V0.55.0 entry (本)
+
+### Pilot 经验 #3 → 真发现链路
+
+| 阶段 | catch 路径 |
+|------|----------|
+| V0.5.0 (初) | 3 连续完全相同 sig → abort |
+| V0.46.1 (#25 follow-up) | 5-window + count(any sig) ≥ 3 → alternation abort (但 sig 不含 url) |
+| Pilot 真测 #3 | 跨页 mark_id ping-pong [A_click:5, B_click:5, A_click:5, ...] miss (url 变 sig 不变) |
+| **V0.55.0 fix** (本) | sig 加 `@url[:80]#` prefix → 5-window detector 互补 catch 跨页 ping-pong |
+
+### V0.34 教训累计应用至 V0.55 (25 系列贯彻)
+
+| 系列 | 教训应用 |
+|------|---------|
+| V0.46 | plan 推保守, 真测发现保守不够扩 scope (5-window detector) |
+| **V0.55** | **pilot 真测沉淀 → narrow follow-up sig 维度补完** (跨页 ping-pong, V0.46.1 detector cover 不到) |
+
+V0.55 教训应用模式: **真用户 pilot 数据 > plan agent 假设**. V0.46.1 设计时 plan agent 假设 sig
+按 action_type+args 足够 (同 url 默隐含), pilot 真测 #3 暴露跨页 ping-pong 漂移 gap. 跟 V0.44.0
+#25 V0.28 subagent A 假设双端推翻 同模式 — 历史 plan 假设需用真测数据复审.
+
+(累计真发现至 V0.55: 28 个不变; V0.55 系列 +0 — pilot 经验 narrow follow-up fix, 不催新 catch.)
+
+### Decision 门槛 (V0.55 验证)
+
+| 指标 | target | 真测结果 |
+|------|--------|---------|
+| 跨页 ping-pong [A,B,A,B,A] catch | step ≤4 trigger | ✅ test_v055_cross_page_ping_pong_caught_by_5window step 4 |
+| 5 唯一 url false-pos | 不 trigger | ✅ test_v055_cross_page_no_ping_pong_no_trigger |
+| V0.5.0 + V0.46.1 既有 tests | 全 pass | ✅ 23 既有 anti_loop + 6 既有 safety_loop_integration |
+| pytest | ≥ 978 | **983** ✅ (978 + 5 V0.55 new) |
+| mypy / ruff | clean | clean (54 src) |
+| FakePage stub 兼容 | url attr 缺时不 crash | ✅ getattr defensive |
+
+### V0.56 主题候选 (V0.55 完后, 等用户)
+
+Pilot 经验剩 2 项 + 其他:
+- **Pilot #2 SYSTEM_PROMPT 多字段 type 协议重写** (autonomous SYSTEM_PROMPT, cassette 真测烧 ~$0.05 user 红线)
+- **Pilot #1 Monaco hidden textarea** (canvas OCR / a11y tree fallback, maintainer 红线真站测)
+- 代理层接入 (V0.48.2 #26 催生)
+- 其他用户提的方向
+
 ## [0.54.0] - 2026-05-11
 
 ### Doc (V0.54 V0.42.x.1 + V0.51.x.1 真跑 sample sweep — V0.51 sanity 完成 + V0.42 maintainer stay)
