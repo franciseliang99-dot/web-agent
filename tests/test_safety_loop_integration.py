@@ -55,6 +55,8 @@ class FakePage:
     成 no-op, 这里 Page 本身不需要更多接口。
     """
 
+    url = "about:blank"  # V0.69 nav-side-effect snap 兜底默认
+
     class _Keyboard:
         async def press(self, key: str) -> None:
             return None

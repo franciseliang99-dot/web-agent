@@ -846,6 +846,8 @@ async def run_react_loop(
                 return result
             recent_action_window.append(sig)
 
+            # V0.69: action 前后 page.url snap → Step.url_before/after 让 LLM 因果归因 nav 副作用.
+            url_before = page.url
             # V0.17.0: match-case dispatch on dataclass discriminated union (mypy narrow 自动)
             obs = ""
             match action:
@@ -968,6 +970,7 @@ async def run_react_loop(
                         last_clicked_mark = None  # 即便没切 active, 关 tab 后保险重置
                         obs = f"closed tab [{tab_idx}], active_idx now={active_idx}"
 
+            url_after = page.url  # V0.69 snap-after; Step.for_llm 仅 != url_before 时注入 nav_side_effect
             action_args = _action_args_only(action)
             if elicited_approval_rule is not None:
                 action_args["elicited_approval_rule"] = elicited_approval_rule  # V0.18.0
@@ -985,6 +988,8 @@ async def run_react_loop(
                 cache_creation_input_tokens=step_cache_creation_tokens,
                 cache_read_input_tokens=step_cache_read_tokens,
                 plan_elapsed_s=step_plan_elapsed_s,  # V0.66.1
+                url_before=url_before,  # V0.69
+                url_after=url_after,    # V0.69
             )
             trace.append(step)
             write_step(conn, task_id, step, str(shot_path))

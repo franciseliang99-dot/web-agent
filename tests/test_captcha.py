@@ -118,6 +118,8 @@ class FakePage:
     """最小 Page stub: loop.py 直接调到 wait_for_load_state / keyboard.press,
     captcha_detect/wait 由 monkeypatch 接管, 不会到 evaluate。"""
 
+    url = "about:blank"  # V0.69 nav-side-effect snap 兜底默认
+
     class _Keyboard:
         async def press(self, key: str) -> None:
             return None

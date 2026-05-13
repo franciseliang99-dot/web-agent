@@ -30,15 +30,23 @@ class Step:
     # V0.66.1: plan() 单步 wall clock latency (time.monotonic 差, 含 SDK retry). None 表示该 step
     # 没成功 plan (LLM_FAILED) — 给 V0.66.2 Provider-aware wallclock 数据驱动定 baseline.
     plan_elapsed_s: float | None = None
+    # V0.69: action 前后 page.url snapshot — 当 url_before != url_after, for_llm 注入
+    # nav_side_effect 字段让 LLM 因果归因 "上一 action 触发了 nav" vs "自然加载". V0.68 Supabase
+    # dogfood: type URL 后 React effect 跳页, LLM 下一步在 wrong page 决策的根因解决.
+    url_before: str = ""
+    url_after: str = ""
 
     def for_llm(self) -> dict[str, Any]:
         """给 LLM 看的精简版（不带截图、observation 截断）。"""
-        return {
+        d: dict[str, Any] = {
             "step": self.step,
             "thought": self.thought,
             "action": {"type": self.action_type, **self.action_args},
             "observation": self.observation[:200],
         }
+        if self.url_before and self.url_after and self.url_before != self.url_after:
+            d["nav_side_effect"] = f"{self.url_before} → {self.url_after}"
+        return d
 
 
 @dataclass
@@ -73,6 +81,8 @@ def init_db(db_path: Path) -> sqlite3.Connection:
             cache_creation_input_tokens INTEGER DEFAULT 0,
             cache_read_input_tokens INTEGER DEFAULT 0,
             plan_elapsed_s REAL,
+            url_before TEXT DEFAULT '',
+            url_after TEXT DEFAULT '',
             PRIMARY KEY (task_id, step)
         )
         """
@@ -93,6 +103,12 @@ def init_db(db_path: Path) -> sqlite3.Connection:
         conn.execute("ALTER TABLE steps ADD COLUMN plan_elapsed_s REAL")
     except sqlite3.OperationalError:
         pass  # column 已存
+    # V0.69: url_before / url_after ALTER 兼容老 db.
+    for col in ("url_before", "url_after"):
+        try:
+            conn.execute(f"ALTER TABLE steps ADD COLUMN {col} TEXT DEFAULT ''")
+        except sqlite3.OperationalError:
+            pass
     conn.execute(
         """
         CREATE TABLE IF NOT EXISTS tasks (
@@ -114,13 +130,14 @@ def write_step(
     s: Step,
     screenshot_path: str = "",
 ) -> None:
-    # V0.33.1 + V0.42.0 + V0.66.1: 加 cache_creation/cache_read + plan_elapsed_s INSERT
+    # V0.33.1 + V0.42.0 + V0.66.1 + V0.69: 加 cache_creation/cache_read + plan_elapsed_s + url_before/after INSERT
     conn.execute(
         "INSERT OR REPLACE INTO steps "
         "(task_id, step, ts, thought, action_type, action_args, screenshot_path, "
         "observation, input_tokens, output_tokens, "
-        "cache_creation_input_tokens, cache_read_input_tokens, plan_elapsed_s) "
-        "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)",
+        "cache_creation_input_tokens, cache_read_input_tokens, plan_elapsed_s, "
+        "url_before, url_after) "
+        "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
         (
             task_id,
             s.step,
@@ -135,6 +152,8 @@ def write_step(
             s.cache_creation_input_tokens,
             s.cache_read_input_tokens,
             s.plan_elapsed_s,
+            s.url_before,
+            s.url_after,
         ),
     )
     conn.commit()

@@ -2,6 +2,53 @@
 
 All notable changes to web-agent. 版本号遵循 SemVer 简化形式（V<major>.<minor>.<patch>）。
 
+## [0.69.0] - 2026-05-12
+
+### Feat (V0.69 navigation side-effect detection — Step.url_before/after 让 LLM 因果归因 nav)
+
+V0.68 dogfood (Supabase Dashboard) 暴露 `type "https://vanboard.vercel.app"` 后
+React-effect 把页面跳到 Policies, LLM 下一步 perceive 在 wrong page 决策, 浪费 step.
+根因: ReAct loop 让 LLM 看 step N+1 screenshot 时**不知道 N+1 的页面变化是 N action 触发的**
+(vs 自然加载 vs 后台改的).
+
+主改 (`src/web_agent/trace.py` + `src/web_agent/loop.py`):
+- `Step` 加 `url_before: str=""` / `url_after: str=""` 字段, default 空保老 caller 兼容.
+- `Step.for_llm()` **仅当 `url_before != url_after`** (且两者非空) 时注入 `nav_side_effect: "X → Y"` 字段;
+  否则不污染 LLM context. LLM 自然看见 trace 历史段含因果归因.
+- `loop.py` dispatch action 前后各 `snap = page.url`, Step 构造传参.
+- `init_db` CREATE TABLE 加 `url_before TEXT DEFAULT ''` + `url_after TEXT DEFAULT ''`,
+  ALTER 幂等 try/except 兼容老 db. `write_step` INSERT 加 2 列.
+
+### 设计权衡 (subagent /simplify 审过 5 候选全 reject)
+
+| 候选 | 判决 | 理由 |
+|------|------|------|
+| 单 `url_changed: "X→Y"` 替 2 字段 | reject | 失 SQL queryability + replay 重建 |
+| nav_side_effect 始终输出 (不条件) | reject | 大部分 step 不 nav, 噪声 |
+| `step_meta JSON` blob 替 2 列 | reject (defer V0.70+) | retrofit 跨 V0.33.1/V0.42.0/V0.66.1 cols 超 scope |
+| 抽 FakePage base class | reject | 5 个 unrelated test 各自 tailored, 抽象 cost > 5 行省 |
+| `_snap_url(page)` helper | reject | `page.url` 已是 1-token attr, 包装无价值 |
+
+### Anti-loop 兼容
+
+V0.55 `_action_signature` 已带 `url[:80]` prefix, type@page-A vs type@page-B sig 不同,
+跳页后 anti-loop **不会误判**. V0.69 无需扩.
+
+### TDD red→green (`tests/test_trace_nav_side_effect.py` 7 测试)
+
+- `test_step_default_url_fields_empty` / `..._no_nav_side_effect_when_both_empty`: 兼容老 caller.
+- `..._no_nav_side_effect_when_urls_equal`: 同 URL 不污染.
+- `..._adds_nav_side_effect_when_url_changed`: Supabase 真场景 (auth/url-configuration → policies).
+- `..._creates_url_before_after_columns` / `..._alter_url_columns_idempotent`: schema + ALTER 幂等.
+- `..._persists_url_fields_round_trip`: write_step round-trip.
+
+红 (TypeError: unexpected keyword url_before) → 绿 (7/7 passed) → 全套件 **1036/1036**.
+
+### 5 FakePage mock 加 url 兜底
+
+`test_captcha.py` + `test_safety_loop_integration.py` 加 class-level `url = "about:blank"`
+(另 3 个 mock 已有 `self.url` 或 `__init__(url=...)` instance attr 不动).
+
 ## [0.68.2] - 2026-05-12
 
 ### Doc (V0.66.5 ticket — OpenRouter Qwen3-VL real-task wallclock 10-100x 慢于 smoke, 待 DashScope 直连对照)
