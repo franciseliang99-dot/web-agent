@@ -342,6 +342,28 @@ async def _walk_child_frames_concurrent(
     return all_marks, all_frames, all_hosts
 
 
+async def _screenshot_via_cdp(page: Page, fmt: str, quality: int) -> bytes:
+    """V0.65.0: CDP raw Page.captureScreenshot 绕 Playwright _preparePage 全 frame race + fonts.race.
+
+    V0.61-V0.64 四次同根因 step 1 timeout 红线 (vanboard prod / Supabase Dashboard click 后
+    perceive 卡 15s) + 双轮 subagent 验证: 元凶 = screenshotter.js:168/216/218 _preparePage
+    串行 inPagePrepareForScreenshots + fonts.ready race 在 complex SPA + React rerender 卡.
+    CDP 走 Chromium DevTools Protocol Page.captureScreenshot 跳整个 wait 链直接拍 frame buffer.
+
+    丢: animations/caret cosmetic + DOM 保险 wait (Supabase Dashboard 微抖动 + caret 闪可接受).
+    保: format/quality 透传 current_screenshot_* 单源 + viewport-only (captureBeyondViewport 默 false).
+    """
+    client = await page.context.new_cdp_session(page)
+    try:
+        params: dict[str, object] = {"format": fmt, "optimizeForSpeed": True}
+        if fmt in ("webp", "jpeg"):
+            params["quality"] = quality
+        result = await client.send("Page.captureScreenshot", params)
+        return base64.b64decode(cast(str, result["data"]))
+    finally:
+        await client.detach()
+
+
 async def perceive(page: Page) -> tuple[list[Mark], str, list[str]]:
     """先尝试关弹窗 → 注入 SoM 标注 (主 frame + 同源 iframe) → 截带标注的视口图 → 移除标注。
 
@@ -399,32 +421,11 @@ async def perceive(page: Page) -> tuple[list[Mark], str, list[str]]:
         )
     # renumber 失败不致命 (DOM 端 stale id, 但 Mark.id 已是新值) — log + 继续
     await asyncio.gather(*renumber_tasks, return_exceptions=True)
-    # V0.33.3: env `WEB_AGENT_SCREENSHOT_FORMAT=webp` opt-in (默 png 兼容 V0.33.2 baseline).
-    # V0.62.0: 前置 DOM 保险 + screenshot timeout 30s→15s + animations/caret cosmetic.
-    # 远程字体 stall `document.fonts.ready` 致 default 30s 僵死 (screenshotter.js:218-223
-    # race). 真 skip fonts wait 需 `PW_TEST_SCREENSHOT_NO_FONTS_READY` env, 标 TODO 留红线.
-    try:
-        await page.wait_for_load_state("domcontentloaded", timeout=10000)
-    except Exception:
-        pass
-    _fmt = current_screenshot_format()
-    if _fmt == "webp":
-        screenshot_bytes = await page.screenshot(
-            type="webp",  # type: ignore[arg-type]
-            quality=current_screenshot_quality(),
-            full_page=False,
-            timeout=15000,
-            animations="disabled",
-            caret="hide",
-        )
-    else:
-        screenshot_bytes = await page.screenshot(
-            type="png",
-            full_page=False,
-            timeout=15000,
-            animations="disabled",
-            caret="hide",
-        )
+    # V0.65.0: CDP raw 替代 page.screenshot() — V0.62 前置 wait + timeout/animations/caret
+    # 全去掉, V0.63 PW_TEST_SCREENSHOT_NO_FONTS_READY env opt-in 仍保留 (向后兼容降级路径).
+    screenshot_bytes = await _screenshot_via_cdp(
+        page, current_screenshot_format(), current_screenshot_quality(),
+    )
     # V0.34.4: cleanup 主 + 所有 child frame 并发 (各 frame _remove_som 独立)
     cleanup_tasks = [_remove_som_in_frame(page.main_frame)]
     for frame, _fpath, _count in child_frames:

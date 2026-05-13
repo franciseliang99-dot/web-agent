@@ -2,6 +2,78 @@
 
 All notable changes to web-agent. 版本号遵循 SemVer 简化形式（V<major>.<minor>.<patch>）。
 
+## [0.65.0] - 2026-05-12
+
+### Fix (V0.65 CDP raw screenshot — V0.61-V0.64 四连同根因终局 + screenshotter.js _preparePage 全 frame race 绕过)
+
+V0.64 (`7fdaef5`) audit doc 锁定 CDP raw plan 后, 用户 prod dogfood findings 给出稳定信号链
+(step 0 perceive 一定 ✅ 57/62/59 marks / step 1 click 后一定 timeout / fonts 行已不在 log /
+"Frame was detached" + "Target page closed" step 0 也照过非 root cause / click input 后 React
+rerender 是真触发点). subagent 双轮验证元凶: `screenshotter.js:168/216/218` _preparePage 串
+行 `inPagePrepareForScreenshots` + `document.fonts.ready` race 在 complex SPA + cross-origin
+iframe + React rerender 卡 15s deadline. CDP 直接走 Chromium DevTools Protocol
+`Page.captureScreenshot` 跳整个 wait 链, 直接拍当前 frame buffer.
+
+### 修补 (perceiver.py 新 helper + perceive() 替换, 净 +13 行)
+
+新 `_screenshot_via_cdp(page, fmt, quality)` helper:
+
+```python
+client = await page.context.new_cdp_session(page)
+try:
+    params = {"format": fmt, "optimizeForSpeed": True}
+    if fmt in ("webp", "jpeg"):
+        params["quality"] = quality
+    result = await client.send("Page.captureScreenshot", params)
+    return base64.b64decode(result["data"])
+finally:
+    await client.detach()
+```
+
+`perceive()` 内替换 V0.62 screenshot 块 (`page.screenshot(..., timeout=15000, animations="disabled", caret="hide")` + 前置 `wait_for_load_state("domcontentloaded", 10000)` 全去). V0.63 `PW_TEST_SCREENSHOT_NO_FONTS_READY` env opt-in 保留作降级路径 BC (用户 prod 已 export).
+
+### Step 4 subagent 6 问 verdict 复述
+
+| Q | verdict | 落地 |
+|---|---------|------|
+| Q1 `new_cdp_session` API | `_generated.py:14138-14158` `(page: Page\|Frame) → CDPSession`. **必 `detach()`** (`_cdp_session.py:42-46`), 用户草稿漏 → try/finally 补 | ✅ |
+| Q2 `Page.captureScreenshot` 参数 | `protocol.d.ts:15367-15398` `format/quality/clip/captureBeyondViewport/optimizeForSpeed`. `captureBeyondViewport=False` 默 = `full_page=False` ✓ | ✅ |
+| Q3 webp/quality 透传 | `perceiver.py:443-465` `current_screenshot_format/quality` 单源, helper 必读不硬码 | ✅ |
+| Q4 SoM inject 是否也卡 | screenshot 路径 `safeNonStallingEvaluateInAllFrames` 已设计成 reject-fast (`frames.js:422-428` `_invalidateNonStallingEvaluations`), 元凶是 `fonts.ready` race. SoM `frame.evaluate` standard 路径非 nonStalling, React rerender 不 invalidate JS context — 风险低 | ✅ **本轮不动**, 真测 1-2 轮后看 |
+| Q5 fallback 策略 | 不加 (跟 V0.62/V0.63 现状对齐, CDP 失败概率 < page.screenshot wrapper, 加 fallback hide bug) | ✅ |
+| Q6 /simplify 必要性 | 判据 ①✓ (新 helper) ④✓ (CDP session 抽象). helper ~20 行薄 wrapper + perceive() 内 ~12 行替换 = ~32 行临界. **跑** | ✅ commit 后单独 subagent |
+
+### 用户草稿 3 分歧点采纳
+
+| 分歧 | 用户草稿 | 采纳 | 理由 |
+|------|---------|------|------|
+| `detach()` | 无 | **加** try/finally | `_cdp_session.py:42-46` 不 detach leak session, 每 perceive 累积 N 个 dangling |
+| `format/quality` | 硬码 `png` | **透传 single source** | 用户 webp opt-in BC (`WEB_AGENT_SCREENSHOT_FORMAT=webp`) |
+| `optimizeForSpeed` | 未传 | **`True`** | CDP encode 提速 nice-to-have (`crPage.js:222` Playwright 内部用同 API) |
+
+### Scope 锁 (V0.65 不做的事)
+
+- SoM inject 主 frame `perceiver.py:367` 裸 await 隐患: 留 V0.66 escalation, 等 V0.65 真测归因
+- `perceive()` 顶层 `asyncio.wait_for(8s)` 兜底: 同上, 元凶若已在 screenshot 不需要
+- B 方案 DOM 文本替代 vision: 长线 defer (SYSTEM_PROMPT + image block 重协议工程量大)
+
+### V0.65.x.1 user 真测跑法
+
+```bash
+# 重启 web-agent CLI (Chrome CDP attach 不动). 跑同一 Supabase Dashboard task:
+# step 0 perceive ✅ → LLM click site URL input → step 1 perceive 应 ≤ 几秒返
+# 如 step 1 仍 timeout → V0.66 escalation: SoM 主 frame inject + asyncio.wait_for 兜底
+```
+
+V0.61-V0.64 四连终局: V0.65 prod 验证若成 → V0.65.x.1 关单 + V0.34 教训 33 系列贯彻 (CDP
+raw 绕 Playwright 高 level wait 链, 跨 stealth/perception 复用模板).
+
+### Tests
+
+`tests/test_perceive_bench_*.py` 既有 cover unchanged. CDP raw 替换不影响 marks/hosts 返回,
+仅 screenshot bytes 来源 channel 变 (Playwright wrapper → Chromium DevTools 直 raw). bug-fix-
+with-coverage, V0.65 落地后 subagent 跑 /simplify 检查 helper 抽象边界.
+
 ## [0.64.0] - 2026-05-12
 
 ### Doc (V0.64 V0.63 三连失败同根因 audit sweep 1/1 — screenshotter.js race 元凶定位 + V0.65 CDP raw plan + V0.34 教训 32 累计)
