@@ -135,6 +135,21 @@ def test_system_prompt_includes_failure_recovery_clauses():
     assert "换思路" in SYSTEM_PROMPT or "换策略" in SYSTEM_PROMPT
 
 
+def test_system_prompt_includes_multi_field_type_protocol():
+    """V0.56.0 pilot #2: SYSTEM_PROMPT 第 7 条多字段 type 协议 example-driven 重写.
+
+    Pilot 真测 #2 weak — "LLM 不熟 type 默认到 focused 协议". 原第 7 条单行裸文本协议已写但
+    LLM 多字段表单仍连续 click→type 错序. V0.56.0 expand 到含正反例 example block.
+    """
+    from web_agent.llm._schema import SYSTEM_PROMPT
+    # 严格交错 关键词 (LLM 看到此明示 click→type 严格交错)
+    for keyword in ("严格交错", "click[5]", "click[7]", "焦点", "反例"):
+        assert keyword in SYSTEM_PROMPT, f"V0.56.0: SYSTEM_PROMPT 应含 {keyword!r} 多字段 example"
+    # 正反例 mark (LLM 视觉 cue)
+    assert "✅" in SYSTEM_PROMPT
+    assert "❌" in SYSTEM_PROMPT
+
+
 # ---------- V0.21.2 build_user_text tabs header 渲染 ----------
 
 

@@ -2,6 +2,70 @@
 
 All notable changes to web-agent. 版本号遵循 SemVer 简化形式（V<major>.<minor>.<patch>）。
 
+## [0.56.0] - 2026-05-11
+
+### Feat (V0.56 pilot 经验 #2 — SYSTEM_PROMPT 多字段 type 协议 example-driven 重写)
+
+Pilot 真测 #2 weak: "多字段表单跨字段 type — LLM 不熟 'type 默认到 focused' 协议". `_schema.py`
+第 7 条**原本已写** "输入框先 click 再 type" 但单行裸文本无 example, LLM 多字段时仍连续 click 多个再
+type (焦点跑到最后一个 click, 第一个 type 写错框). V0.56.0 expand 到含正反例 example block.
+
+### Changed (~12 src LOC + ~12 test LOC)
+
+- `src/web_agent/llm/_schema.py` 第 7 条 (~12 LOC, 从 1 行扩到 ~10 行):
+  - 显式: `type` 不带 mark_id, 默认作用于上一步 click 聚焦的元素
+  - 多字段红线: **click→type 严格交错**, 不要连续 click 多个再 type (焦点会跑到最后)
+  - ✅ 正例: `click[5] (姓名) → type "Alice" → click[7] (邮箱) → type "alice@x.com" → click[9] (Submit)`
+  - ❌ 反例: `click[5] click[7] type "Alice"` — 焦点在 [7], "Alice" 写错框
+  - 长文本 (>50 字符) 走 paste (同需 click 聚焦, 但更快 + 不触发反爬键盘指纹)
+- `tests/test_llm_schema.py` +1 test `test_system_prompt_includes_multi_field_type_protocol`:
+  - 验 SYSTEM_PROMPT 含 `严格交错` / `click[5]` / `click[7]` / `焦点` / `反例` / ✅ / ❌ keywords
+  - 跟 V0.24.2 / V0.25.3 既有 SYSTEM_PROMPT invariant test 同模式
+- `pyproject.toml` / `__init__.py` 0.55.0 → 0.56.0
+- `uv.lock` 同步
+- `CHANGELOG.md` V0.56.0 entry (本)
+
+### Pilot 经验 #2 → 真发现链路 (不沉淀 #N — autonomous SYSTEM_PROMPT 重写不催 catch)
+
+| 阶段 | type 协议 |
+|------|---------|
+| V0.x.0 (V0.42 8/13 条) | `输入框先 click 再 type. type 的 submit=true 会按回车` 单行裸文本 |
+| Pilot 真测 #2 | 协议**已写但 LLM 不熟**, 多字段表单连续 click→type 错序 |
+| **V0.56.0** (本) | example-driven 重写 (~10 行) + 正反例 ✅❌ + 严格交错 keyword |
+
+### V0.34 教训累计应用至 V0.56 (26 系列贯彻)
+
+| 系列 | 教训应用 |
+|------|---------|
+| V0.55 | pilot 真测沉淀 → narrow sig 跨页维度补完 |
+| **V0.56** | **pilot 真测沉淀 → SYSTEM_PROMPT example-driven 重写** (协议已写但 LLM 不熟, 加 example 改善 follow) |
+
+V0.56 教训应用新维度: **LLM-facing protocol "写了"不等于"LLM 熟练 follow"** — 单行裸文本协议
+对 LLM 而言是隐式 / 模糊, 需正反例 example block 让 LLM 视觉化看 "应该怎么做 vs 不应该怎么做".
+跟 V0.18+ elicit / V0.27 vault / V0.42 cache_control 真测前 plan 假设 vs 真测同模式 — 设计层
+explicit 写法 ≠ LLM 真实 behavior.
+
+cassette 真测 LLM 改善 multi-field 通过率 = **user 红线** stay (跟 V0.42.x.1 / V0.49.x.1 同模式).
+
+(累计真发现至 V0.56: 28 个不变; V0.56 系列 +0 — pilot SYSTEM_PROMPT narrow rewrite.)
+
+### Decision 门槛 (V0.56 验证)
+
+| 指标 | target | 真测结果 |
+|------|--------|---------|
+| SYSTEM_PROMPT 含多字段 example | ✅ | invariant test 验 ✅❌/click[5]/click[7]/严格交错/反例 |
+| pytest | ≥ 983 | **984** ✅ (+1 V0.56) |
+| mypy / ruff | clean | clean (54 src) |
+| cassette 真测 LLM behavior | user 红线 stay | user env 跑 (~$0.05 多字段 task task) |
+
+### V0.57 主题候选 (V0.56 完后, 等用户)
+
+Pilot 经验剩 1 项 + 其他:
+- **Pilot #1 Monaco hidden textarea** (canvas OCR / a11y tree fallback, maintainer 红线真站测)
+- 代理层接入 (V0.48.2 #26 催生)
+- V0.56.x.1 user env 真测 multi-field cassette
+- 其他用户提的方向
+
 ## [0.55.0] - 2026-05-11
 
 ### Feat (V0.55 pilot 经验 #3 — _action_signature 加 url prefix 跨页 ping-pong catch)
