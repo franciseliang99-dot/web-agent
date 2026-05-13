@@ -400,15 +400,31 @@ async def perceive(page: Page) -> tuple[list[Mark], str, list[str]]:
     # renumber 失败不致命 (DOM 端 stale id, 但 Mark.id 已是新值) — log + 继续
     await asyncio.gather(*renumber_tasks, return_exceptions=True)
     # V0.33.3: env `WEB_AGENT_SCREENSHOT_FORMAT=webp` opt-in (默 png 兼容 V0.33.2 baseline).
+    # V0.62.0: 前置 DOM 保险 + screenshot timeout 30s→15s + animations/caret cosmetic.
+    # 远程字体 stall `document.fonts.ready` 致 default 30s 僵死 (screenshotter.js:218-223
+    # race). 真 skip fonts wait 需 `PW_TEST_SCREENSHOT_NO_FONTS_READY` env, 标 TODO 留红线.
+    try:
+        await page.wait_for_load_state("domcontentloaded", timeout=10000)
+    except Exception:
+        pass
     _fmt = current_screenshot_format()
     if _fmt == "webp":
         screenshot_bytes = await page.screenshot(
             type="webp",  # type: ignore[arg-type]
             quality=current_screenshot_quality(),
             full_page=False,
+            timeout=15000,
+            animations="disabled",
+            caret="hide",
         )
     else:
-        screenshot_bytes = await page.screenshot(type="png", full_page=False)
+        screenshot_bytes = await page.screenshot(
+            type="png",
+            full_page=False,
+            timeout=15000,
+            animations="disabled",
+            caret="hide",
+        )
     # V0.34.4: cleanup 主 + 所有 child frame 并发 (各 frame _remove_som 独立)
     cleanup_tasks = [_remove_som_in_frame(page.main_frame)]
     for frame, _fpath, _count in child_frames:

@@ -2,6 +2,43 @@
 
 All notable changes to web-agent. 版本号遵循 SemVer 简化形式（V<major>.<minor>.<patch>）。
 
+## [0.62.0] - 2026-05-12
+
+### Fix (V0.62 screenshot fonts.ready stall 修补 — V0.55-V0.57 pilot 没沾 30s 默 timeout)
+
+vanboard prod / Supabase Dashboard 远程字体 stall `document.fonts.ready` 致 `page.screenshot()`
+default 30s 僵死真测红线触发. 双轮 subagent 独审证据: `screenshotter.js:218-223` fonts.ready 包
+在 `progress.race`, 30s = race 上限; `_preparePageForScreenshot` 串行先 caret/animations 后 fonts
+race, 两步无条件 (唯 `PW_TEST_SCREENSHOT_NO_FONTS_READY=1` env 跳). V0.55 action signature + V0.56
+多字段 type + V0.57 Monaco walker 三 pilot commit 全不沾 screenshot/fonts.
+
+### 修补 (perceiver.py:402-429, 净 +17 行)
+
+| 改动 | 治什么 |
+|------|--------|
+| `timeout=15000` | **核心** — 缩僵死上限 30s→15s, fonts stall 时 15s throw TimeoutError 让上层 retry |
+| `animations="disabled"` + `caret="hide"` | cosmetic 副件, 跟 fonts.ready 路径**无关** (`screenshotter.js:212-216` 先于 fonts wait), 顺手砍 CSS 动画 / caret 抖, 不算 fonts 修复贡献 |
+| 前置 `wait_for_load_state("domcontentloaded", 10000)` try/except | DOM 保险, 本地 cached ≈ 0 成本 (`_frame.py:286-289` 已 fired 立即 fulfill), slow 网络给 DOM 10s |
+
+### 选型审核 (Step 4 subagent 复述)
+
+用户原 3 候选**单用都不解题**: A `timeout=60000` = stall 时卡 60s 然后 throw (治标不治本拖更
+久); B `animations`/`caret` = 跟 fonts.ready 完全不相干; C 前置 `wait_for_load_state` = 跳不过
+screenshot 内部 fonts race. 采纳混合: 核心 timeout=15000 + B cosmetic + C DOM 保险. 15s 是
+stall (30/60s 卡僵更久) / slow (8s 误伤慢字体) 平衡点.
+
+### L2 标 TODO (等真测红线再触发)
+
+真"skip fonts wait" 通道唯有 `PW_TEST_SCREENSHOT_NO_FONTS_READY=1` env (undocumented test 通道,
+锁 playwright 版本风险 + 字体可能未渲染完即截). 等 V0.62.0 prod 跑后仍卡 15s 真红线再走 V0.60.0
+双 env opt-in 模式 (`WEB_AGENT_SCREENSHOT_SKIP_FONTS=1` + 进程入口 `PW_TEST_...` setdefault).
+
+### Tests
+
+`tests/test_perceive_bench_baseline_v038.py` + `tests/test_perceive_bench_real.py` 既有 cover
+`perceive()` hot path. 改动是 `page.screenshot()` 默认参数 → 显式参数, 截图 bytes 行为兼容
+(timeout 缩 + cosmetic 步骤显式化, 内容不变). bug-fix-with-coverage 跳 TDD-first.
+
 ## [0.61.0] - 2026-05-11
 
 ### Doc (V0.61 V0.60.x.1 真测红线 audit sweep 1/1 — 3 user 红线全击 stay maintainer)
