@@ -47,11 +47,14 @@ def _mk_frame(
 
 
 def _mk_page(main_frame: AsyncMock) -> MagicMock:
-    """构 fake Page."""
+    """V0.65.0: 构 fake Page. CDP raw 替 page.screenshot, mock new_cdp_session 链."""
     page = MagicMock()
     page.main_frame = main_frame
     page.evaluate = AsyncMock(return_value=[])  # auto-dismiss empty
-    page.screenshot = AsyncMock(return_value=b"\x89PNG\r\n\x1a\n" + b"\x00" * 8)
+    cdp = AsyncMock()
+    cdp.send = AsyncMock(return_value={"data": "iVBORw0KGgo="})
+    cdp.detach = AsyncMock()
+    page.context.new_cdp_session = AsyncMock(return_value=cdp)
     return page
 
 

@@ -342,16 +342,12 @@ async def _walk_child_frames_concurrent(
     return all_marks, all_frames, all_hosts
 
 
-async def _screenshot_via_cdp(page: Page, fmt: str, quality: int) -> bytes:
-    """V0.65.0: CDP raw Page.captureScreenshot 绕 Playwright _preparePage 全 frame race + fonts.race.
+async def _capture_screenshot_cdp(page: Page, fmt: str, quality: int) -> bytes:
+    """CDP raw Page.captureScreenshot 绕 Playwright _preparePage fonts.ready race (V0.65.0).
 
-    V0.61-V0.64 四次同根因 step 1 timeout 红线 (vanboard prod / Supabase Dashboard click 后
-    perceive 卡 15s) + 双轮 subagent 验证: 元凶 = screenshotter.js:168/216/218 _preparePage
-    串行 inPagePrepareForScreenshots + fonts.ready race 在 complex SPA + React rerender 卡.
-    CDP 走 Chromium DevTools Protocol Page.captureScreenshot 跳整个 wait 链直接拍 frame buffer.
-
-    丢: animations/caret cosmetic + DOM 保险 wait (Supabase Dashboard 微抖动 + caret 闪可接受).
-    保: format/quality 透传 current_screenshot_* 单源 + viewport-only (captureBeyondViewport 默 false).
+    page.screenshot() wrapper 串行跑 inPagePrepareForScreenshots + document.fonts.ready,
+    complex SPA + cross-origin iframe + React rerender 下 race 卡 timeout. CDP raw 直接拍
+    viewport frame buffer 跳整个 wait 链 (无 animations/caret cosmetic, 无 DOM 保险 wait).
     """
     client = await page.context.new_cdp_session(page)
     try:
@@ -421,9 +417,8 @@ async def perceive(page: Page) -> tuple[list[Mark], str, list[str]]:
         )
     # renumber 失败不致命 (DOM 端 stale id, 但 Mark.id 已是新值) — log + 继续
     await asyncio.gather(*renumber_tasks, return_exceptions=True)
-    # V0.65.0: CDP raw 替代 page.screenshot() — V0.62 前置 wait + timeout/animations/caret
-    # 全去掉, V0.63 PW_TEST_SCREENSHOT_NO_FONTS_READY env opt-in 仍保留 (向后兼容降级路径).
-    screenshot_bytes = await _screenshot_via_cdp(
+    # CDP raw 截图绕 Playwright fonts.ready race (见 _capture_screenshot_cdp docstring).
+    screenshot_bytes = await _capture_screenshot_cdp(
         page, current_screenshot_format(), current_screenshot_quality(),
     )
     # V0.34.4: cleanup 主 + 所有 child frame 并发 (各 frame _remove_som 独立)

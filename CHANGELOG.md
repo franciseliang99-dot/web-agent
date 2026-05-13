@@ -2,6 +2,55 @@
 
 All notable changes to web-agent. 版本号遵循 SemVer 简化形式（V<major>.<minor>.<patch>）。
 
+## [0.65.1] - 2026-05-12
+
+### Fix (V0.65.1 V0.65.0 follow-up — /simplify rename + test mock 修 14 broken + 报告纪律 acknowledge)
+
+V0.65.0 commit `485ec22` 引入 `_capture_screenshot_cdp` helper 但**没 update test fixtures**.
+`/simplify` subagent 跑时发现 **14 broken tests** (test_perceiver.py 8 + test_perceiver_concurrent.py
+6): mock `page.screenshot` 不再被调 + 新调 `page.context.new_cdp_session(page)` 未 mock →
+`TypeError: object MagicMock can't be used in 'await' expression`. commit msg 自报 "tests 既有
+cover unchanged" **没真跑 pytest 就写**, 违反 CLAUDE.md "失败恢复 报告纪律 完成 / 通过 / 成功
+的措辞必须可验证".
+
+### 修补 (双逻辑单元 单 commit)
+
+**1. /simplify rename + docstring 精简** (perceiver.py):
+- `_screenshot_via_cdp` → `_capture_screenshot_cdp` (动词短语 convention 对齐
+  `_inject_som_in_frame` / `_remove_som_in_frame` / `_walk_child_frames_concurrent`)
+- docstring 7 行 V0.61-V0.64 历史 + `screenshotter.js:168/216/218` 行号 → 3 行 current-state
+  (历史已在 CHANGELOG, Playwright 内部行号跨版本漂)
+- perceive() call-site comment 2 行 → 1 行指 helper docstring
+
+**2. test mock 修** (test_perceiver.py + test_perceiver_concurrent.py):
+- test_perceiver.py 抽 `_mk_page(main_frame)` factory (跟 concurrent.py 对齐 — bug fix 顺手清
+  stale inconsistency) + 9 处 inline 替换
+- factory 含 CDP mock: `cdp.send = AsyncMock(return_value={"data": "iVBORw0KGgo="})` (b64 of
+  8-byte PNG signature) + `cdp.detach = AsyncMock()` + `page.context.new_cdp_session =
+  AsyncMock(return_value=cdp)`
+- 去 stale `page.screenshot` mock (V0.65 CDP raw 不再调)
+
+### Tests
+
+```
+pytest tests/ → 1003 passed + 29 skipped (跟 V0.61.0 baseline 0 regression)
+tests/test_perceiver.py        42 pass
+tests/test_perceiver_concurrent.py  6 pass
+tests/test_perceiver_monaco.py   2 pass + 1 skip (本就 skip)
+```
+
+### Step 4 subagent 报告 (/simplify 自动化价值)
+
+`/simplify` subagent 跑判据 ① (新 helper) ④ (CDP session 抽象), 执行 3 处简化 (rename +
+docstring + call-site comment). **out-of-scope 红线发现**: V0.65.0 14 broken tests, surfacing
+for parent — 这正是 /simplify 自动化价值 (catch silent breakage in V0.65.0 report).
+
+### V0.34 教训 33 系列贯彻新维度 (报告纪律)
+
+V0.65.0 commit msg "tests cover unchanged" silent breakage 触发: V0.66+ 任何
+`perceive()` / SoM / screenshot 改动 commit **前** 必跑 `pytest tests/test_perceiver*` ≥ 单次,
+不凭 grep 不凭推断写 "cover unchanged". 累计 conservative reframe V0.42-V0.65 12 次.
+
 ## [0.65.0] - 2026-05-12
 
 ### Fix (V0.65 CDP raw screenshot — V0.61-V0.64 四连同根因终局 + screenshotter.js _preparePage 全 frame race 绕过)

@@ -307,15 +307,29 @@ def _mk_frame(child_frames=None, evaluate_returns=None, evaluate_raises=None, ur
     return frame
 
 
+def _mk_page(main_frame):
+    """V0.65.0: 构 fake Page. CDP raw 替 page.screenshot, mock new_cdp_session 链.
+
+    fake CDP session: send 返 base64 ("iVBORw0KGgo=" 是 8-byte PNG signature 编码), detach
+    保 try/finally close 路径不抛.
+    """
+    from unittest.mock import AsyncMock, MagicMock
+    page = MagicMock()
+    page.main_frame = main_frame
+    page.evaluate = AsyncMock(return_value=[])  # auto-dismiss empty
+    cdp = AsyncMock()
+    cdp.send = AsyncMock(return_value={"data": "iVBORw0KGgo="})
+    cdp.detach = AsyncMock()
+    page.context.new_cdp_session = AsyncMock(return_value=cdp)
+    return page
+
+
 async def test_perceive_main_frame_only_no_iframes():
     """V0.22.1: 无 iframe → 行为等价 V0.22.0 (主 frame 1 次注入, 全 frame_path='')."""
     from unittest.mock import AsyncMock, MagicMock
     from web_agent.perceiver import perceive
     main_frame = _mk_frame(child_frames=[], evaluate_returns=[_mk_raw(1, 2), None])
-    page = MagicMock()
-    page.main_frame = main_frame
-    page.evaluate = AsyncMock(return_value=[])  # auto-dismiss
-    page.screenshot = AsyncMock(return_value=b"\x89PNG\r\n\x1a\n" + b"\x00" * 8)
+    page = _mk_page(main_frame)
     marks, _, _ = await perceive(page)
     assert len(marks) == 2
     assert all(m.frame_path == "" for m in marks)
@@ -340,10 +354,7 @@ async def test_perceive_iframe_dfs_id_offset_continuous():
         child_frames=[iframe],
         evaluate_returns=[_mk_raw(1, 2), None, None],  # INJECT, RENUMBER, REMOVE
     )
-    page = MagicMock()
-    page.main_frame = main_frame
-    page.evaluate = AsyncMock(return_value=[])
-    page.screenshot = AsyncMock(return_value=b"\x89PNG\r\n\x1a\n" + b"\x00" * 8)
+    page = _mk_page(main_frame)
     marks, _, _ = await perceive(page)
     # Python renumber 后全局 id 1..5 DFS 顺序 (主 1..2 + child local 1..3 → renumber 3..5)
     assert [m.id for m in marks] == [1, 2, 3, 4, 5]
@@ -371,10 +382,7 @@ async def test_perceive_cross_origin_iframe_skipped_main_continues():
         child_frames=[cross_origin],
         evaluate_returns=[_mk_raw(1, 2), None],
     )
-    page = MagicMock()
-    page.main_frame = main_frame
-    page.evaluate = AsyncMock(return_value=[])
-    page.screenshot = AsyncMock(return_value=b"\x89PNG\r\n\x1a\n" + b"\x00" * 8)
+    page = _mk_page(main_frame)
     marks, _, _ = await perceive(page)
     # 主 2 marks 仍在; 跨域 0 marks; 不抛
     assert len(marks) == 2
@@ -389,10 +397,7 @@ async def test_perceive_main_frame_evaluate_failure_propagates():
         child_frames=[],
         evaluate_raises=RuntimeError("main frame crashed"),
     )
-    page = MagicMock()
-    page.main_frame = main_frame
-    page.evaluate = AsyncMock(return_value=[])
-    page.screenshot = AsyncMock(return_value=b"\x89PNG\r\n\x1a\n" + b"\x00" * 8)
+    page = _mk_page(main_frame)
     import pytest
     with pytest.raises(RuntimeError, match="main frame crashed"):
         _ = await perceive(page)
@@ -430,10 +435,7 @@ async def test_perceive_returns_three_tuple_with_cross_origin_hosts():
     from unittest.mock import AsyncMock, MagicMock
     from web_agent.perceiver import perceive
     main_frame = _mk_frame(child_frames=[], evaluate_returns=[_mk_raw(1, 1), None])
-    page = MagicMock()
-    page.main_frame = main_frame
-    page.evaluate = AsyncMock(return_value=[])
-    page.screenshot = AsyncMock(return_value=b"\x89PNG\r\n\x1a\n" + b"\x00" * 8)
+    page = _mk_page(main_frame)
     result = await perceive(page)
     assert len(result) == 3, f"V0.22.4: perceive 必须返三-tuple; got len={len(result)}"
     marks, _, hosts = result
@@ -453,10 +455,7 @@ async def test_perceive_collects_cross_origin_host_from_url():
         child_frames=[cross_origin],
         evaluate_returns=[_mk_raw(1, 1), None],
     )
-    page = MagicMock()
-    page.main_frame = main_frame
-    page.evaluate = AsyncMock(return_value=[])
-    page.screenshot = AsyncMock(return_value=b"\x89PNG\r\n\x1a\n" + b"\x00" * 8)
+    page = _mk_page(main_frame)
     _, _, hosts = await perceive(page)
     assert hosts == ["www.google.com"], f"应收集 netloc; got {hosts}"
 
@@ -472,10 +471,7 @@ async def test_perceive_dedupes_repeated_cross_origin_hosts_dfs_order():
         child_frames=[a1, b, a2],
         evaluate_returns=[_mk_raw(1, 1), None],
     )
-    page = MagicMock()
-    page.main_frame = main_frame
-    page.evaluate = AsyncMock(return_value=[])
-    page.screenshot = AsyncMock(return_value=b"\x89PNG\r\n\x1a\n" + b"\x00" * 8)
+    page = _mk_page(main_frame)
     _, _, hosts = await perceive(page)
     assert hosts == ["a.example", "b.example"], (
         f"DFS 顺序去重: a 先于 b, a 第二次 skip; got {hosts}"
@@ -495,10 +491,7 @@ async def test_perceive_cross_origin_url_fallback_to_url_when_no_netloc():
         child_frames=[weird],
         evaluate_returns=[_mk_raw(1, 1), None],
     )
-    page = MagicMock()
-    page.main_frame = main_frame
-    page.evaluate = AsyncMock(return_value=[])
-    page.screenshot = AsyncMock(return_value=b"\x89PNG\r\n\x1a\n" + b"\x00" * 8)
+    page = _mk_page(main_frame)
     _, _, hosts = await perceive(page)
     assert hosts and hosts[0].startswith("data:"), (
         f"无 netloc 应 fallback url 原串; got {hosts}"
@@ -528,10 +521,7 @@ async def test_perceive_nested_iframe_path_encoding():
         child_frames=[middle],
         evaluate_returns=[_mk_raw(1, 1), None],
     )
-    page = MagicMock()
-    page.main_frame = main_frame
-    page.evaluate = AsyncMock(return_value=[])
-    page.screenshot = AsyncMock(return_value=b"\x89PNG\r\n\x1a\n" + b"\x00" * 8)
+    page = _mk_page(main_frame)
     marks, _, _ = await perceive(page)
     assert [m.frame_path for m in marks] == ["", "0", "0.1"]
     assert [m.id for m in marks] == [1, 2, 3]

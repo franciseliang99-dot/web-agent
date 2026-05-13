@@ -2,7 +2,7 @@
 
 import os as _os
 
-__version__ = "0.65.0"
+__version__ = "0.65.1"
 
 # V0.63.0: opt-in 真 skip Playwright `document.fonts.ready` race. screenshotter.js:218 是唯一跳
 # fonts wait 通道 — undocumented test env, 锁 playwright 版本风险, 故仅在用户显式 opt-in 时 set
