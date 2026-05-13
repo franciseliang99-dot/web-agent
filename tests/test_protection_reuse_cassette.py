@@ -303,7 +303,14 @@ async def test_reuse_detection_real(domain: str, url: str, expected_baseline: st
     from web_agent.protection import attach_protection_listener
 
     async with async_playwright() as p:
-        browser = await p.chromium.launch(headless=True, args=["--no-sandbox"])
+        # V0.60.0: cassette test direct launch proxy 双 env opt-in (cassette 已 WEB_AGENT_REUSE_PROBE
+        # opt-in, 加 proxy 时同 cassette 录 proxy header → user 红线显式).
+        from web_agent.proxy_util import get_eval_proxy_kwargs
+        _proxy = get_eval_proxy_kwargs()
+        _launch_kwargs: dict = {"headless": True, "args": ["--no-sandbox"]}
+        if _proxy is not None:
+            _launch_kwargs["proxy"] = _proxy
+        browser = await p.chromium.launch(**_launch_kwargs)
         try:
             ctx = await browser.new_context()
             attach_protection_listener(ctx)  # V0.47.1 listener 装 ctx

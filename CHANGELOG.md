@@ -2,6 +2,92 @@
 
 All notable changes to web-agent. 版本号遵循 SemVer 简化形式（V<major>.<minor>.<patch>）。
 
+## [0.60.0] - 2026-05-11
+
+### Feat (V0.60 eval direct launch proxy 接入 — V0.58 conservative defer follow-up)
+
+V0.58.0 conservative reframe: "eval cassette 录制不该走 proxy 防 cassette header → 重放 leak".
+V0.58.1 仅做 cli/prod CDP path (`start_chrome.sh --proxy-server`), direct launch path
+(`eval/runner.py` + `perceive_bench_adapter.py` + cassette test 3 处 `chromium.launch`) **defer**.
+
+V0.60.0 把 V0.58 defer 路径接上, **双 env opt-in** 防意外 cassette leak:
+- 一级 `WEB_AGENT_PROXY` (V0.58.1 schema, URL string)
+- 二级 `WEB_AGENT_PROXY_EVAL=1` (V0.60 新, eval 显式启用)
+- 任一 unset → eval 不接 proxy (默关 leak guard)
+
+### Changed (~30 src LOC + ~60 test LOC)
+
+- `src/web_agent/proxy_util.py` +`get_eval_proxy_kwargs() -> dict[str, str] | None`:
+  - 单点决策 helper (3 处 launch 调用 DRY)
+  - `WEB_AGENT_PROXY_EVAL == "1"` 严格比对 + `parse_proxy_env()` 非 None → 返
+    `to_playwright_kwargs()`, 否则 None
+- `eval/runner.py:155`: launch 加 `proxy=_proxy` 条件 (V0.60 helper)
+- `eval/perceive_bench_adapter.py:61`: 同 pattern + `from typing import Any` (mypy fix)
+- `tests/test_protection_reuse_cassette.py:305`: cassette real test launch 同 (cassette 已 opt-in
+  WEB_AGENT_REUSE_PROBE, 加 proxy 时双 env explicit)
+- `tests/test_proxy_util.py` +4 fast unit:
+  - `test_get_eval_proxy_kwargs_both_env_unset_returns_none` (默关 leak guard)
+  - `test_get_eval_proxy_kwargs_only_primary_set_returns_none` (**核心 leak guard**: cli/prod 有
+    WEB_AGENT_PROXY 但 eval 不自动跟进)
+  - `test_get_eval_proxy_kwargs_both_set_returns_kwargs` (eval 显式 opt-in 路径)
+  - `test_get_eval_proxy_kwargs_secondary_not_one_returns_none` (跟 RUN_SLOW 同 `=="1"` 严格)
+- `pyproject.toml` / `__init__.py` 0.59.0 → 0.60.0
+- `uv.lock` 同步
+- `CHANGELOG.md` V0.60.0 entry (本)
+
+### V0.58 + V0.60 完整 proxy 接入 chain
+
+| Path | Trigger | 默关 leak guard |
+|------|---------|---------------|
+| CDP cli/prod (V0.58.1) | `WEB_AGENT_PROXY` env | shell 条件块 (unset 不加 flag) |
+| direct launch eval/test (V0.60.0) | `WEB_AGENT_PROXY` **+** `WEB_AGENT_PROXY_EVAL=1` 双 env | helper 单点 (任一 unset 返 None) |
+| `connect_over_cdp` 阶段 (V0.58.0 audit) | n/a | 进程已起 Playwright 无法改 |
+
+### Decision 门槛 (V0.60 验证)
+
+| 指标 | target | 真测结果 |
+|------|--------|---------|
+| `get_eval_proxy_kwargs` 双 env unset → None | None | ✅ test_both_env_unset |
+| **leak guard**: 仅一级 set → None | None | ✅ test_only_primary_set (cli/prod 有 proxy 但 eval 不自动) |
+| 双 env set → Playwright kwargs | dict 含 server/username/password | ✅ test_both_set |
+| 严格 `=="1"` (not 'true'/'yes') | None for non-'1' | ✅ test_secondary_not_one |
+| 既有 cassette test 兼容 | regression 0 | ✅ V0.48.2 3 cassette test 未破 |
+| pytest | ≥ 999 | **1003** ✅ (+4 V0.60) |
+| mypy / ruff | clean | clean (55 src; +1 typing.Any import fix in perceive_bench_adapter) |
+
+### V0.34 教训累计应用至 V0.60 (30 系列贯彻)
+
+| 系列 | 教训应用 |
+|------|---------|
+| V0.47 | autonomous L1+L2+L3 + maintainer 红线分层 |
+| V0.51 | destructive 默 dry-run + `--apply` 用户显式 |
+| V0.58 | proxy env schema 单一来源 + autonomous infra + maintainer 真接 |
+| **V0.60** | **双 env opt-in (一级 schema + 二级 leak guard) — leak guard 设计模式** |
+
+V0.60 教训应用新维度: **双 env opt-in leak guard** — 即使一级 schema 有效, 二级显式 opt-in 控制
+"哪个 path 接 proxy". 跟 V0.51 `--apply` (destructive 显式) / V0.27 vault elicit (secret 显式)
+同模式 — sensitive operation 二级显式控制门. 防意外 path 跟随 (V0.58 reframe "eval cassette 不
+跟进 proxy 防 leak" 落地).
+
+(累计真发现至 V0.60: 28 个不变; V0.60 系列 +0 — V0.58 defer 路径补完, 不催 catch.)
+
+### V0.60.x.1 user env 真测 (跟 V0.58.x.1 同模式)
+
+```bash
+export WEB_AGENT_PROXY="http://user:pass@proxy.example.com:8080"
+export WEB_AGENT_PROXY_EVAL=1  # 二级显式 opt-in
+# eval 真测 (LLM 烧 + 真访经过代理)
+WEB_AGENT_RUN_EVAL=1 WEB_AGENT_EVAL_REAL=1 uv run web-agent-eval --corpus capability-real-world ...
+# 验 launch 接受 proxy kwargs (logs / Playwright 自身 trace)
+```
+
+### V0.61 主题候选 (V0.60 完后, 等用户)
+
+- V0.58.x.1 maintainer 真接付费代理 真测 akamai 403→200
+- V0.60.x.1 maintainer eval 真访经过代理 (LLM 烧)
+- pilot V0.55/V0.56.x.1 真测
+- 其他用户提的方向
+
 ## [0.59.0] - 2026-05-11
 
 ### Doc (V0.59 pilot V0.55-V0.57.x.1 cassette sweep 1/1 — 关单 V0.57.x.1 + defer V0.55/V0.56.x.1 LLM 红线)

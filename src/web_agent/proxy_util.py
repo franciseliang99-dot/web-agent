@@ -88,4 +88,25 @@ def parse_proxy_env(env_value: str | None = None) -> ProxyConfig | None:
     )
 
 
-__all__ = ["ProxyConfig", "parse_proxy_env"]
+def get_eval_proxy_kwargs() -> dict[str, str] | None:
+    """V0.60.0: eval direct launch proxy 双 env opt-in 单点决策 helper.
+
+    V0.58 reframe "eval cassette 录制不该走 proxy 防 cassette header 进 cassette → 重放 leak".
+    V0.60 用**双 env opt-in** 防意外 leak:
+    - 一级: `WEB_AGENT_PROXY` (V0.58.1 schema, URL string)
+    - 二级: `WEB_AGENT_PROXY_EVAL=1` (V0.60 新, eval 显式 启用)
+
+    返 dict (Playwright `chromium.launch(proxy={...})` kwargs) iff 两 env 都 set, 否则 None.
+    eval/runner.py + perceive_bench_adapter.py + cassette test 3 处 launch 同点调用 (DRY).
+
+    跟 `WEB_AGENT_RUN_SLOW=1` / `WEB_AGENT_RUN_EVAL=1` 同 '=="1"' 字符串比对模式.
+    """
+    if os.environ.get("WEB_AGENT_PROXY_EVAL", "").strip() != "1":
+        return None
+    cfg = parse_proxy_env()
+    if cfg is None:
+        return None
+    return cfg.to_playwright_kwargs()
+
+
+__all__ = ["ProxyConfig", "get_eval_proxy_kwargs", "parse_proxy_env"]

@@ -152,7 +152,14 @@ async def run_one(
         cassette_ctx = nullcontext()
 
     try:
-        browser = await chromium_launcher.launch(headless=True, args=["--no-sandbox"])
+        # V0.60.0: eval direct launch proxy 双 env opt-in (WEB_AGENT_PROXY + WEB_AGENT_PROXY_EVAL=1).
+        # 默 None → 不接 proxy (V0.58 reframe 防 cassette leak); 双 env set → Playwright proxy kwargs.
+        from web_agent.proxy_util import get_eval_proxy_kwargs
+        _proxy = get_eval_proxy_kwargs()
+        _launch_kwargs: dict[str, Any] = {"headless": True, "args": ["--no-sandbox"]}
+        if _proxy is not None:
+            _launch_kwargs["proxy"] = _proxy
+        browser = await chromium_launcher.launch(**_launch_kwargs)
         try:
             ctx = await browser.new_context(accept_downloads=True)
             page = await ctx.new_page()

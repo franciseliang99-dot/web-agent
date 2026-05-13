@@ -125,3 +125,60 @@ def test_proxy_config_frozen() -> None:
     cfg = ProxyConfig(server="http://x:8080", username="", password="", raw="http://x:8080")
     with pytest.raises(AttributeError):
         cfg.server = "evil"  # type: ignore[misc]
+
+
+# --- V0.60.0: get_eval_proxy_kwargs (双 env opt-in 防 cassette leak) ---
+
+
+def test_get_eval_proxy_kwargs_both_env_unset_returns_none(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """V0.60.0: 一级 + 二级 env 都 unset → None (eval 默关 proxy 防 cassette leak)."""
+    from web_agent.proxy_util import get_eval_proxy_kwargs
+    monkeypatch.delenv("WEB_AGENT_PROXY", raising=False)
+    monkeypatch.delenv("WEB_AGENT_PROXY_EVAL", raising=False)
+    assert get_eval_proxy_kwargs() is None
+
+
+def test_get_eval_proxy_kwargs_only_primary_set_returns_none(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """V0.60.0 核心 leak guard: 一级 set 但二级 unset → None.
+
+    cli/prod 路径 (V0.58.1 start_chrome.sh) 用 WEB_AGENT_PROXY 接 proxy, 但 eval 不该自动跟进
+    (cassette leak 风险). 二级 WEB_AGENT_PROXY_EVAL=1 必须显式 set 才接 proxy.
+    """
+    from web_agent.proxy_util import get_eval_proxy_kwargs
+    monkeypatch.setenv("WEB_AGENT_PROXY", "http://proxy.example.com:8080")
+    monkeypatch.delenv("WEB_AGENT_PROXY_EVAL", raising=False)
+    assert get_eval_proxy_kwargs() is None
+
+
+def test_get_eval_proxy_kwargs_both_set_returns_kwargs(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """V0.60.0: 双 env set → Playwright launch kwargs dict (eval 显式 opt-in)."""
+    from web_agent.proxy_util import get_eval_proxy_kwargs
+    monkeypatch.setenv("WEB_AGENT_PROXY", "http://alice:s3cret@proxy.example.com:8080")
+    monkeypatch.setenv("WEB_AGENT_PROXY_EVAL", "1")
+    kwargs = get_eval_proxy_kwargs()
+    assert kwargs == {
+        "server": "http://proxy.example.com:8080",
+        "username": "alice",
+        "password": "s3cret",
+    }
+
+
+def test_get_eval_proxy_kwargs_secondary_not_one_returns_none(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """V0.60.0: 二级 env 值 != '1' (e.g. 'true'/'yes'/'TRUE') → None (跟 RUN_SLOW 同严格 '=="1"' 比对)."""
+    from web_agent.proxy_util import get_eval_proxy_kwargs
+    monkeypatch.setenv("WEB_AGENT_PROXY", "http://proxy.example.com:8080")
+    for val in ("true", "yes", "TRUE", "0", " 1 ", ""):
+        monkeypatch.setenv("WEB_AGENT_PROXY_EVAL", val)
+        # " 1 " strip 后 == "1", 应过; 测剩余应 None
+        if val.strip() == "1":
+            assert get_eval_proxy_kwargs() is not None, f"val={val!r} strip 后等 '1' 应 opt-in"
+        else:
+            assert get_eval_proxy_kwargs() is None, f"val={val!r} != '1' 应 None"

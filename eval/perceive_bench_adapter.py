@@ -19,6 +19,7 @@ import logging
 import statistics
 import time
 import tracemalloc
+from typing import Any
 from urllib.parse import quote
 
 from playwright.async_api import async_playwright
@@ -58,7 +59,13 @@ async def run_bench_against_chromium(
 
     results: list[BenchResult] = []
     async with async_playwright() as p:
-        browser = await p.chromium.launch(headless=headless, args=extra_args or [])
+        # V0.60.0: eval direct launch proxy 双 env opt-in (跟 eval/runner.py 同点 helper DRY).
+        from web_agent.proxy_util import get_eval_proxy_kwargs
+        _proxy = get_eval_proxy_kwargs()
+        _launch_kwargs: dict[str, Any] = {"headless": headless, "args": extra_args or []}
+        if _proxy is not None:
+            _launch_kwargs["proxy"] = _proxy
+        browser = await p.chromium.launch(**_launch_kwargs)
         try:
             for fixture in fixtures:
                 ms_samples: list[float] = []
