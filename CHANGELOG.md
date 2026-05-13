@@ -2,6 +2,88 @@
 
 All notable changes to web-agent. 版本号遵循 SemVer 简化形式（V<major>.<minor>.<patch>）。
 
+## [0.64.0] - 2026-05-12
+
+### Doc (V0.64 V0.63 三连失败同根因 audit sweep 1/1 — screenshotter.js race 元凶定位 + V0.65 CDP raw plan + V0.34 教训 32 累计)
+
+V0.61 → V0.62 → V0.63 三连升级修同一红线 (vanboard prod / Supabase Dashboard step 1 click 后
+`perceive()` 15s screenshot timeout) 均 step 0 ✅ step 1 ❌. 用户 prod 实测后**触发 CLAUDE.md
+"失败恢复 同根因 3 次失败停下问用户"线**, retreat 手动 unblock (Supabase Dashboard URL config
+改 Site URL + Redirect URLs). autonomous audit 后 1 commit doc, 0 src 改: 元凶非 fonts.ready,
+V0.65 锁 CDP raw plan + 用户 PWDEBUG traceback 前置 dep.
+
+### 三连失败同根因 audit (Step 2 三方)
+
+| 升级 | 修了什么 | prod 实测结果 |
+|------|---------|-------------|
+| V0.61 → V0.62 (`4c88b15`) | `page.screenshot` timeout 30s→15s + `animations="disabled"` + `caret="hide"` + 前置 `wait_for_load_state("domcontentloaded", 10000)` | step 1 perceive 仍卡 15s |
+| V0.62 → V0.63 (`cee9982`) | `WEB_AGENT_SCREENSHOT_SKIP_FONTS=1` opt-in env → `PW_TEST_SCREENSHOT_NO_FONTS_READY=1` setdefault, 真 skip `document.fonts.ready` race (用户 prod 验证 traceback 不见 "waiting for fonts") | step 1 perceive 仍卡 15s |
+
+→ 同根因, **非 fonts.ready stall**.
+
+### 元凶定位 (双轮 subagent 验证)
+
+| 元凶候选 | subagent 源码引用 | 落地 |
+|---------|-----------------|------|
+| `document.fonts.ready` stall | `screenshotter.js:218-223` fonts.race | ❌ V0.63 已修, prod 仍卡 → 证伪 |
+| **`safeNonStallingEvaluateInAllFrames` race in `_preparePage`** | `screenshotter.js:216` + `page.js:670-673` 对每个 frame 跑 `inPagePrepareForScreenshots` | ✅ **真元凶** — complex SPA + cross-origin iframe + React state update 频繁触发, 15s deadline 内 race 卡 |
+| Frame detach mid-evaluate | `progress.race` 内 detach 立即 throw, 不卡 timeout | ⚠️ 副信号非主因 |
+| 主 frame inject `perceiver.py:367` 裸 await | `_inject_som_in_frame` 主 frame 不 catch (fail-fast) | ⚠️ V0.65 escalation 兼修 |
+
+### V0.65 plan (锁 C CDP raw, A 证伪 / B 长线 defer / D 兜底)
+
+| 候选 | verdict | 风险 |
+|------|--------|------|
+| A `locator("body").screenshot()` fallback | ❌ `screenshotter.js:185-210` `screenshotElement` 第一步同调 `_preparePageForScreenshot` 内部仍跑 `safeNonStallingEvaluateInAllFrames` — 换错误信号不换根因 | 证伪弃 |
+| B `page.evaluate` DOM 文本替代 screenshot | ⚠️ `llm/_schema.py:19` SYSTEM_PROMPT 硬要"标注截图" + `llm/anthropic.py:72-80` 硬塞 `screenshot_b64` image block — 工程量过大 | 长线 defer |
+| **C `BrowserContext.new_cdp_session(page).send("Page.captureScreenshot", ...)`** | ✅ 100% 绕过 `_preparePage` 全 frame race + fonts.race + animations/caret cosmetic. Chromium-only (项目本就 only) + 丢 cosmetic 微抖动 (Supabase 可接受) | **V0.65 优选** |
+| D perceive() 顶层 `asyncio.wait_for(8s)` + `(marks, "", hosts)` 占位 | ⚠️ graceful fail 兜底, 跨 step LLM degrade 风险 (无截图本步 ≈ 失败), `loop.py:626` `write_bytes` + `:647` LLM image block 需判空 | C 后兜底 |
+
+**PWDEBUG 前置 dep** (V0.65 落地必读): 用户跑一次 `PWDEBUG=1 PWDEBUG_PRINT=1 ...` 抓完整 driver log,
+定位 stall 在 `safeNonStallingEvaluateInAllFrames` / `_screenshot` / `takeScreenshot` 哪一环 + 哪
+个 frame URL. 不抓 traceback 直接动 C = 第 4 次盲目重试 (违反 CLAUDE.md 失败恢复).
+
+### V0.34 教训累计应用至 V0.64 (32 系列贯彻)
+
+| 系列 | 教训应用 |
+|------|---------|
+| V0.61 (31) | autonomous 红线 audit 不止 1 项, 多项叠加 stay 概率 100% |
+| V0.62 | 用户给方案 ≠ 方案真解题, subagent 必独审用户三候选 (A `timeout=60000` 治标不治本 / B `animations` 不沾 fonts / C `wait_for_load_state` 跳不过 screenshot 内部) |
+| V0.63 | 用户实测推断 ≠ 代码事实, "fonts skip 已生效" 推断 grep 三处验证全否 |
+| **V0.64 (32 新维度)** | **autonomous 同根因 3 次失败必触 CLAUDE.md 失败恢复线 → stay + 用户 PWDEBUG traceback 数据收集, 不盲冲第 4 次方案** |
+
+累计 conservative reframe V0.42-V0.64 11 次: image cache / W5-C.2 / send amount / type-only
+detector / simplify extract / fingerprint pool / A'' corpus / destructive 真删 / pilot cassette
+stub / V0.61 V0.60.x.1 真测 stub / V0.64 V0.63 三连失败 stay.
+
+### V0.63.x.1 user env 跑法 (V0.65 落地前 PWDEBUG 真测)
+
+```bash
+# 在 web-agent 项目根
+export PWDEBUG=1
+export PWDEBUG_PRINT=1
+export WEB_AGENT_SCREENSHOT_SKIP_FONTS=1  # V0.63 已含
+# 重启 web-agent CLI 跑同一 Supabase Dashboard task
+# step 1 click 后看 driver log 卡在哪个 frame URL + 哪个 evaluate
+```
+
+捕完整 traceback (含 driver `pw:api` log) 贴回, 走 V0.65 C CDP raw 落地. 不贴 traceback 不动.
+
+### 用户 retreat 手动 unblock 事实
+
+Supabase Dashboard `https://supabase.com/dashboard/project/<id>/auth/url-configuration`:
+- Site URL: `https://vanboard.vercel.app`
+- Redirect URLs +2: `https://vanboard.vercel.app/auth/callback`, `http://localhost:3000/auth/callback`
+- Save → "Updated successfully"
+
+≈ 1 min 完成, 本次 task unblock. V0.65 不阻塞用户业务推进.
+
+### Tests
+
+`tests/test_perceive_bench_*.py` + 1003+ 既有 cover unchanged. 0 src 改 → 0 测变.
+
+(累计真发现至 V0.64: 28 个不变; V0.64 系列 +0 — sweep audit-only.)
+
 ## [0.63.0] - 2026-05-12
 
 ### Fix (V0.63 真 skip fonts wait opt-in — V0.62 L2 落地 + 用户 env-生效判断纠正)
