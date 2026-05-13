@@ -2,6 +2,52 @@
 
 All notable changes to web-agent. 版本号遵循 SemVer 简化形式（V<major>.<minor>.<patch>）。
 
+## [0.63.0] - 2026-05-12
+
+### Fix (V0.63 真 skip fonts wait opt-in — V0.62 L2 落地 + 用户 env-生效判断纠正)
+
+V0.62 commit 4c88b15 prod 实测 Supabase Dashboard 仍卡 15s timeout. 用户红线观察"`PW_TEST_
+SCREENSHOT_NO_FONTS_READY=1` 生效" — Step 0 subagent 全 repo + .env + 当前 shell printenv 三处
+grep 验证: **该 env V0.62 全未 set**, `perceiver.py:405` 仅注释标 TODO. 用户判断不符代码事实
+(traceback 不见 "waiting for fonts to load" 真实原因: fonts.race 内 `.catch(()=>{})` 让
+`progress.log` 不上抛到 TimeoutError message, 非 fonts wait 已跳).
+
+### 修补 (src/web_agent/__init__.py 净 +7 行 + .env.example 文档)
+
+进程顶层 module-init opt-in (走 V0.60.0 双 env 模式):
+
+```python
+if _os.environ.get("WEB_AGENT_SCREENSHOT_SKIP_FONTS", "").lower() in ("1", "true", "yes", "on"):
+    _os.environ.setdefault("PW_TEST_SCREENSHOT_NO_FONTS_READY", "1")
+```
+
+一级 `WEB_AGENT_SCREENSHOT_SKIP_FONTS` user-facing → 二级 `PW_TEST_SCREENSHOT_NO_FONTS_READY`
+setdefault 给 Playwright driver 子进程 (subprocess 默认继承父 env). 默认关 — undocumented test
+通道锁 playwright 版本风险 + 字体可能未渲染完即截 (LLM 看 layout 一般不影响, 但 trade-off
+用户负责).
+
+### Step 4 subagent 5 问 verdict (复述)
+
+| Q | verdict |
+|---|---------|
+| Q1 V0.62 env 是否 set | ❌ 未 set, 用户推断错 (codebase/.env/shell 三处验证) |
+| Q2 screenshot 15s 包什么 | `progress.run(15s)` deadline 包整 `_preparePage + _screenshot` 串行链, fonts.race 仍在 path 上 (screenshotter.js:163→168→212→218) |
+| Q3 SoM inject 主 frame 隐患 | `perceiver.py:367` 裸 await 是隐患 (主 frame fail-fast 设计), V0.63 不修, V0.64 escalation |
+| Q4 perceive() 顶层 timeout | `loop.py:611` 裸 await 无兜底, V0.63 不修 |
+| Q5 推荐 | C `os.environ.setdefault` 必做 + 缩 timeout 8s. V0.63 仅采纳 C, timeout=15s 保留 (一次动一处 + 真测验证) |
+
+### V0.64 escalation TODO (若 V0.63 prod 仍卡)
+
+用户 `.env` 加 `WEB_AGENT_SCREENSHOT_SKIP_FONTS=1` 跑 Supabase Dashboard:
+- 解决 → V0.63 关单
+- 仍卡 15s → 走 subagent 推荐 V0.64 escalation: screenshot timeout 15s→8s + perceive() 顶层
+  `asyncio.wait_for(12s)` 兜底 + 主 frame inject `frame.is_detached` 前置 check
+
+### Tests
+
+env opt-in 默认关 → 行为零变化 → `tests/test_perceive_bench_*.py` 既有 cover 充分, 跳 TDD-first.
+配置接口非 API 接口, 跳 /simplify.
+
 ## [0.62.0] - 2026-05-12
 
 ### Fix (V0.62 screenshot fonts.ready stall 修补 — V0.55-V0.57 pilot 没沾 30s 默 timeout)
