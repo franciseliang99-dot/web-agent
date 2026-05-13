@@ -2,6 +2,91 @@
 
 All notable changes to web-agent. 版本号遵循 SemVer 简化形式（V<major>.<minor>.<patch>）。
 
+## [0.66.0] - 2026-05-12
+
+### Doc (V0.66 V0.65 关单 + LLM 慢 max_wallclock 瓶颈 audit sweep 1/1 — Provider-aware wallclock plan + Kimi 4-24min 单步真测 + V0.34 教训 34 累计)
+
+V0.65.1 (`155eb66`) CDP raw screenshot 用户 prod 真测 **大成功** — V0.61-V0.64 四连同根因
+彻底终结, 每个 perceive() 都完成. 但用户 dogfood 暴露**新瓶颈**: Kimi LLM 单步 chat completions
+4-24 min, default `WEB_AGENT_MAX_WALLCLOCK_S=300s` 完全不够 (用户 prod step 0→1→2→3 实跑
+1694s 才 abort). 用户已 retreat 手动操作 (Step A 1 min) unblock 业务. autonomous audit 后
+1 commit doc, 0 src 改: V0.65 红线关单 + V0.66.x 分阶段 plan 锁定.
+
+### 用户业务 unblock 事实 (V0.65 prod 真跑 + 手动 Step A)
+
+V0.65 CDP raw 验证后 (perceive 全步完成), 用户基于实用主义选 A (manual unblock 1 min):
+Supabase Dashboard `https://supabase.com/dashboard/project/<id>/auth/url-configuration` 改
+Site URL + Redirect URLs +2. V0.66 不阻塞业务推进.
+
+### V0.61-V0.65 同根因终局 audit (Step 2 三方)
+
+| 升级 | 修补 | prod 实测 |
+|------|------|----------|
+| V0.61 → V0.62 (`4c88b15`) | timeout 30s→15s + animations/caret + DOM 保险 | step 1 卡 15s ❌ |
+| V0.62 → V0.63 (`cee9982`) | `WEB_AGENT_SCREENSHOT_SKIP_FONTS=1` env opt-in (真生效) | step 1 卡 15s ❌ (非 fonts) |
+| V0.63 → V0.64 (`7fdaef5`) | audit doc sweep — 元凶定位 + V0.65 CDP raw plan | 0 src 改 |
+| V0.64 → V0.65 (`485ec22` + `155eb66`) | **CDP raw `Page.captureScreenshot` 绕 `_preparePage` 全 frame race** + V0.65.1 test mock 修 14 broken | **每个 perceive 都 ✅** — 红线关单 |
+
+→ V0.65 CDP raw 真治本, V0.34 教训 34 维度沉淀 ("Playwright 高 level wait 链 绕 = CDP DevTools Protocol").
+
+### V0.66 LLM 慢 max_wallclock 瓶颈 audit (subagent 5 问 verdict)
+
+| 用户 3 plan 候选 | subagent verdict | 落地 |
+|-----------------|---------------|------|
+| A Kimi 硬码 1800s | ❌ anti-pattern (hard-code provider 名违 V0.27/V0.60 env 单一来源 + 1800s 任意 (Kimi 24min × 60 = 1440s 都不够)) | 弃 |
+| **B Provider-aware wallclock dict** | ✅ **推荐** — 复用 `llm/__init__.py:25-52` `provider_from_model()` + `client.name` ("anthropic"/"openai"/"openai-kimi") 现成, 符 V0.27 secret_store / V0.42 model-aware cache 同模式 | V0.66.2 |
+| C 单步 fail-fast > 60s abort | ❌ **数据反方向** — 用户 prod 232s 是 **Kimi 一次 LLM API 真返**非 SDK retry hang, < 60s abort 把正常调用按 timeout 处理 | 弃 |
+
+### 数据三方对不上 audit (V0.66.1 instrumentation 前置 dep)
+
+| 数 | 出处 |
+|----|------|
+| `300s` default | `cli.py:60` `WEB_AGENT_MAX_WALLCLOCK_S` + `.env.example:30` |
+| `480s` 用户报 | 用户语境 (来源不明 — CLI flag 或 env override) |
+| `1694s` 实跑到 abort | 用户 prod log (= 卡在某 step 内总时长, wallclock check 在 step **头部** `loop.py:558-573`, step 内 LLM hang 期间 wallclock 不截) |
+
+→ **现状不能验证用户 3 个 Kimi 慢根因猜测** (国内→sandbox 网络 / long context / SDK retry 吞).
+`trace.py` / `types.Step` 没记 `plan_elapsed_s` per-call latency. CLAUDE.md "Step 2c live probe / 数据驱动" 触发 — V0.66.1 必先加观测.
+
+### V0.66.x plan 锁 (分阶段)
+
+| 阶段 | 内容 | scope | 风险 |
+|------|------|-------|------|
+| **V0.66.1** | `plan_elapsed_s` per-step instrumentation 加入 `trace.py` + `types.Step` + `loop.py:644-665` 包 `t_plan_start = time.monotonic()` | ~10 行 + 1 test, 0 行为改变 | 0 |
+| **V0.66.2** | B Provider-aware wallclock dict (`{"anthropic": 480, "openai-kimi": ?, "openai": ?}`) + `cli.py:60` default 改 `client.name` 查表 | 表初值待 V0.66.1 数据回流 (不凭感觉 1800/480/600) | 中 (改 default 行为, 用户需 ack) |
+| V0.66.x.1 | maintainer 红线 — Kimi prod 真测 sandbox 网络 (烧 LLM $) | user env 跑 | 用户授权 |
+
+**关键决策**: 不立刻 V0.66.2 — V0.62-V0.64 教训 32 "同根因不盲冲方案" 同骨架, 没 per-call latency 数据先加 observable.
+
+### V0.34 教训累计应用至 V0.66 (34 系列贯彻)
+
+| 系列 | 教训应用 |
+|------|---------|
+| V0.61 (31) | autonomous 红线 audit 不止 1 项, 多项叠加 stay 概率 100% |
+| V0.64 (32) | autonomous 同根因 3 次失败必触 CLAUDE.md 失败恢复线 → stay + 用户 PWDEBUG traceback 数据收集 |
+| V0.65.1 (33) | 报告纪律 — `pytest tests/test_perceiver*` 必跑 ≥ 单次, 不凭推断写 "cover unchanged" |
+| **V0.66 (34 新维度)** | **数据驱动观测前置 — 没 per-call latency 不盲冲 wallclock/retry 调参, 加 instrumentation 让真测数据回流定 baseline (CDP raw 路径胜 + LLM 慢瓶颈分两步走)** |
+
+累计 conservative reframe V0.42-V0.66 13 次: image cache / W5-C.2 / send amount / type-only
+detector / simplify extract / fingerprint pool / A'' corpus / destructive 真删 / pilot cassette
+stub / V0.61 真测 stub / V0.64 三连失败 stay / V0.65.1 报告纪律 / V0.66 LLM 慢观测前置.
+
+### V0.66.x.1 user env 跑法 (V0.66.1 落地后 Kimi 真测)
+
+```bash
+# V0.66.1 instrumentation 落地后, 跑同一 Supabase Dashboard task (或 simpler benchmark):
+# 看 trace.db 里 plan_elapsed_s 分布: Kimi median / p95 / max 真分布
+# data 回流后 V0.66.2 B 表初值 = max(p95, 2×median) 经验取整
+```
+
+### Tests
+
+V0.66.0 = doc only (~80 doc LOC, 0 src). `pytest tests/` → 1003 passed + 29 skipped (跟 V0.65.1
+baseline 0 regression). 4 处同步 bump (CHANGELOG + pyproject + __init__ + uv.lock self-ref)
+防 `76bcce3` carry-over 坑.
+
+(累计真发现至 V0.66: 28 个不变; V0.66 系列 +0 — sweep audit-only.)
+
 ## [0.65.1] - 2026-05-12
 
 ### Fix (V0.65.1 V0.65.0 follow-up — /simplify rename + test mock 修 14 broken + 报告纪律 acknowledge)
