@@ -80,23 +80,40 @@ def test_upload_path_blacklist_block(monkeypatch, path, should_block):
 
 
 @pytest.mark.parametrize("url", [
+    # V0.70.1 原 4 scheme
     "javascript:alert(document.cookie)",
-    "JAVASCRIPT:void(0)",  # 大小写不敏感
-    "vbscript:msgbox('xss')",  # V0.70.1 simplify: 旧 IE/Edge XSS scheme 同拦
+    "JAVASCRIPT:void(0)",
+    "vbscript:msgbox('xss')",
     "VBScript:Execute('...')",
     "data:text/html,<script>fetch('/api')</script>",
     "DATA:image/png;base64,iVBOR...",
     "file:///etc/passwd",
     "FILE:///home/user/.ssh/id_rsa",
+    # V0.70.3 allowlist 新挡 N 种 scheme (V0.70.2-A 静态分析: agent flow 无合法 non-http 用例)
+    "intent://scan/#Intent;scheme=zxing;end",  # Android deep link
+    "tel:+15551234567",                         # OS phone app
+    "mailto:victim@x.com",                      # OS mail app
+    "sms:+15551234567",                         # OS SMS app
+    "ws://malicious.example/ws",                # WebSocket 非 HTTP navigation
+    "wss://malicious.example/ws",
+    "ftp://files.example.com/",                 # Chrome 已废弃 ftp
+    "magnet:?xt=urn:btih:abc",                  # BitTorrent
+    "chrome://settings/",                       # Chromium 内部
+    "chrome-extension://abc/page.html",
+    "view-source:https://x.com/",               # 开发者工具
+    "blob:https://example.com/uuid",            # SPA 内部临时 URL
+    "about:config",                             # 浏览器配置
+    "example.com/page",                         # 缺 scheme (LLM 常见漏 https://)
+    "//cdn.example.com/lib.js",                 # protocol-relative
 ])
-def test_goto_url_dangerous_scheme_blocked(monkeypatch, url):
-    """V0.70.1: javascript:/data:/file: scheme 都拒 (XSS / 本地文件读)."""
+def test_goto_url_non_http_scheme_blocked(monkeypatch, url):
+    """V0.70.3: allowlist 模式 — 仅 http://https:// 允许, 其余 N 种 scheme 全拒."""
     from web_agent.types import GotoUrlAction
     monkeypatch.delenv("WEB_AGENT_AUTO_APPROVE", raising=False)
     action = GotoUrlAction(thought="x", url=url)
     decision = check(action, mark=None, marks=None)
     assert not decision.allow, f"{url!r} 应被 block"
-    assert decision.rule == "goto-url-dangerous-scheme"
+    assert decision.rule == "goto-url-non-http-scheme"
 
 
 @pytest.mark.parametrize("url", [
@@ -114,10 +131,10 @@ def test_goto_url_https_allowed(monkeypatch, url):
     assert decision.allow, f"{url!r} 应放行 got reason={decision.reason}"
 
 
-def test_goto_url_auto_approve_dangerous_scheme(monkeypatch):
-    """V0.70.1: WEB_AGENT_AUTO_APPROVE 包含 goto-url-dangerous-scheme → 放行 (dev escape hatch)."""
+def test_goto_url_auto_approve_non_http_scheme(monkeypatch):
+    """V0.70.3: WEB_AGENT_AUTO_APPROVE=goto-url-non-http-scheme → 放行 (dev escape hatch)."""
     from web_agent.types import GotoUrlAction
-    monkeypatch.setenv("WEB_AGENT_AUTO_APPROVE", "goto-url-dangerous-scheme")
+    monkeypatch.setenv("WEB_AGENT_AUTO_APPROVE", "goto-url-non-http-scheme")
     action = GotoUrlAction(thought="x", url="javascript:void(0)")
     decision = check(action, mark=None, marks=None)
     assert decision.allow

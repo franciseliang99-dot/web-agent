@@ -195,15 +195,19 @@ def check(action: Action, mark: Mark | None, marks: list[Mark] | None = None) ->
             return decision
         return SafetyDecision(allow=True)
 
-    # V0.70.1: GotoUrlAction 拒 javascript:/vbscript:/data:/file: scheme
-    # (XSS / 旧 IE script / 本地文件读) — LLM hallucinate URL 真实风险, blacklist 最小防,
-    # 不依赖 mark. allowlist (仅 http/https) 是更严但破 localhost dev, 留 V0.70.2 评估.
+    # V0.70.3 (V0.70.2-A close): GotoUrlAction allowlist — 仅 http://https:// 允许.
+    # 切自 V0.70.1 blacklist (4 scheme) 后, 静态分析 (trace.db 0 历史 + agent flow 无合法
+    # non-http 用例 about:blank/data:/blob: 全是页面 state 不是 LLM goto 目标) 推 allowlist
+    # 一次挡 N 种 scheme (intent:/tel:/mailto:/sms:/ws:/chrome:/view-source:/blob:/缺 scheme/...).
+    # 错误消息提示 LLM self-correct 加 https:// prefix.
+    # escape hatch: WEB_AGENT_AUTO_APPROVE=goto-url-non-http-scheme (dev 解锁).
     if isinstance(action, GotoUrlAction):
         u = action.url.lower().strip()
-        if u.startswith(("javascript:", "vbscript:", "data:", "file:")):
+        if not u.startswith(("http://", "https://")):
             d = _block(
-                "goto-url-dangerous-scheme",
-                f"safety: goto_url scheme 被拒 (url={action.url[:80]!r}); 仅 http/https 允许。",
+                "goto-url-non-http-scheme",
+                f"safety: goto_url scheme 被拒 (url={action.url[:80]!r}); 仅 http://https:// 允许。"
+                f" 若 URL 缺 scheme prefix, LLM 应改用 'https://...' 重发。",
             )
             if d:
                 return d

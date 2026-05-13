@@ -2,6 +2,51 @@
 
 All notable changes to web-agent. 版本号遵循 SemVer 简化形式（V<major>.<minor>.<patch>）。
 
+## [0.70.3] - 2026-05-13
+
+### Refactor (V0.70.2-A close: GotoUrlAction safety blacklist → allowlist)
+
+V0.70.1 ship 含 4-scheme blacklist (`javascript:` / `vbscript:` / `data:` / `file:`).
+V0.70.2-A 静态分析 (subagent general-purpose) 后, 切到 **allowlist `{http://, https://}`** —
+一次性挡 N+ 种潜在危险 / 无意义 scheme.
+
+**V0.70.2-A 静态分析依据** (trace.db + grep 数据驱动):
+
+| 维度 | 数据 |
+|------|------|
+| trace.db 历史 goto_url use | **0** (V0.70.1 ship 后无 LLM 选过 GotoUrlAction) |
+| dogfood log non-http scheme | **0 hits** in `/tmp/*.log` (example.com / 自检 task 全 http) |
+| localhost dev (http://127.0.0.1:9222) | ✅ 在 allowlist `http://` 覆盖内 |
+| agent flow non-http 合法用例 | **0** — about:blank / data: / blob: 全是页面内部 state, LLM 不会作 goto 目标 |
+| blacklist 漏的危险 scheme | 10+: `intent:` `tel:` `mailto:` `sms:` `ws:` `wss:` `ftp:` `magnet:` `chrome:` `chrome-extension:` `view-source:` `about:` `blob:` + 缺 scheme prefix |
+
+→ Verdict: 0 breaking risk + 一次性覆盖未来 scheme + 错误消息更清晰 (allowlist `"应改用 'https://...' 重发"`
+比 Playwright `ERR_UNKNOWN_URL_SCHEME` 强 LLM self-correct).
+
+**实施** (`src/web_agent/safety.py:198-215`):
+- `u.startswith(("javascript:", "vbscript:", "data:", "file:"))` → `not u.startswith(("http://", "https://"))`
+- Rule 名 `goto-url-dangerous-scheme` → `goto-url-non-http-scheme`
+- 错误消息加 "若 URL 缺 scheme prefix, LLM 应改用 'https://...' 重发" hint
+- escape hatch env `WEB_AGENT_AUTO_APPROVE=goto-url-non-http-scheme` (改 rule 名)
+
+**Schema + Prompt 同步**:
+- `src/web_agent/llm/_schema.py` rule-15: "URL 必须 http:// 或 https:// 开头, 其余 scheme 全拒"
+- `goto_url` tool description + url 字段 description 同样 update
+
+**测试** (`tests/test_safety.py`):
+- `test_goto_url_non_http_scheme_blocked` parametrize: 原 8 case (V0.70.1 大小写两两) + 新 13 case
+  (intent / tel / mailto / sms / ws / wss / ftp / magnet / chrome / chrome-extension / view-source /
+  blob / about / 缺 scheme `example.com/page` / protocol-relative `//cdn.x/lib.js`) = **22 cases**
+- `test_goto_url_https_allowed`: 4 case 不变 (localhost http: + https: + path 复杂样本)
+- `test_goto_url_auto_approve_dangerous_scheme` → rename `test_goto_url_auto_approve_non_http_scheme` + 用新 rule 名
+
+红→绿: 24 case 红 (新 13 scheme + rule 名 mismatch) → 实现后 28/28 + 全套件 **1083/1083** ✅.
+
+### V0.70.2-A 关闭, V0.70.2-B 仍在 ticket
+
+V0.70.2-B (真 task 验 LLM 是否真选 goto_url) 不变, 等用户授权跑 Supabase Dashboard
+复现 V0.69 dogfood 场景验证 V0.70/V0.70.1 闭环.
+
 ## [0.70.2] - 2026-05-13
 
 ### Doc (V0.70.2 ticket — V0.70.1 GotoUrlAction 后续验证 + allowlist 评估 plan)
