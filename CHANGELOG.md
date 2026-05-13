@@ -2,6 +2,57 @@
 
 All notable changes to web-agent. 版本号遵循 SemVer 简化形式（V<major>.<minor>.<patch>）。
 
+## [0.70.0] - 2026-05-13
+
+### Feat (V0.70 no_nav_after_action positive signal — V0.69 dogfood Supabase mark 49 LOOP_DETECTED 根因解决)
+
+V0.69 nav_side_effect detection 已让 LLM 看到 url 变化, 但**沉默 absence** (字段不出) 当 url 不变.
+V0.69 dogfood (Supabase Dashboard 真测): mark 49 click 后 url 没变, Qwen3-VL Vision **没察觉**
+"click 无效"连点 3 次撞 V0.55 anti-loop 切. Subagent /audit verdict: LLM 把 absence 当 ambiguous
+不当 positive signal. V0.70 翻 "沉默 negative" → "显式 positive":
+
+`src/web_agent/trace.py`:
+- 加 module-level `_NAV_EXPECTING_ACTIONS = frozenset({"click", "keyboard_shortcut", "switch_tab", "type"})`
+  (extract/scroll/done/upload/drag 等不该 nav 的 action 不触发, 避免 LLM 误判).
+- `Step.for_llm()` 扩 elif 分支: url_before==url_after **且**两者非空**且** action_type 在 nav-expecting set
+  → 注入 `no_nav_after_action: True` 字段.
+
+LLM 推理路径 (Qwen3-VL 中文 dogfood 验证):
+- 看 `nav_side_effect: "X → Y"` → "上一 action 跳页了" (V0.69)
+- 看 `no_nav_after_action: true` → "上一 click/keyboard/switch_tab 没生效, 别盲目重试" (V0.70 新增)
+- 看 trace 段无相关字段 → "正常 stay-page 行为" (extract/scroll/done 等)
+
+### 设计取舍 (subagent /audit 复述)
+
+| 维度 | 决定 |
+|------|------|
+| field name `no_nav_after_action` | 选 self-documenting JSON key, 不动 SYSTEM_PROMPT |
+| trigger set 4 个 (click/keyboard/switch_tab/type) | type 不区分 args.submit (失败 submit 同样诊断价值) |
+| extract/scroll/done 不触发 | 这些 action 本不该 nav, url 不变正常 |
+| db schema 加列? | 不加, 字段是 url_before/url_after derived, 无 schema 改动 |
+| `mark_count_delta` 字段 | defer V0.71 — modal/SPA 路由换 marks 不换 count, 误判风险高 |
+| `focused_element` snap | reject — V0.69 nav_side_effect 已捕 Ctrl+A→example.com 跳页, 加 20 evaluate/task 无新诊断力 |
+| `GotoUrlAction` (用户原提议 3) | 拆 V0.70.1 — 5 files + 2 SDK schema + actuator + prompt, 同 commit 太大 |
+
+### TDD red→green (9 测试 `tests/test_trace_no_nav_signal.py`)
+
+- click + url 同 → `no_nav: True` ✅
+- extract / scroll + url 同 → 字段不出 ✅
+- keyboard_shortcut url 变 → V0.69 `nav_side_effect` (V0.70 不破)
+- keyboard_shortcut url 同 → `no_nav: True` (Ctrl+Enter submit 无效场景)
+- 老 trace 空 url → 字段不出 (向后兼容)
+- 边界一侧 snap → 字段不出
+- switch_tab / type 同 url → `no_nav: True`
+
+红 (4 case AssertionError None != True) → 绿 (9/9 + V0.69 7/7 + 全套件 **1048/1048**).
+
+### V0.70.1 ticket — `GotoUrlAction` direct URL navigation fallback (排队)
+
+Scope: types.py 加 `GotoUrlAction(url: str)` + `Action` Union + `action_from_tool_call` arm;
+`_schema.py` `to_openai_tools` / `to_anthropic_tools` 加 function schema; `loop.py` match-case
+加 `case GotoUrlAction(url=u): await page.goto(u, wait_until="domcontentloaded")`; SYSTEM_PROMPT
+hint "mark click 无效后可 goto_url 直连". ~80-150 行 + 5-file 跨改, 单独 commit.
+
 ## [0.69.2] - 2026-05-12
 
 ### Doc (V0.66.5 ticket close + V0.66.6 实测: detail=low 12x 加速假说 2 完全确认)

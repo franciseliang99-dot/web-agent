@@ -11,6 +11,11 @@ from pathlib import Path
 from typing import Any
 
 
+# V0.70: 对哪些 action 期望触发 nav, 决定 for_llm 是否注入 no_nav_after_action positive signal.
+# extract/scroll/done/upload 本不该 nav, url 不变正常, 不触发避免误导 LLM.
+_NAV_EXPECTING_ACTIONS = frozenset({"click", "keyboard_shortcut", "switch_tab", "type"})
+
+
 @dataclass
 class Step:
     step: int
@@ -46,6 +51,14 @@ class Step:
         }
         if self.url_before and self.url_after and self.url_before != self.url_after:
             d["nav_side_effect"] = f"{self.url_before} → {self.url_after}"
+        elif (
+            self.url_before
+            and self.url_after
+            and self.action_type in _NAV_EXPECTING_ACTIONS
+        ):
+            # V0.70: nav-expecting action 但 url 没变 → 显式 positive signal, 防 LLM 重试无效 mark.
+            # V0.69 dogfood Supabase mark 49 click 后 url 没变 + LLM 没察觉连点 3 次撞 anti-loop 根因解决.
+            d["no_nav_after_action"] = True
         return d
 
 
