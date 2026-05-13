@@ -2,6 +2,60 @@
 
 All notable changes to web-agent. 版本号遵循 SemVer 简化形式（V<major>.<minor>.<patch>）。
 
+## [0.66.1] - 2026-05-12
+
+### Fix (V0.66.1 plan_elapsed_s instrumentation — V0.66.0 plan 锁阶段 1/3 落地, TDD-first 红绿 + V0.66.2 数据驱动 baseline)
+
+V0.66.0 (`b8c5a32`) audit doc 锁分阶段 plan, V0.66.1 = 阶段 1 (instrumentation only). 加
+`plan_elapsed_s: float | None` 进 `trace.Step` + sqlite `steps` 表 REAL 列 + `loop.py` plan()
+retry loop 包 `time.monotonic()` 算单步 wall clock. **0 行为改变**, 仅记录 per-call latency
+让 V0.66.2 (Provider-aware wallclock dict) 表初值由真测数据回流定 baseline, 不凭感觉 1800/480/600.
+
+### TDD-first 流程 (CLAUDE.md 红 → 绿 → simplify)
+
+Step 0 subagent 不读实现草稿先写 8 个 red tests (`tests/test_plan_elapsed_telemetry.py`):
+1. `Step` dataclass 含 `plan_elapsed_s: float | None` 字段
+2. `init_db` schema 含 `plan_elapsed_s` 列
+3. `init_db` ALTER 老 db 加 plan_elapsed_s (REAL 非 INTEGER)
+4. `write_step` 接受并存储 plan_elapsed_s, round-trip read 一致
+5-6. None 值 round-trip
+7-8. loop.py 集成: plan() 成功后 Step.plan_elapsed_s = 单调差; LLM_FAILED Step 保持 None
+
+red 阶段: 8/8 fail (AttributeError / sqlite3.OperationalError no such column). 主 agent 实施
+trace.py + loop.py 改动后 → 8/8 green. **TDD-first 红绿成立**.
+
+### 修补 (trace.py + loop.py 净 +20 行 + 新 test file)
+
+| 文件 | 改动 |
+|------|------|
+| `src/web_agent/trace.py` | `Step` +1 字段 `plan_elapsed_s: float \| None = None` (line 30); `init_db` CREATE TABLE 加 `plan_elapsed_s REAL` 列 + ALTER 独立 try (REAL nullable, 跟 V0.33.1/V0.42.0 INTEGER DEFAULT 0 类型不同) + `write_step` INSERT 13 cols |
+| `src/web_agent/loop.py` | line 644 之前 `t_plan_start = time.monotonic()` + `step_plan_elapsed_s: float \| None = None`; line 666 success break 之前算单调差; 5 处 Step ctor (safety_block 734, backtrack 782, loop_detected 799, alt-step 826, 主 success 974) 加 `plan_elapsed_s=step_plan_elapsed_s`; line 685 LLM_FAILED Step 保持 None (plan 没成功完, latency None semantically 正确) |
+
+### Tests (TDD red → green + 全 suite 0 regression)
+
+```
+pytest tests/test_plan_elapsed_telemetry.py → 8 passed (red→green)
+pytest tests/ → 1011 passed + 29 skipped (跟 V0.65.1 baseline 1003 + 8 新测试一致, 0 regression)
+```
+
+### V0.66.x plan 进度
+
+| 阶段 | 状态 | 内容 |
+|------|------|------|
+| V0.66.0 (`b8c5a32`) | ✅ | audit doc sweep + 分阶段 plan 锁 + V0.34 教训 34 |
+| **V0.66.1 (本条)** | ✅ | plan_elapsed_s instrumentation TDD-first 红绿 |
+| V0.66.2 | 等数据 | Provider-aware wallclock dict (`{"anthropic": ?, "openai-kimi": ?, "openai": ?}`), 表初值 = max(p95, 2×median) 来自 V0.66.1 真测数据回流, 用户 ack 后跑 |
+| V0.66.x.1 maintainer | 红线 | Kimi prod sandbox 网络真测 (烧 LLM $) |
+
+### V0.66.1 user 用法
+
+```bash
+# 跑任何 task 后看 trace.db 单步 plan latency 真分布:
+sqlite3 data/trace.db \
+  "SELECT step, action_type, plan_elapsed_s FROM steps WHERE plan_elapsed_s IS NOT NULL ORDER BY step;"
+# Anthropic / OpenAI-Kimi / OpenAI 各跑 1-2 任务积累样本 → V0.66.2 baseline
+```
+
 ## [0.66.0] - 2026-05-12
 
 ### Doc (V0.66 V0.65 关单 + LLM 慢 max_wallclock 瓶颈 audit sweep 1/1 — Provider-aware wallclock plan + Kimi 4-24min 单步真测 + V0.34 教训 34 累计)

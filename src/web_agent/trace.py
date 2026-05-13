@@ -27,6 +27,9 @@ class Step:
     # cache_read (命中, 0.1× input cost). OpenAI/Kimi 只有 cache_read (auto cache 无 creation 概念).
     cache_creation_input_tokens: int = 0
     cache_read_input_tokens: int = 0
+    # V0.66.1: plan() 单步 wall clock latency (time.monotonic 差, 含 SDK retry). None 表示该 step
+    # 没成功 plan (LLM_FAILED) — 给 V0.66.2 Provider-aware wallclock 数据驱动定 baseline.
+    plan_elapsed_s: float | None = None
 
     def for_llm(self) -> dict[str, Any]:
         """给 LLM 看的精简版（不带截图、observation 截断）。"""
@@ -69,12 +72,13 @@ def init_db(db_path: Path) -> sqlite3.Connection:
             output_tokens INTEGER DEFAULT 0,
             cache_creation_input_tokens INTEGER DEFAULT 0,
             cache_read_input_tokens INTEGER DEFAULT 0,
+            plan_elapsed_s REAL,
             PRIMARY KEY (task_id, step)
         )
         """
     )
-    # V0.33.1 + V0.42.0: ALTER 兼容老 db (V0.33.0 / V0.42.0 之前 schema 缺新列). sqlite ADD COLUMN
-    # 幂等性靠 try/except (重复 ALTER raise OperationalError "duplicate column").
+    # V0.33.1 + V0.42.0 + V0.66.1: ALTER 兼容老 db (新列幂等 try/except). V0.66.1 plan_elapsed_s
+    # 是 REAL nullable (无 default), 跟 V0.33.1 V0.42.0 INTEGER DEFAULT 0 类型不同 → 分组 ALTER.
     for col in (
         "input_tokens",
         "output_tokens",
@@ -85,6 +89,10 @@ def init_db(db_path: Path) -> sqlite3.Connection:
             conn.execute(f"ALTER TABLE steps ADD COLUMN {col} INTEGER DEFAULT 0")
         except sqlite3.OperationalError:
             pass  # column 已存 (新 db CREATE 时已加 / 老 db 之前 ALTER 过)
+    try:
+        conn.execute("ALTER TABLE steps ADD COLUMN plan_elapsed_s REAL")
+    except sqlite3.OperationalError:
+        pass  # column 已存
     conn.execute(
         """
         CREATE TABLE IF NOT EXISTS tasks (
@@ -106,13 +114,13 @@ def write_step(
     s: Step,
     screenshot_path: str = "",
 ) -> None:
-    # V0.33.1 + V0.42.0: 加 cache_creation/cache_read 列 INSERT (D 主题 cache hit-rate audit)
+    # V0.33.1 + V0.42.0 + V0.66.1: 加 cache_creation/cache_read + plan_elapsed_s INSERT
     conn.execute(
         "INSERT OR REPLACE INTO steps "
         "(task_id, step, ts, thought, action_type, action_args, screenshot_path, "
         "observation, input_tokens, output_tokens, "
-        "cache_creation_input_tokens, cache_read_input_tokens) "
-        "VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
+        "cache_creation_input_tokens, cache_read_input_tokens, plan_elapsed_s) "
+        "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)",
         (
             task_id,
             s.step,
@@ -126,6 +134,7 @@ def write_step(
             s.output_tokens,
             s.cache_creation_input_tokens,
             s.cache_read_input_tokens,
+            s.plan_elapsed_s,
         ),
     )
     conn.commit()

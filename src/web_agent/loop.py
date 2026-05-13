@@ -641,6 +641,9 @@ async def run_react_loop(
             step_output_tokens = 0
             step_cache_creation_tokens = 0
             step_cache_read_tokens = 0
+            # V0.66.1: per-step plan() wall clock (含 SDK retry). break 后算差给 Step.plan_elapsed_s.
+            t_plan_start = time.monotonic()
+            step_plan_elapsed_s: float | None = None
             for attempt in range(retry_max + 1):  # 第 0 次是首发, 1..retry_max 是 retry
                 try:
                     action = await client.plan(
@@ -663,6 +666,7 @@ async def run_react_loop(
                             step_input_tokens * 0.003 / 1000.0
                             + step_output_tokens * 0.015 / 1000.0
                         )
+                    step_plan_elapsed_s = time.monotonic() - t_plan_start  # V0.66.1 instrumentation
                     break  # 成功跳出 retry loop
                 except Exception as e:
                     last_error = e
@@ -736,6 +740,7 @@ async def run_react_loop(
                             action_type="safety_block",
                             action_args={"original_type": action.type, "rule": decision.rule, **_action_args_only(action)},
                             observation=result,
+                            plan_elapsed_s=step_plan_elapsed_s,
                         )
                         trace.append(step)
                         write_step(conn, task_id, step, str(shot_path))
@@ -784,6 +789,7 @@ async def run_react_loop(
                             action_type="backtrack",
                             action_args={"sig": sig[:200], "trigger": "anti_loop"},
                             observation=f"backtracked: {hint[:200]}",
+                            plan_elapsed_s=step_plan_elapsed_s,
                         )
                         trace.append(bt_step)
                         write_step(conn, task_id, bt_step, str(shot_path))
@@ -800,6 +806,7 @@ async def run_react_loop(
                     step=step_i, ts=time.time(), thought=action.thought,
                     action_type=action.type, action_args=_action_args_only(action),
                     observation="LOOP_DETECTED — aborted",
+                    plan_elapsed_s=step_plan_elapsed_s,
                 )
                 trace.append(step)
                 write_step(conn, task_id, step, str(shot_path))
@@ -827,6 +834,7 @@ async def run_react_loop(
                     step=step_i, ts=time.time(), thought=action.thought,
                     action_type=action.type, action_args=_action_args_only(action),
                     observation="LOOP_DETECTED — alternation aborted",
+                    plan_elapsed_s=step_plan_elapsed_s,
                 )
                 trace.append(alt_step)
                 write_step(conn, task_id, alt_step, str(shot_path))
@@ -976,6 +984,7 @@ async def run_react_loop(
                 # V0.42.0 D: cache hit-rate audit per-step
                 cache_creation_input_tokens=step_cache_creation_tokens,
                 cache_read_input_tokens=step_cache_read_tokens,
+                plan_elapsed_s=step_plan_elapsed_s,  # V0.66.1
             )
             trace.append(step)
             write_step(conn, task_id, step, str(shot_path))
