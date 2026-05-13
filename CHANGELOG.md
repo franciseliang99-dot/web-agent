@@ -2,6 +2,85 @@
 
 All notable changes to web-agent. 版本号遵循 SemVer 简化形式（V<major>.<minor>.<patch>）。
 
+## [0.58.2] - 2026-05-11
+
+### Doc (V0.58 代理层接入系列收尾 3/3 — V0.34 教训 28 累计 + V0.58.x.1 maintainer 占位 + V0.59 inventory)
+
+V0.58.0 plan + V0.58.1 proxy_util infra 已落 (2 commit autonomous). 本提交收尾: 系列总结 + V0.34
+教训 28 累计 + V0.58.x.1 maintainer 红线占位 + V0.59 主题候选.
+
+### V0.58 系列回顾 (3 commit autonomous + 1 maintainer 占位)
+
+| ver | scope | LOC | 状态 |
+|-----|-------|-----|------|
+| V0.58.0 | doc audit + plan + decision 门槛 + eval cassette 默关 reframe | ~150 doc | ✅ |
+| V0.58.1 | proxy_util + start_chrome.sh --proxy-server + 13 fast unit | ~80 src + ~130 test + ~80 doc | ✅ |
+| **V0.58.2** | 系列收尾 + V0.58.x.1 maintainer 占位 + V0.59 inventory | ~80 doc | ✅ 本 |
+| **V0.58.x.1** | 真接付费代理 + 真测 akamai 403→200 cassette | n/a | ❌ **maintainer 红线** stay |
+
+V0.58 代理层接入 autonomous infra 完成. **真接付费代理验证 V0.48.2 #26 解决路径**仍 user 红线
+(跟 V0.42.x.1 / V0.51.x.1 同模式).
+
+### V0.34 教训累计应用至 V0.58 (28 系列贯彻)
+
+| 系列 | 教训应用 |
+|------|---------|
+| V0.47 | autonomous L1+L2+L3 + L3 武器 maintainer |
+| V0.51 | destructive 默 dry-run + --apply 用户显式 |
+| V0.55-V0.57 | pilot 真测沉淀 narrow follow-up fix |
+| **V0.58** | **代理层接入 autonomous env infra + maintainer 真接付费 = 红线分层 implementation 第 2 次** |
+
+**V0.58 教训应用新维度**: **env schema 单一来源** (URL string) 防 `_USER/_PASS` 独立 var 两侧
+schema drift. Conservative reframe **eval cassette 默关 proxy** 防 cassette 录制 leak (跟 V0.51
+destructive 默 dry-run 同 安全 default 模式).
+
+跟 V0.47 (autonomous L1+L2+L3 / L3 武器 maintainer) **同分层模式**:
+- V0.47: protection 识别 autonomous, 武器切换 (代理/Solver/指纹) maintainer
+- **V0.58: 代理 env infra autonomous, 真接付费代理 maintainer** (V0.47 的"L3 武器" 一个 sub 实施)
+
+(累计真发现至 V0.58: 28 个; V0.58 系列 +0 — autonomous env infra 不催 catch, V0.58.x.1 真测
+后可能 catch.)
+
+### V0.58.x.1 maintainer 真测占位 (用户授权后跑)
+
+```bash
+# 1. 真接付费代理 (Bright Data / Oxylabs / 自建 residential, ~$5-50/mo)
+export WEB_AGENT_PROXY="http://user:pass@your-residential-proxy.com:port"
+
+# 2. CDP cli 路径 (prod 主) — Chrome spawn 时加 --proxy-server
+bash scripts/start_chrome.sh
+# 日志预期: Proxy: http://<auth>@your-residential-proxy.com:port (auth masked)
+
+# 3. 真测 V0.48.2 同 cassette akamai 真访 (期望 403→200, 代理换出口 IP)
+WEB_AGENT_RUN_SLOW=1 WEB_AGENT_REUSE_PROBE=1 uv run pytest \
+  "tests/test_protection_reuse_cassette.py::test_reuse_detection_real[akamai.com-https://www.akamai.com/-medium]" -v
+
+# 4. compare V0.48.2 baseline (akamai 403 stable) vs V0.58.x.1 (期望 200 baseline)
+sqlite3 ... 或 cassette JSON diff
+
+# 5. 失败 → 不回退 V0.58.1 (env 接入无害), 文档标"代理 tier 不绕 akamai (需 residential)"
+```
+
+### V0.59 主题候选 (V0.58 完后, 等用户)
+
+V0.46.2 inventory 全 + pilot 经验 3 项 + 代理层接入完. 累计:
+- V0.58.x.1 maintainer 真接付费代理验证 (用户 $)
+- V0.55/V0.56/V0.57.x.1 cassette 真站测 (~$0.05-0.20 各)
+- V0.42.x.1 / V0.51.x.1 真测 sample
+- **eval direct launch proxy 接入** (V0.58 conservative reframe defer, 若 V0.58.x.1 验代理成功
+  且 eval 真测需要代理, 再 add)
+- 其他用户提的方向
+
+### Changed (~0 src LOC, ~80 doc LOC)
+
+- `CHANGELOG.md` V0.58.2 entry (本)
+- `pyproject.toml` / `__init__.py` 0.58.1 → 0.58.2
+- `uv.lock` 同步
+
+### Verify
+
+- `uv run pytest` → **999 passed, 29 skipped** (V0.58.1 状态 0 src 改 → 0 测变)
+
 ## [0.58.1] - 2026-05-11
 
 ### Feat (V0.58 代理层接入 2/3 — proxy_util env helper + start_chrome.sh --proxy-server flag)
