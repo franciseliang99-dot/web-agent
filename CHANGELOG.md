@@ -2,6 +2,59 @@
 
 All notable changes to web-agent. 版本号遵循 SemVer 简化形式（V<major>.<minor>.<patch>）。
 
+## [0.70.2] - 2026-05-13
+
+### Doc (V0.70.2 ticket — V0.70.1 GotoUrlAction 后续验证 + allowlist 评估 plan)
+
+V0.70.1 GotoUrlAction shipped 含 blacklist (`javascript:` / `vbscript:` / `data:` / `file:`).
+subagent /simplify 当时 defer 完整 allowlist (仅 `http:` / `https:`) 是 value-tradeoff (localhost
+dev 用户 vs 严格 multi-user 安全). 本 ticket 拆 2 个验证子项, 独立可推进, **不阻塞主线 V0.71+**.
+
+### V0.70.2-A: GotoUrlAction allowlist 评估 (静态分析, 0 烧 \$)
+
+**问题**: 当前 blacklist 拒 4 scheme, 漏 (举几个潜在 bypass):
+- `about:` (Chrome internal: `about:config` 改 flag, `about:blank` 无害)
+- `chrome:` / `chrome-extension:` (chromium internal page)
+- `blob:` (大文件 URL, 通常正常但 SPA 可能注入恶意 blob)
+- `view-source:` (查源码, 无害但语义异常)
+- `intent:` (Android deep link, web-agent 桌面用例不关心)
+- 自定义 URL scheme (e.g. `slack:`, `zoom:`, `vscode:`)
+
+**评估维度** (待 V0.70.2-A 跑):
+1. 上述 scheme 在 web-agent 实际 task 出现频率 (扫现有 trace.db + dogfood log, 0 case → 切 allowlist 安全)
+2. localhost dev 频率 (`http://localhost:N` / `http://127.0.0.1:N`) — allowlist 保 http 即可, 不影响
+3. file:// 测试场景 (本地 HTML 测试) — 用户是否需要? 当前已拒, 切 allowlist 仍拒, 0 行为差
+4. Recommendation: 若 1-3 全 0 风险 → 切 allowlist (`{"http:", "https:"}` 显式 in), reject 其他.
+
+**触发条件** (任一 met → 启动 V0.70.2-A):
+- (a) dogfood 出现新 scheme bypass / 安全报告需求
+- (b) multi-user / hosted 场景上线 (当前是 personal automation)
+- (c) 用户主动要求收紧
+
+**Scope 估算**: 5 行 safety.py 改 + 4 行测试 update + CHANGELOG. < 30 分钟.
+
+### V0.70.2-B: 真 task 验 LLM 是否真选 goto_url (≤\$0.05, 1-2 task)
+
+**问题**: V0.70.1 给 LLM 加 goto_url tool, 但 SYSTEM_PROMPT rule-15 是 hint 性的 ("不要每步都 goto").
+Qwen3-VL 实际推理在 V0.69 dogfood Supabase mark 49 撞 anti-loop 场景下, 会**真选 goto_url** 还是仍偏好 retry mark?
+
+**验证 plan** (按用户授权后跑):
+1. 起 Chrome 9222, 跑 V0.69 同 Supabase Dashboard task (auth/url-configuration → policies 跳转)
+2. 关键观察:
+   - LLM 在 mark click 失败 (`no_nav_after_action: true` 出现) 几步内是否切到 goto_url?
+   - 若切 goto_url, URL 选对 (站内已知结构) 还是 hallucinate?
+   - V0.55 anti-loop 是否仍在 mark 49 触发 (signal 没 LLM-感知到), 还是被 V0.70 提前转向?
+3. 失败模式: LLM 不选 goto_url 仍 retry mark → 验证 SYSTEM_PROMPT rule-15 prompt-engineering 是否够强, 可能需要 V0.71 加 explicit 触发条件 (e.g. `no_nav_after_action` 连续 2 步后强制建议 goto_url)
+
+**Scope 估算**: 1-2 real task × \$0.005-0.02 ≈ **\$0.05 上限**. trace.db row 写 prod 数据, 用 V0.66.6 detail=low 省 token + 加速 (3min/task vs 30min).
+
+**触发条件**: 用户授权 "跑 V0.70.2-B 验证" + Chrome 9222 alive + .env OpenRouter Qwen3-VL key 已配 (当前满足).
+
+### V0.70.2 状态: ⏳ 等用户决定子项
+
+- A 0 烧 \$ 可随时跑 (静态分析); B 需用户授权 (烧 \$ + Chrome interactive).
+- 不阻塞 V0.71 (e.g. mark_count_delta 字段, 之前 V0.70 defer 到 V0.71 排队).
+
 ## [0.70.1] - 2026-05-13
 
 ### Feat (V0.70.1 GotoUrlAction — mark click 失败时的直连导航 escape hatch)
