@@ -35,7 +35,9 @@ async def test_anthropic_plan_smoke_pipeline_alive():
     from web_agent.llm.anthropic import AnthropicClient
     from web_agent.trace import Trace
 
-    os.environ.setdefault("ANTHROPIC_API_KEY", "sk-ant-cassette-replay-not-real")
+    # setdefault 不覆盖空字符串; .env ANTHROPIC_API_KEY= (空) 时仍要给 cassette replay 一个 fake key
+    if not os.environ.get("ANTHROPIC_API_KEY"):
+        os.environ["ANTHROPIC_API_KEY"] = "sk-ant-cassette-replay-not-real"
 
     client = AnthropicClient()
     trace = Trace(task_id="smoke-real", goal="搜苹果价格", steps=deque())

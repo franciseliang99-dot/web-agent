@@ -45,7 +45,9 @@ async def test_gpt_plan_smoke_pipeline_alive():
     from web_agent.llm.openai import OpenAIClient
     from web_agent.trace import Trace
 
-    os.environ.setdefault("OPENAI_API_KEY", "sk-gpt-cassette-replay-not-real")
+    # setdefault 不覆盖空字符串; .env OPENAI_API_KEY= (空) 时仍要给 cassette replay 一个 fake key
+    if not os.environ.get("OPENAI_API_KEY"):
+        os.environ["OPENAI_API_KEY"] = "sk-gpt-cassette-replay-not-real"
 
     # 显式传 base_url 防 OPENAI_BASE_URL env (用户主体配 moonshot.cn) 劫持请求
     client = OpenAIClient(base_url=_GPT_BASE_URL, model=_GPT_MODEL)

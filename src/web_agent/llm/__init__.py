@@ -38,6 +38,8 @@ def provider_from_model(model: str) -> str:
         return "openai"  # Kimi/Moonshot OpenAI compat 端点
     if m.startswith("deepseek"):
         return "openai"  # DeepSeek OpenAI compat 端点
+    if m.startswith("qwen"):
+        return "openai"  # Qwen via DashScope / OpenRouter OpenAI compat 端点
     if m.startswith("gemini"):
         return "gemini"
     if "/" in m:  # OpenRouter 风格 "anthropic/claude-..." → 走对应 skin
@@ -46,6 +48,8 @@ def provider_from_model(model: str) -> str:
             "anthropic": "anthropic",
             "openai": "openai",
             "moonshotai": "openai",  # OpenRouter 路径 "moonshotai/kimi-k2.6"
+            "qwen": "openai",  # OpenRouter 路径 "qwen/qwen3-vl-32b-instruct"
+            "deepseek": "openai",
             "google": "gemini",
             "gemini": "gemini",
         }
@@ -74,6 +78,14 @@ def make_client(
     if provider is None:
         provider = provider_from_model(model) if model else "anthropic"
     provider = provider.lower().strip()
+
+    # V0.66.3: web-agent 必需 vision (SoM + screenshot), fail-fast guard 防止
+    # 构造一个 chat() 必 400 'unknown variant image_url' 的 client. model is None
+    # 时跳过 (anthropic/openai client 用 DEFAULT_MODEL, 当前 default 全 vision-capable).
+    if model:
+        from web_agent.llm._capabilities import assert_vision_capable
+
+        assert_vision_capable(provider, model)
 
     if provider == "anthropic":
         from web_agent.llm.anthropic import DEFAULT_MODEL, AnthropicClient

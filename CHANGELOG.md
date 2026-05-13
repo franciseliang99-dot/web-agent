@@ -2,6 +2,49 @@
 
 All notable changes to web-agent. 版本号遵循 SemVer 简化形式（V<major>.<minor>.<patch>）。
 
+## [0.68.0] - 2026-05-12
+
+### Feat (V0.66.3 vision-capability gating — fail-fast guard 防止 chat() 首次 400 'unknown variant image_url')
+
+V0.65 dogfood 切 DeepSeek 后第一次 chat() 才 400 `unknown variant 'image_url'` —
+web-agent 整个 domain 假设 LLM 支持 vision (SoM + screenshot), 但 `make_client()`
+不检查 model 能力, 构造一个 chat 必 400 的 client 反 fail-fast 原则.
+
+本版加 vision-capability table + `make_client()` 内 guard:
+- 新建 `src/web_agent/llm/_capabilities.py` (~96 行): `VISION_CAPABLE_PREFIXES` /
+  `VISION_INCAPABLE_PREFIXES` 静态表 + `_strip_vendor()` 归一 OpenRouter 路径 +
+  `is_vision_capable()` / `assert_vision_capable()` 两个 pure function.
+- 黑名单优先于白名单, 边界 case `qwen3-instruct` (黑) vs `qwen3-vl-` (白) 单测覆盖.
+- 未知 model 默认 True + UserWarning (避免锁死新 release 的 model).
+- `make_client()` 进入 provider 分支前调 `assert_vision_capable()`, 不支持时 raise
+  RuntimeError 含 actionable hint (建议替代 `gpt-4o-mini / claude-sonnet-4.6 /
+  kimi-k2.6 / qwen3-vl-32b-instruct`).
+
+### Feat (provider_from_model 扩展 qwen 前缀 + OpenRouter map 扩展)
+
+- `qwen-*` / `qwen3-*` / `qwen3-vl-*` model 名自动推断到 openai provider
+  (走 DashScope / OpenRouter / SiliconFlow OpenAI-compat 端点).
+- OpenRouter map 新增 `qwen/` (Qwen via OpenRouter) + `deepseek/` (DeepSeek via OpenRouter)
+  路径分支.
+
+### Fix (3 处 smoke test setdefault 边界 bug)
+
+`tests/test_smoke_{anthropic,openai_gpt,openai_kimi}_real.py` 用 `os.environ.setdefault()`
+给 cassette replay 灌 fake key, **不覆盖空字符串** — .env 把 API_KEY 留空时 setdefault
+不生效 → client 构造 MissingSecretError. 改成 `if not os.environ.get(): os.environ[]=fake`.
+
+### Changed (.env 切换 OpenRouter Qwen3-VL-32B-Instruct)
+
+注释 DeepSeek 段 (V0.65 dogfood 确认无 vision), 启用 OpenRouter Qwen3-VL-32B-Instruct
+(`qwen/qwen3-vl-32b-instruct`, $0.104/$0.416 per M, 131K ctx, vision ✅).
+
+### TDD red→green
+
+- `tests/test_llm_capabilities.py` 15 测试先写 (red: ModuleNotFoundError) →
+  `_capabilities.py` 实现 (green: 15/15 + 全套件 1027/1027 全过).
+- subagent (general-purpose) /simplify 审查识别 OpenRouter vendor 前缀冗余
+  (`gpt-4o` vs `openai/gpt-4o`), 引入 `_strip_vendor()` 归一两表去重 36→23 entries.
+
 ## [0.67.1] - 2026-05-12
 
 ### Fix (V0.67.1 `provider_from_model` deepseek 前缀分支落地 — docstring/实现不一致补齐)
