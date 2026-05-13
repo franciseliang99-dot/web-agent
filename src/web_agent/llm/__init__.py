@@ -36,6 +36,8 @@ def provider_from_model(model: str) -> str:
         return "openai"
     if m.startswith(("kimi", "moonshot")):
         return "openai"  # Kimi/Moonshot OpenAI compat 端点
+    if m.startswith("deepseek"):
+        return "openai"  # DeepSeek OpenAI compat 端点
     if m.startswith("gemini"):
         return "gemini"
     if "/" in m:  # OpenRouter 风格 "anthropic/claude-..." → 走对应 skin

@@ -102,6 +102,18 @@ def test_provider_from_model_kimi_and_moonshot():
         assert provider_from_model(m) == "openai", f"{m!r} should infer openai"
 
 
+def test_provider_from_model_deepseek():
+    """DeepSeek model 名前缀应推断到 openai（OpenAI compat 端点）。"""
+    from web_agent.llm import provider_from_model
+
+    for m in [
+        "deepseek-chat",
+        "deepseek-reasoner",
+        "deepseek-v4-flash",
+    ]:
+        assert provider_from_model(m) == "openai", f"{m!r} should infer openai"
+
+
 def test_openai_client_kimi_detection_via_base_url(monkeypatch):
     """base_url 含 "moonshot" → _is_kimi=True，启用兼容补丁。"""
     monkeypatch.setenv("OPENAI_API_KEY", "sk-test")

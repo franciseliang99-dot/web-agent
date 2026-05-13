@@ -2,6 +2,22 @@
 
 All notable changes to web-agent. 版本号遵循 SemVer 简化形式（V<major>.<minor>.<patch>）。
 
+## [0.67.1] - 2026-05-12
+
+### Fix (V0.67.1 `provider_from_model` deepseek 前缀分支落地 — docstring/实现不一致补齐)
+
+`src/web_agent/llm/__init__.py:28` docstring 写"OpenAI 兼容端点（Kimi / Moonshot / DeepSeek 等）走
+'openai' provider"，但 `provider_from_model()` 32-52 行只列了 `kimi` / `moonshot` 前缀分支，
+**`deepseek-*` 会 fallthrough 到 anthropic** → 配 DeepSeek key 时 SDK 401。本次加一行
+`if m.startswith("deepseek"): return "openai"` 让 docstring 承诺落地。
+
+TDD-first 红绿: 先加 `test_provider_from_model_deepseek`（3 model 名: `deepseek-chat`/
+`deepseek-reasoner`/`deepseek-v4-flash`）跑红（`anthropic != openai`），再加分支跑绿,
+`tests/test_llm_openai.py` 14 测试全过。
+
+用户侧影响: 之前 .env 必须显式 `WEB_AGENT_LLM_PROVIDER=openai` 才能用 DeepSeek，
+本版后 `WEB_AGENT_MODEL=deepseek-chat` 自动推断到 openai provider，env 可省。
+
 ## [0.67.0] - 2026-05-12
 
 ### Doc (V0.67 V0.66.x.1 数据等用户 audit sweep 1/1 — Kimi maintainer 真测红线 + autonomous baseline 红线双叠 stay + V0.66.2 plan locked + V0.34 教训 35 累计)
