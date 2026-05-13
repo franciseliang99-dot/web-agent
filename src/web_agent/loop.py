@@ -42,6 +42,7 @@ from web_agent.types import (
     DoneAction,
     DragAction,
     ExtractAction,
+    GotoUrlAction,
     KeyboardShortcutAction,
     Mark,
     PasteAction,
@@ -708,7 +709,7 @@ async def run_react_loop(
             # safety check：在 actuator 之前 intercept 敏感 action（send/pay/delete/密码字段...）
             # V0.17.0: isinstance 替 action.type 字符串比, mypy 自动 narrow ClickAction.mark_id
             # V0.23.2: UploadAction 也走 safety check (paths 黑名单), elicit 流程一致
-            if isinstance(action, (ClickAction, TypeAction, PasteAction, UploadAction)):
+            if isinstance(action, (ClickAction, TypeAction, PasteAction, UploadAction, GotoUrlAction)):
                 check_mark: Mark | None = None
                 if isinstance(action, ClickAction):
                     check_mark = _find_mark(marks, action.mark_id)
@@ -716,6 +717,9 @@ async def run_react_loop(
                     # V0.23.2: UploadAction safety 看 paths 不看 mark; mark 仅传给 obs 用,
                     # safety.check 内 isinstance(UploadAction) 分支不读 mark 直接走 paths 黑名单.
                     check_mark = _find_mark(marks, action.mark_id)
+                elif isinstance(action, GotoUrlAction):
+                    # V0.70.1: GotoUrlAction safety 看 url scheme 不看 mark; URL 不依赖 mark.
+                    check_mark = None
                 else:  # TypeAction or PasteAction (V0.19.0: paste 同 type 用 last_clicked_mark)
                     check_mark = last_clicked_mark
                 decision = safety_check(action, check_mark, marks)
@@ -951,6 +955,16 @@ async def run_react_loop(
                         except RuntimeError as e:
                             # actuator DOM walk 失败 (button 找不到关联 input) → 兜底 ERROR obs
                             obs = f"ERROR: upload {e}"
+                case GotoUrlAction(url=goto_target):
+                    # V0.70.1: 直连导航 escape hatch — mark click 反复无效后 LLM 走这条.
+                    # wait_until="domcontentloaded" 跟 click 后 (line 863) 同 strategy.
+                    # 失败模式 (DNS / 403 / TimeoutError) → ERROR obs 让 LLM 第 14 条失败恢复策略接管.
+                    try:
+                        await page.goto(goto_target, wait_until="domcontentloaded")
+                        last_clicked_mark = None  # 跳页焦点重置, 防 type safety 误判旧 mark
+                        obs = f"goto_url {goto_target[:200]}"
+                    except Exception as e:
+                        obs = f"ERROR: goto_url {goto_target[:80]}: {type(e).__name__}: {str(e)[:160]}"
                 case CloseTabAction(idx=tab_idx):
                     # V0.21.1: 2 道 guard — len==1 拒 + idx==active_idx 拒 (强迫先 switch 再 close).
                     if tab_idx < 0 or tab_idx >= len(step_pages):

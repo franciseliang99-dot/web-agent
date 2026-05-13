@@ -22,7 +22,7 @@ def test_openai_client_init_uses_env_key(monkeypatch):
     client = OpenAIClient()
     assert client.name == "openai"
     assert client.model == DEFAULT_MODEL
-    assert len(client._tools) == 11
+    assert len(client._tools) == 12  # V0.70.1: +goto_url
     for t in client._tools:
         assert t["type"] == "function"
         f = t["function"]

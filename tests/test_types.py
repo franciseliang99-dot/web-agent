@@ -14,6 +14,7 @@ from web_agent.types import (
     DoneAction,
     DragAction,
     ExtractAction,
+    GotoUrlAction,
     KeyboardShortcutAction,
     PasteAction,
     ScrollAction,
@@ -108,6 +109,28 @@ def test_close_tab_idx_coerce_int():
     a = action_from_tool_call("close_tab", {"thought": "关", "idx": "0"})
     assert isinstance(a, CloseTabAction)
     assert a.idx == 0
+
+
+def test_goto_url_factory():
+    """V0.70.1: goto_url 工厂 — 直连 URL 替代失败 mark click."""
+    a = action_from_tool_call("goto_url", {"thought": "mark 49 反复点击无效, 直跳 url-configuration", "url": "https://supabase.com/dashboard/x/auth/url-configuration"})
+    assert isinstance(a, GotoUrlAction)
+    assert a.thought == "mark 49 反复点击无效, 直跳 url-configuration"
+    assert a.url == "https://supabase.com/dashboard/x/auth/url-configuration"
+    assert a.type == "goto_url"
+
+
+def test_goto_url_factory_url_required():
+    """V0.70.1: 缺 url 应抛 KeyError (raw["url"] 无 default)."""
+    with pytest.raises(KeyError):
+        action_from_tool_call("goto_url", {"thought": "缺 url"})
+
+
+def test_goto_url_action_frozen():
+    """V0.70.1: GotoUrlAction frozen — 不可 mutate."""
+    a = action_from_tool_call("goto_url", {"thought": "x", "url": "https://example.com/"})
+    with pytest.raises(AttributeError):
+        a.url = "https://malicious.com/"  # type: ignore[misc]
 
 
 def test_unknown_tool_name_raises():

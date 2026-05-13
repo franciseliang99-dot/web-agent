@@ -79,6 +79,50 @@ def test_upload_path_blacklist_block(monkeypatch, path, should_block):
         assert decision.allow, f"{path} 应放行 got reason={decision.reason}"
 
 
+@pytest.mark.parametrize("url", [
+    "javascript:alert(document.cookie)",
+    "JAVASCRIPT:void(0)",  # 大小写不敏感
+    "vbscript:msgbox('xss')",  # V0.70.1 simplify: 旧 IE/Edge XSS scheme 同拦
+    "VBScript:Execute('...')",
+    "data:text/html,<script>fetch('/api')</script>",
+    "DATA:image/png;base64,iVBOR...",
+    "file:///etc/passwd",
+    "FILE:///home/user/.ssh/id_rsa",
+])
+def test_goto_url_dangerous_scheme_blocked(monkeypatch, url):
+    """V0.70.1: javascript:/data:/file: scheme 都拒 (XSS / 本地文件读)."""
+    from web_agent.types import GotoUrlAction
+    monkeypatch.delenv("WEB_AGENT_AUTO_APPROVE", raising=False)
+    action = GotoUrlAction(thought="x", url=url)
+    decision = check(action, mark=None, marks=None)
+    assert not decision.allow, f"{url!r} 应被 block"
+    assert decision.rule == "goto-url-dangerous-scheme"
+
+
+@pytest.mark.parametrize("url", [
+    "https://example.com/",
+    "https://supabase.com/dashboard/x/auth/url-configuration",
+    "http://localhost:8080/",
+    "https://api.deepseek.com/v1",
+])
+def test_goto_url_https_allowed(monkeypatch, url):
+    """V0.70.1: http/https URL 放行."""
+    from web_agent.types import GotoUrlAction
+    monkeypatch.delenv("WEB_AGENT_AUTO_APPROVE", raising=False)
+    action = GotoUrlAction(thought="x", url=url)
+    decision = check(action, mark=None, marks=None)
+    assert decision.allow, f"{url!r} 应放行 got reason={decision.reason}"
+
+
+def test_goto_url_auto_approve_dangerous_scheme(monkeypatch):
+    """V0.70.1: WEB_AGENT_AUTO_APPROVE 包含 goto-url-dangerous-scheme → 放行 (dev escape hatch)."""
+    from web_agent.types import GotoUrlAction
+    monkeypatch.setenv("WEB_AGENT_AUTO_APPROVE", "goto-url-dangerous-scheme")
+    action = GotoUrlAction(thought="x", url="javascript:void(0)")
+    decision = check(action, mark=None, marks=None)
+    assert decision.allow
+
+
 def test_upload_multi_paths_one_match_blocks_all(monkeypatch):
     """V0.23.2: paths 多元素其一命中 → 整 action block (短路第一命中)."""
     from web_agent.types import UploadAction

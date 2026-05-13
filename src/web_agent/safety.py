@@ -20,7 +20,7 @@ import re
 from dataclasses import dataclass
 from pathlib import Path
 
-from web_agent.types import Action, Mark, UploadAction
+from web_agent.types import Action, GotoUrlAction, Mark, UploadAction
 
 
 @dataclass
@@ -193,6 +193,20 @@ def check(action: Action, mark: Mark | None, marks: list[Mark] | None = None) ->
         decision = _check_upload_paths(action.paths)
         if decision is not None:
             return decision
+        return SafetyDecision(allow=True)
+
+    # V0.70.1: GotoUrlAction 拒 javascript:/vbscript:/data:/file: scheme
+    # (XSS / 旧 IE script / 本地文件读) — LLM hallucinate URL 真实风险, blacklist 最小防,
+    # 不依赖 mark. allowlist (仅 http/https) 是更严但破 localhost dev, 留 V0.70.2 评估.
+    if isinstance(action, GotoUrlAction):
+        u = action.url.lower().strip()
+        if u.startswith(("javascript:", "vbscript:", "data:", "file:")):
+            d = _block(
+                "goto-url-dangerous-scheme",
+                f"safety: goto_url scheme 被拒 (url={action.url[:80]!r}); 仅 http/https 允许。",
+            )
+            if d:
+                return d
         return SafetyDecision(allow=True)
 
     if action.type in ("scroll", "extract", "done", "keyboard_shortcut", "drag") or mark is None:

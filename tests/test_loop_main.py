@@ -17,7 +17,7 @@ from pathlib import Path
 
 import pytest
 
-from web_agent.types import Action, CloseTabAction, DoneAction, ScrollAction, SwitchTabAction
+from web_agent.types import Action, CloseTabAction, DoneAction, GotoUrlAction, ScrollAction, SwitchTabAction
 from web_agent.loop import run_react_loop
 from web_agent.perceiver import Mark
 
@@ -58,9 +58,17 @@ class FakePage:
         self.keyboard = FakePage._Keyboard()
         self.brought_to_front = 0
         self.closed = False
+        # V0.70.1: goto_calls 显式 init (跟 brought_to_front/closed 同模式),
+        # 让 assert pages[0].goto_calls == [] 而非 hasattr getattr 兜底.
+        self.goto_calls: list[tuple[str, dict]] = []
 
     async def wait_for_load_state(self, *args, **kwargs) -> None:
         return None
+
+    async def goto(self, url: str, **kwargs) -> None:
+        # V0.70.1: FakePage.goto 模拟 page.goto — 真实 Playwright 跳 url 改 page.url
+        self.goto_calls.append((url, kwargs))
+        self.url = url
 
     async def bring_to_front(self) -> None:
         self.brought_to_front += 1
@@ -262,6 +270,56 @@ async def test_llm_exception_captured_writes_error_step(
 
 
 # ---------- V0.21.1 multi-tab 派发测试 ----------
+
+
+async def test_goto_url_dispatches_page_goto_and_changes_url(
+    monkeypatch, tmp_path, patch_loop_internals
+):
+    """V0.70.1: GotoUrlAction 派发 page.goto(url, wait_until=domcontentloaded); URL 变化触发 V0.69 nav_side_effect."""
+    monkeypatch.delenv("WEB_AGENT_AUTO_APPROVE", raising=False)
+    pages = [FakePage(url="https://supabase.com/dashboard/x/auth/url-configuration")]
+    client = FakeLLMClient([
+        GotoUrlAction(thought="mark 49 反复无效, 直跳 policies", url="https://supabase.com/dashboard/x/auth/policies"),
+        DoneAction(thought="完成", result="navigated"),
+    ])
+    db = tmp_path / "trace.db"
+    result = await run_react_loop(
+        FakeContext(pages), client, goal="测 goto_url",
+        max_steps=3, db_path=db, screenshots_dir=tmp_path / "shots",
+    )
+    assert result == "navigated"
+    # 验证 page.goto 被调 (V0.70.1: goto_calls 在 __init__ 显式初 [], 不再 hasattr)
+    assert len(pages[0].goto_calls) == 1
+    assert pages[0].goto_calls[0][0] == "https://supabase.com/dashboard/x/auth/policies"
+    assert pages[0].goto_calls[0][1].get("wait_until") == "domcontentloaded"
+    # URL 已更新
+    assert pages[0].url == "https://supabase.com/dashboard/x/auth/policies"
+    # trace 记录 goto_url action + URL delta
+    steps = _read_trace_steps(db)
+    assert steps[0][1] == "goto_url"
+    assert steps[0][2] == {"url": "https://supabase.com/dashboard/x/auth/policies"}
+
+
+async def test_goto_url_javascript_scheme_blocked_by_safety(
+    monkeypatch, tmp_path, patch_loop_internals
+):
+    """V0.70.1: javascript: scheme 被 safety 拒, loop graceful abort (不 page.goto)."""
+    monkeypatch.delenv("WEB_AGENT_AUTO_APPROVE", raising=False)
+    pages = [FakePage(url="https://example.com/")]
+    client = FakeLLMClient([
+        GotoUrlAction(thought="坏 LLM", url="javascript:alert(document.cookie)"),
+        DoneAction(thought="完成", result="ok"),  # 不应该到这里
+    ])
+    db = tmp_path / "trace.db"
+    result = await run_react_loop(
+        FakeContext(pages), client, goal="测 goto_url safety",
+        max_steps=3, db_path=db, screenshots_dir=tmp_path / "shots",
+    )
+    # safety abort, 不 page.goto, URL 不变
+    assert pages[0].goto_calls == []
+    assert pages[0].url == "https://example.com/"
+    # result 含 SAFETY_BLOCK 信号 (loop 写到 result)
+    assert "SAFETY" in result or "safety" in result.lower() or "拒" in result
 
 
 async def test_switch_tab_brings_target_page_to_front_and_changes_active(

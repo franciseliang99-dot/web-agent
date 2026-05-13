@@ -214,6 +214,21 @@ class UploadAction:
     type: Literal["upload"] = "upload"
 
 
+@dataclass(frozen=True, slots=True)
+class GotoUrlAction:
+    """V0.70.1: 直接 page.goto(url) — mark click 反复无效后的 escape hatch.
+
+    使用场景: V0.69 dogfood Supabase Dashboard mark 49 click 撞 anti-loop, LLM 已知
+    site URL 结构 (e.g. /dashboard/x/auth/url-configuration) → goto_url 直跳绕开 mark 识别.
+    safety V0.70.1: 拒 javascript:/data:/file: scheme (XSS / 本地文件读).
+    actuator (loop.py match-case): try page.goto(url, wait_until="domcontentloaded") except → ERROR obs.
+    """
+
+    thought: str
+    url: str
+    type: Literal["goto_url"] = "goto_url"
+
+
 Action = (
     ClickAction
     | TypeAction
@@ -226,6 +241,7 @@ Action = (
     | CloseTabAction
     | DragAction
     | UploadAction
+    | GotoUrlAction
 )
 
 
@@ -269,6 +285,8 @@ def action_from_tool_call(name: str, raw: dict[str, Any]) -> Action:
                 mark_id=int(raw["mark_id"]),
                 paths=tuple(str(p) for p in paths_raw),
             )
+        case "goto_url":
+            return GotoUrlAction(thought=thought, url=str(raw["url"]))
         case _:
             raise RuntimeError(f"action_from_tool_call: unknown tool name {name!r}")
 

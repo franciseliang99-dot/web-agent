@@ -2,6 +2,63 @@
 
 All notable changes to web-agent. 版本号遵循 SemVer 简化形式（V<major>.<minor>.<patch>）。
 
+## [0.70.1] - 2026-05-13
+
+### Feat (V0.70.1 GotoUrlAction — mark click 失败时的直连导航 escape hatch)
+
+V0.69 dogfood (Supabase Dashboard) mark 49 click 反复无效, V0.70 加 no_nav_after_action
+signal 让 LLM 看到 click 没生效, 但 LLM 还需 escape hatch — 已知 site URL 结构时可直连绕开
+mark 识别失败. V0.70.1 闭这个 loop.
+
+**新 Action 类型**:
+- `src/web_agent/types.py`: 加 `@dataclass(frozen=True, slots=True) GotoUrlAction(thought: str, url: str)`
+  + `Action` Union + `action_from_tool_call` "goto_url" arm. 跟 V0.21 SwitchTab/V0.23 Drag/Upload 同模式.
+
+**Schema + Prompt**:
+- `src/web_agent/llm/_schema.py`: TOOL_SCHEMAS 加 goto_url entry (url string required, http/https only).
+  SYSTEM_PROMPT 新 rule-15: "mark click 反复无效但已知目标 URL 结构 → goto_url 直跳, 绕开 mark 识别失败.
+  不要每步都 goto (会绕开 SoM 学习); javascript:/vbscript:/data:/file: scheme 会被 safety 拒绝."
+
+**Safety guard** (subagent /simplify 加 vbscript 扩展):
+- `src/web_agent/safety.py`: `check()` 加 GotoUrlAction arm, 拒 `javascript:` / `vbscript:` / `data:` /
+  `file:` scheme (XSS / IE legacy script / 本地文件读). 大小写不敏感. allowlist (仅 http/https) 是
+  更严但破 localhost dev, 留 V0.70.2 评估 (subagent /simplify defer).
+- 支持 `WEB_AGENT_AUTO_APPROVE=goto-url-dangerous-scheme` dev escape hatch (跟 V0.23.2 upload 同模式).
+
+**Loop dispatch**:
+- `src/web_agent/loop.py`: safety dispatch isinstance 加 GotoUrlAction (line 711); elif arm
+  check_mark=None (URL 不依赖 mark). match-case 加 `GotoUrlAction(url=u)`: `try page.goto(u,
+  wait_until="domcontentloaded")` (跟 click 后 line 863 同 strategy); 失败 → ERROR obs
+  (rule-14 LLM 失败恢复接管); `last_clicked_mark = None` (跳页焦点重置防 type safety 误判).
+
+### TDD red→green (4 phase, ~70 测试新加)
+
+| Phase | 测试 | Source | 红信号 |
+|-------|------|--------|--------|
+| 1 types | 3 (factory / url required / frozen) | types.py +16 行 | `ImportError: cannot import name 'GotoUrlAction'` |
+| 2 schema | 2 + 3 数字 update (11→12) | _schema.py +14 行 | KeyError 'goto_url' |
+| 3 safety | 8 parametrize (4 scheme × 2 大小写) + 4 allow + 1 auto_approve | safety.py +13 行 | AttributeError check() 无 GotoUrlAction arm |
+| 4 loop | 2 (dispatch + safety block) + FakePage.goto + goto_calls init | loop.py +16 行 | Test red, page.goto 未调 |
+
+**全套件 1068/1068 passed, 29 skipped** (+18 from V0.70 baseline).
+
+### Subagent /simplify 复述 (7 候选)
+
+| # | 候选 | Decision |
+|---|------|---------|
+| 1 | blacklist→allowlist | PARTIAL: 加 `vbscript:` (zero-tradeoff additive), 完整 allowlist defer V0.70.2 (localhost dev tradeoff) |
+| 2 | 显式 `timeout=` on `page.goto` | skip (cli.py:80 同模式, Playwright default 30s 够) |
+| 3 | narrow `except Exception` | skip (现有 Drag/Click/Type case 全 bare except, 一致性) |
+| 4 | safety arm 位置 | skip (跟 UploadAction 同样 mark-independent, 正确放 top) |
+| 5 | schema description 长度 | skip (220 字, 跟 upload=221/keyboard_shortcut=236 一致) |
+| 6 | rule-15 长度 | skip (跟 rule-13 405 字一致) |
+| 7 | FakePage `__init__` goto_calls | apply (显式 init `self.goto_calls = []` 跟 brought_to_front/closed 同模式) |
+
+### V0.70.2 ticket (排队)
+
+- 评估 GotoUrlAction allowlist (仅 http/https) vs 当前 blacklist (拒 4 scheme). 触发: 若用户 dogfood 出现新 scheme bypass / 安全报告需求 / multi-user 场景上线.
+- 真 task 验 V0.70.1 (跑 Supabase Dashboard / Gmail compose 等多步任务, 看 Qwen3-VL 是否在 mark click 失败后真选 goto_url, 还是仍偏好 retry mark).
+
 ## [0.70.0] - 2026-05-13
 
 ### Feat (V0.70 no_nav_after_action positive signal — V0.69 dogfood Supabase mark 49 LOOP_DETECTED 根因解决)

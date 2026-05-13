@@ -19,10 +19,11 @@ EXPECTED_TOOL_NAMES = {
     "close_tab",
     "drag",
     "upload",
+    "goto_url",
 }
 
 
-def test_neutral_schemas_have_11_tools_with_thought():
+def test_neutral_schemas_have_12_tools_with_thought():
     assert {s["name"] for s in TOOL_SCHEMAS} == EXPECTED_TOOL_NAMES
     for s in TOOL_SCHEMAS:
         assert "thought" in s["properties"], f"{s['name']} 缺 thought 字段"
@@ -31,7 +32,7 @@ def test_neutral_schemas_have_11_tools_with_thought():
 
 def test_to_anthropic_tools_shape():
     tools = to_anthropic_tools()
-    assert len(tools) == 11
+    assert len(tools) == 12
     for t in tools:
         assert set(t.keys()) == {"name", "description", "input_schema"}
         assert t["input_schema"]["type"] == "object"
@@ -47,7 +48,7 @@ def test_to_openai_tools_strict_mode_invariants():
     3. parameters.required 必须包含所有 properties（即便业务上是 optional）
     """
     tools = to_openai_tools(strict=True)
-    assert len(tools) == 11
+    assert len(tools) == 12
     for t in tools:
         assert t["type"] == "function"
         f = t["function"]
@@ -93,6 +94,25 @@ def test_drag_schema_shape():
     for field in ("from_mark_id", "to_mark_id"):
         assert s["properties"][field]["type"] == "integer", f"drag.{field} 必须 integer"
         assert field in s["required"]
+
+
+def test_goto_url_schema_shape():
+    """V0.70.1: goto_url 中性 schema (url string required, thought required)."""
+    by_name = {s["name"]: s for s in TOOL_SCHEMAS}
+    s = by_name["goto_url"]
+    assert s["properties"]["url"]["type"] == "string"
+    assert "url" in s["required"]
+    assert "thought" in s["required"]
+    # description 应提及 mark click 失败的 fallback 场景
+    assert "click" in s["description"] or "失败" in s["description"] or "url" in s["description"].lower()
+
+
+def test_system_prompt_includes_goto_url_hint():
+    """V0.70.1: SYSTEM_PROMPT rule-15 提示 goto_url fallback."""
+    from web_agent.llm._schema import SYSTEM_PROMPT
+    assert "goto_url" in SYSTEM_PROMPT
+    # 提示位置: 跟 rule-14 失败恢复策略相关 (V0.69 dogfood mark 49 click 撞 anti-loop 根因)
+    assert "fallback" in SYSTEM_PROMPT.lower() or "直" in SYSTEM_PROMPT or "无效" in SYSTEM_PROMPT
 
 
 def test_upload_schema_shape():
