@@ -2,6 +2,99 @@
 
 All notable changes to web-agent. 版本号遵循 SemVer 简化形式（V<major>.<minor>.<patch>）。
 
+## [0.61.0] - 2026-05-11
+
+### Doc (V0.61 V0.60.x.1 真测红线 audit sweep 1/1 — 3 user 红线全击 stay maintainer)
+
+用户授权 "V0.60.x.1 eval 真访经过代理 (LLM 烧)". autonomous audit 后 1 commit doc: **3 user 红线
+全击** (ANTHROPIC_API_KEY 空 + WEB_AGENT_PROXY 未设 + 无真付费代理), autonomous 不能跑真测. V0.60.0
+helper test 既有 cover **充分** (4 fast unit 全 leak guard path), defer V0.60.x.1 至 user env.
+
+### 3 user 红线 audit (Step 2 三方)
+
+| 红线 | 现状 | autonomous 可做? |
+|------|------|----------------|
+| `ANTHROPIC_API_KEY` | `.env` placeholder (`len=0`, V0.54.0 audit 仍 stale-clean) | ❌ (跟 V0.54/V0.42.x.1/V0.49.x.1 同 stay) |
+| `WEB_AGENT_PROXY` | `.env` 无此键, runtime env 无 | ❌ (真付费代理用户 $ 配置) |
+| `WEB_AGENT_PROXY_EVAL=1` | `.env` 无此键, runtime env 无 | ⚠️ (二级 opt-in flag, 但配它无意义如一级 unset) |
+
+→ **0/3 红线 met, autonomous 真测 stop** (跟 V0.54.0 V0.42.x.1 真跑 audit STOP 同模式).
+
+### V0.60.0 既有 helper test 既有 cover (audit)
+
+V0.60.0 加 `get_eval_proxy_kwargs()` + 4 fast unit (`tests/test_proxy_util.py` V0.60.0 block):
+- `test_get_eval_proxy_kwargs_both_env_unset_returns_none` (默关 leak guard)
+- `test_get_eval_proxy_kwargs_only_primary_set_returns_none` (**核心 leak guard**: cli/prod 有
+  WEB_AGENT_PROXY 但 eval 不自动跟进)
+- `test_get_eval_proxy_kwargs_both_set_returns_kwargs` (eval 显式 opt-in 路径)
+- `test_get_eval_proxy_kwargs_secondary_not_one_returns_none` (`=="1"` 严格)
+
+3 处 launch 调用 (`eval/runner.py:155` + `eval/perceive_bench_adapter.py:61` +
+`tests/test_protection_reuse_cassette.py:305`) 全走 helper → V0.60.0 fast unit 覆盖所有 leak guard
+paths. **V0.61 加 stub infra 重复 cover → 拒** (跟 V0.59.0 拒 subagent stub infra 同因).
+
+### V0.34 教训累计应用至 V0.61 (31 系列贯彻)
+
+| 系列 | 教训应用 |
+|------|---------|
+| V0.54 | autonomous 真跑 sample 验 .env key 空 (V0.42.x.1 stop) |
+| V0.59 | sweep audit + 拒 subagent stub infra (V0.55-V0.57 既有 cover max) |
+| **V0.61** | **3 红线 audit + 既有 cover 说明 + 拒 stub** (sweep audit-only 同 V0.59 模式) |
+
+**V0.61 教训应用模式**: **autonomous 红线 audit 不止 1 项, 多项叠加时 stay 概率 100%**. V0.60.x.1
+需 ANTHROPIC_API_KEY + WEB_AGENT_PROXY + 真付费代理 3 项, 任一不足 stop. 跟 V0.51 destructive
+默 dry-run + V0.27 vault elicit + V0.18 elicit auto-approve **3 类 user 红线模式** (secret /
+destructive / proxy/cost) 共同点 = autonomous 不擅自 spec sensitive params.
+
+累计 **conservative reframe V0.42-V0.61 10 次**: image cache / W5-C.2 cleanup / send amount /
+type-only detector / simplify extract / fingerprint pool / A'' corpus / destructive 真删 / pilot
+cassette stub / V0.61 V0.60.x.1 真测 stub.
+
+(累计真发现至 V0.61: 28 个不变; V0.61 系列 +0 — sweep audit, 不催 catch.)
+
+### V0.60.x.1 user env 真测跑法 (跟 V0.58.x.1 / V0.42.x.1 同模式)
+
+```bash
+# 1. 真接付费代理 (Bright Data / Oxylabs / 自建 residential, ~$5-50/mo)
+export WEB_AGENT_PROXY="http://user:pass@residential-proxy.example.com:port"
+
+# 2. 二级显式 opt-in (V0.60.0 leak guard)
+export WEB_AGENT_PROXY_EVAL=1
+
+# 3. 真 LLM key
+export ANTHROPIC_API_KEY=sk-ant-...
+
+# 4. 跑 eval 真访 (LLM 烧 ~$0.05-0.20)
+WEB_AGENT_RUN_EVAL=1 WEB_AGENT_EVAL_REAL=1 uv run web-agent-eval \
+  --corpus capability-real-world --providers anthropic --runs 1 \
+  --output data/eval/v060_x1_proxy_audit/
+
+# 5. 验:
+# - browser 真接 proxy (Playwright trace / proxy provider 流量统计)
+# - cassette 不录 proxy header (vcr cassette diff 看 server header)
+# - LLM trace 含 cache hit + proxy IP exit (跨 task 验)
+```
+
+### V0.62 主题候选 (V0.61 完后, 等用户)
+
+V0.46.2 inventory 全 + pilot 3 项全 + 代理层 V0.58+V0.60 完整 + 累计 sweep V0.54/V0.59/V0.61.
+剩 maintainer 红线:
+- V0.58.x.1 真接付费代理 真测 akamai 403→200 (V0.48.2 #26 主路径验证)
+- V0.60.x.1 eval 真访代理 (本系列 stay)
+- V0.55/V0.56.x.1 pilot 真测
+- V0.42.x.1 / V0.51.x.1 真测 sample
+- 其他用户提的方向
+
+### Changed (~0 src LOC, ~100 doc LOC)
+
+- `CHANGELOG.md` V0.61.0 entry (本)
+- `pyproject.toml` / `__init__.py` 0.60.0 → 0.61.0
+- `uv.lock` 同步
+
+### Verify
+
+- `uv run pytest` → **1003 passed, 29 skipped** (V0.60.0 状态 0 src 改 → 0 测变)
+
 ## [0.60.0] - 2026-05-11
 
 ### Feat (V0.60 eval direct launch proxy 接入 — V0.58 conservative defer follow-up)
