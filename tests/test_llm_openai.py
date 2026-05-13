@@ -79,13 +79,15 @@ def test_openai_client_kimi_name_is_openai_kimi(monkeypatch):
     assert client._is_kimi is True
 
 
-def test_openai_client_non_kimi_keeps_openai_name(monkeypatch):
-    """V0.26.4: 非 Kimi base_url (e.g. OpenRouter) → name 仍 "openai" (类 attribute 默认)."""
+def test_openai_client_non_kimi_non_openrouter_keeps_openai_name(monkeypatch):
+    """V0.26.4 + V0.66.4: 非 Kimi 非 OpenRouter base_url (直连 OpenAI / DeepSeek)
+    → name 仍 "openai" (类 attribute 默认). OpenRouter 在 V0.66.4 被分到 openai-openrouter."""
     monkeypatch.setenv("OPENAI_API_KEY", "sk-test")
-    monkeypatch.setenv("OPENAI_BASE_URL", "https://openrouter.ai/api/v1")
+    monkeypatch.setenv("OPENAI_BASE_URL", "https://api.openai.com/v1")
     client = OpenAIClient()
     assert client.name == "openai"
     assert client._is_kimi is False
+    assert client._is_openrouter is False
 
 
 def test_provider_from_model_kimi_and_moonshot():
@@ -120,6 +122,16 @@ def test_openai_client_kimi_detection_via_base_url(monkeypatch):
     monkeypatch.setenv("OPENAI_BASE_URL", "https://api.moonshot.ai/v1")
     client = OpenAIClient()
     assert client._is_kimi is True
+
+
+def test_openai_client_openrouter_detection_via_base_url(monkeypatch):
+    """V0.66.4: base_url 含 "openrouter.ai" → _is_openrouter=True, 走 tool_choice="auto"
+    (OpenRouter Qwen3-VL 等上游不支持 "required" 直接 404, 跟 Kimi 同 quirks)."""
+    monkeypatch.setenv("OPENAI_API_KEY", "sk-test")
+    monkeypatch.setenv("OPENAI_BASE_URL", "https://openrouter.ai/api/v1")
+    client = OpenAIClient()
+    assert client._is_openrouter is True
+    assert client._is_kimi is False
 
 
 def test_openai_client_kimi_cn_endpoint_detection(monkeypatch):

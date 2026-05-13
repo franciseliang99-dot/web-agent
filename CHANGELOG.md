@@ -2,6 +2,37 @@
 
 All notable changes to web-agent. 版本号遵循 SemVer 简化形式（V<major>.<minor>.<patch>）。
 
+## [0.68.1] - 2026-05-12
+
+### Fix (V0.66.4 OpenRouter tool_choice 兼容 + V0.66.3 dogfood 闭环 vision unblock 真测通)
+
+V0.66.3 切 OpenRouter Qwen3-VL-32B-Instruct 跑 smoke 暴露 OpenRouter Qwen 上游
+不支持 `tool_choice="required"` (实测 404 `No endpoints found that support the
+provided tool_choice value`). `OpenAIClient._is_kimi` 只检测 base_url 含 "moonshot",
+OpenRouter 路径漏检 → 走 "required" 路径 404. 跟 Kimi 同 quirks 但 OpenRouter
+透传上游不识别 Moonshot 专有 `extra_body={"thinking":{"type":"disabled"}}`.
+
+主改 (`src/web_agent/llm/openai.py`):
+- 加 `_is_openrouter = "openrouter.ai" in base_url.lower()` flag, name="openai-openrouter"
+  (类似 Kimi 标 "openai-kimi" 让 eval metrics 区分).
+- plan() + reflect() 内 `if self._is_kimi` → `if self._is_kimi or self._is_openrouter`:
+  共享 `max_tokens` 旧 alias + `tool_choice="auto"`; `extra_body` thinking-disabled 仅 Kimi 加.
+
+dogfood 真测结果 (`tests/test_smoke_openrouter_qwen3vl_real.py`):
+- ✅ vision unblock (no 400 'unknown variant image_url' — V0.65 DeepSeek 报错根因解决)
+- ✅ tool calling (click action with mark_id=1 正确返回)
+- ✅ 中文 OCR (thought "点击编号为1的搜索按钮" 完整中文理解)
+- **plan_elapsed_s = 3.08s** (V0.66.2 OpenRouter/Qwen wallclock baseline 数据点 — vs Kimi ~8min/step)
+- usage: 3197 in / 57 out ≈ **\$0.0003 一步** (1 个 step 烧 ~\$0.0003, 全 task 20 step ≈ \$0.006)
+
+测试 (TDD red→green, 1029/1029 全套件过):
+- `test_openai_client_openrouter_detection_via_base_url` 新加: 红 (AttributeError) → 绿 (`_is_openrouter` 实装).
+- `test_openai_client_non_kimi_keeps_openai_name` 改: base_url 例 `openrouter.ai` 换 `api.openai.com`
+  (OpenRouter 现在被分到 `openai-openrouter`, 不再代表 "non-Kimi non-special").
+
+cassette: `tests/cassettes/test_smoke_openrouter_qwen3vl_real/*.yaml` (authorization REDACTED),
+重跑套件 0 烧 \$ replay.
+
 ## [0.68.0] - 2026-05-12
 
 ### Feat (V0.66.3 vision-capability gating — fail-fast guard 防止 chat() 首次 400 'unknown variant image_url')

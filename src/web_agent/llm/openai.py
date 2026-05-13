@@ -57,10 +57,16 @@ class OpenAIClient:
         self._tools = to_openai_tools(strict=True)
         # Kimi (Moonshot) OpenAI-compat 端点不支持 tool_choice="required" + 不识 max_completion_tokens
         self._is_kimi = bool(base_url and "moonshot" in base_url.lower())
+        # V0.66.4: OpenRouter 透传上游 (Qwen3-VL/Claude/GPT/...), 大多不 honor tool_choice="required"
+        # — 实测 qwen/qwen3-vl-32b-instruct 直接 404. 跟 Kimi 同 quirks: auto + max_tokens 旧 alias.
+        # 不加 extra_body thinking-disabled (那是 Moonshot 专有, OpenRouter 上游不一定识别).
+        self._is_openrouter = bool(base_url and "openrouter.ai" in base_url.lower())
         # V0.26.4: Kimi 显式标 "openai-kimi" 让 eval metrics report 区分 GPT vs Kimi
         # (V0.21.2 plan F 节已用此标记). instance attribute 覆盖 class attribute.
         if self._is_kimi:
             self.name = "openai-kimi"
+        elif self._is_openrouter:
+            self.name = "openai-openrouter"
         self.last_usage: Usage | None = None  # V0.26.2: eval/runner 累加用
 
     async def plan(
@@ -101,12 +107,14 @@ class OpenAIClient:
             ],
             "tools": self._tools,
         }
-        if self._is_kimi:
-            # Kimi K2.6/K2.5 默认开 thinking mode，reasoning_content 会吃光 max_tokens 导致没机会
-            # emit tool_call。Moonshot 官方对 tool-heavy agent flow 推荐关 thinking。
+        if self._is_kimi or self._is_openrouter:
+            # Kimi: K2.6/K2.5 默认开 thinking mode, reasoning_content 吃光 max_tokens 不吐 tool_call,
+            # 且不识 "required". OpenRouter: 上游 (Qwen 等) 普遍不支持 "required" → 404.
+            # 共享 auto + max_tokens 兼容路径; extra_body thinking-disabled 仅 Kimi 加 (Moonshot 专有).
             kwargs["max_tokens"] = 4096
             kwargs["tool_choice"] = "auto"
-            kwargs["extra_body"] = {"thinking": {"type": "disabled"}}
+            if self._is_kimi:
+                kwargs["extra_body"] = {"thinking": {"type": "disabled"}}
         else:
             kwargs["max_completion_tokens"] = 2048
             kwargs["tool_choice"] = "required"
@@ -152,7 +160,7 @@ class OpenAIClient:
             "model": self.model,
             "messages": [{"role": "user", "content": prompt}],
         }
-        if self._is_kimi:
+        if self._is_kimi or self._is_openrouter:
             kwargs["max_tokens"] = 512
         else:
             kwargs["max_completion_tokens"] = 512
