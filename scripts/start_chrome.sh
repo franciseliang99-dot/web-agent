@@ -27,6 +27,24 @@ mkdir -p "${USER_DATA}"
 # 用户显式覆盖: CHROME_BIN=/path/to/your/binary bash scripts/start_chrome.sh
 CHROME_BIN="${CHROME_BIN:-}"
 if [[ -z "${CHROME_BIN}" ]]; then
+  # V0.70.5: macOS Chrome.app 路径不在 PATH (Quartz native bundle, 非 ELF in /usr/bin).
+  # 显式探 /Applications/*.app/Contents/MacOS/* 6 fork. darwin miss 再 fallback PATH 探测
+  # (兼容 Homebrew install 把 chromium 放进 /usr/local/bin 等).
+  if [[ "$OSTYPE" == "darwin"* ]]; then
+    for p in "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome" \
+             "/Applications/Chromium.app/Contents/MacOS/Chromium" \
+             "/Applications/Brave Browser.app/Contents/MacOS/Brave Browser" \
+             "/Applications/Microsoft Edge.app/Contents/MacOS/Microsoft Edge" \
+             "/Applications/Vivaldi.app/Contents/MacOS/Vivaldi" \
+             "/Applications/Opera.app/Contents/MacOS/Opera"; do
+      if [[ -x "$p" ]]; then
+        CHROME_BIN="$p"
+        break
+      fi
+    done
+  fi
+fi
+if [[ -z "${CHROME_BIN}" ]]; then
   for c in google-chrome google-chrome-stable chromium chromium-browser \
            brave-browser brave microsoft-edge microsoft-edge-stable msedge \
            vivaldi vivaldi-stable opera; do
@@ -43,7 +61,10 @@ if [[ -z "${CHROME_BIN}" ]]; then
 fi
 
 if [[ "$MODE" == "auto" ]]; then
-  if command -v xvfb-run >/dev/null 2>&1; then
+  # V0.70.5: macOS Quartz native 总有 GUI (无 X11 DISPLAY), auto 默走 headed.
+  if [[ "$OSTYPE" == "darwin"* ]]; then
+    MODE=headed
+  elif command -v xvfb-run >/dev/null 2>&1; then
     MODE=xvfb
   elif [[ -n "${DISPLAY:-}" ]]; then
     MODE=headed
@@ -102,7 +123,8 @@ case "$MODE" in
     exec "${CHROME_BIN}" --headless=new "${ARGS[@]}" "$@"
     ;;
   headed)
-    if [[ -z "${DISPLAY:-}" ]]; then
+    # V0.70.5: macOS Quartz native 不需 X11 DISPLAY; 仅 Linux/X11 strict require.
+    if [[ "$OSTYPE" != "darwin"* ]] && [[ -z "${DISPLAY:-}" ]]; then
       echo "headed 模式需要 DISPLAY 环境变量（本机 GUI / SSH -X 转发）" >&2
       exit 1
     fi

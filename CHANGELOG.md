@@ -73,6 +73,54 @@ Scope: 5 files + ~80-150 行 + ~10 tests + 1-2 \$ 真测. **触发**: V0.70.4 sh
 - V0.70.2-A: ✅ CLOSED (V0.70.3 allowlist 已上)
 - V0.70.2-B: ⏳ 等用户授权 (真 task 验 V0.70/V0.70.1) — V0.70.4 改完后可顺带跑 (验 rule-16/17 + GotoUrlAction 一起)
 
+### Post-ship dogfood verdict (task `55c9e65ea2ee`, 2026-05-14)
+
+V0.70.4 prompt 改 ship 后, 复跑 trace.db task 4 原文 (`4cfa9b20774b` /forgot-password + console JS) 单跑 dogfood. 隔离变量: `WEB_AGENT_MEMORY_DISABLE=1 WEB_AGENT_REFLECTIONS_DISABLE=1` 防 V0.70.3 历史 reflection 干扰; `WEB_AGENT_VISION_DETAIL=low` 加速 (实际 9.68s wallclock).
+
+| 标准 | 实测 | 结论 |
+|------|------|------|
+| P0: chrome-level `keyboard_shortcut` ≤ 1 | F12 × 1 (rule-16 反例 list 内) | ✅ PASS |
+| P1: done 早退 + result 措辞 + 步数 ≤ 5 | step 1 done, result="工具集不含执行 JS / 操作浏览器控制台的能力, 无法完成此任务", 步数=2 | ✅ PASS (完全匹配 rule-16 spec) |
+| P2: 没重发 chrome-level shortcut | F12 → done, 不重发 | ✅ PASS |
+
+**对照 V0.70.3 baseline**:
+
+| 版本 | task 4 行为 | 步数 | 结果 |
+|------|------------|------|------|
+| V0.70.3 (`4cfa9b20774b`) | `Ctrl+Shift+J` × N → `Ctrl+L` × 3 → backtrack → `goto_url` × 8 | ~20+ | LOOP_DETECTED hard abort |
+| V0.70.4 (`55c9e65ea2ee`) | `F12` × 1 → `done("工具集不含...")` | **2** | ✅ 早退 |
+
+LLM step 0 thought 直接引 rule-16: "当前工具集不支持直接操作浏览器控制台或执行 JS。根据规则..." — rule-16 真的被读到 + 内化.
+
+**Cost**: 11062 input + 207 output tokens, wallclock 9.68s, 估 ~\$0.001 (远低于 \$0.03 预算).
+
+**Minor observation (不算违规)**: Step 0 LLM 仍 emit F12 试探 1 次 — rule-16 已写 "❌ F12 不开 DevTools" + 早退, LLM 走 "先试一次确认" 路径. Step 1 立即 done, F12 fail-fast 后没继续. 属 LLM 谨慎行为, 不算 rule-16 失效. V0.70.6+ ticket: prompt 加强 "看到反例 key, 不要试, 直接 done" — 仅当未来 dogfood 看到 F12 试探演化为 N 次时启动.
+
+**V0.71 EvaluateJSAction defer**: dogfood 验通确认 prompt-only **止血 sufficient** (LLM 2 步早退, 不撞 anti-loop). 用户决策: console JS 类 dev-tool task 走 hand-written Playwright script (B 路线), 不上 V0.71. V0.71 ticket 保留, 仅当真有 "声明式 console JS task" 产品需求时再 trigger.
+
+## [0.70.5] - 2026-05-14
+
+### Fix (V0.70.5 start_chrome.sh macOS 支持 — V0.70.4 dogfood 暴露 cross-OS gap)
+
+V0.70.4 dogfood 在 darwin 25.4.0 上跑首撞 2 个 bash 脚本 Linux-only 假设:
+
+- (a) `bash scripts/start_chrome.sh` 报 "找不到 Chrome / Chromium / ... 任一可执行文件" — `script:30-37` binary 探测只查 Linux PATH 名 (`google-chrome` / `chromium` 等), macOS Chrome.app binary 在 `/Applications/*.app/Contents/MacOS/*` 不在 PATH.
+- (b) workaround `export CHROME_BIN=... CHROME_MODE=headed bash ...` 后报 "headed 模式需要 DISPLAY 环境变量" — `script:104-108` strict check `$DISPLAY` (X11 Linux env), macOS Quartz native 不需要.
+
+V0.70.5 3 处 script 改:
+
+- **`script:29` binary 探测**: 加 `if [[ "$OSTYPE" == "darwin"* ]]` 分支, 探 6 个 `/Applications/*.app/Contents/MacOS/*` path (Google Chrome / Chromium / Brave / Edge / Vivaldi / Opera). darwin miss 时 fallback PATH 探测 (兼容 Homebrew install).
+- **`script:45` auto mode**: macOS short-circuit → `MODE=headed` (macOS Quartz 总有 GUI).
+- **`script:104` headed mode DISPLAY check**: 加 `[[ "$OSTYPE" != "darwin"* ]]` 条件, 仅 Linux/X11 strict require DISPLAY.
+
+### V0.16.18 历史 + 测试
+
+V0.16.18 注释 (`script:25-27`) 已知 "用户显式覆盖 CHROME_BIN" 是 macOS 兜底, defer 至 V0.70. V0.70.4 dogfood (用户从 Linux server 切到 darwin local) 首次暴露, V0.70.5 触发修复.
+
+bash 脚本无 unit test (项目无 shellcheck / bats), V0.70.5 不上新 test 框架 (scope 锁 script fix, 不搭车工具链 setup). darwin 真测 = V0.70.6+ dogfood 自然验证: `bash scripts/start_chrome.sh` 直接 work, **无需 export CHROME_BIN / CHROME_MODE**.
+
+V0.70.5 ship 前 user workaround 已 verify: raw Chrome binary 直 spawn (`"/Applications/.../Google Chrome" --remote-debugging-port=9222 --user-data-dir=~/.config/web-agent-chrome --no-first-run --no-default-browser-check`) + Playwright `connect_over_cdp` 验通过 → task 4 dogfood 跑成 (见上 V0.70.4 verdict).
+
 ## [0.70.3] - 2026-05-13
 
 ### Refactor (V0.70.2-A close: GotoUrlAction safety blacklist → allowlist)
