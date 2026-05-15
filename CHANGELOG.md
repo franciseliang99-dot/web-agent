@@ -131,6 +131,40 @@ V0.70.4 真实 POST-ship cover = 1/2 (50%), 不是 user 表的 1/5. 待 V0.70.6 
 - **V0.71 stable mark_id**: task 4 (`e93e073cc60c` menu 弹出后 mark_id 整体偏移 LOOP). `perceiver.py:393-397` 每 perceive DFS `i+1` 重新分配, 无跨 perceive 持久 ID — **fundamental design issue, prompt 无解**. 需 perceiver 大改 (xpath hash / DOM signature stable id), 独立 milestone, 1-2 天 dev.
 - **V0.71 EvaluateJSAction**: 已 backlog, 用户 defer (V0.70.4 止血 sufficient).
 
+### Post-ship dogfood verdict — V0.70.4 + V0.70.6 真 cover = 1/4 (25%)
+
+V0.70.6 ship 后跑 4-task POST-V0.70.4+V0.70.6 dogfood (复跑用户原 task 1-2 + 复用 task 3/4 已有 trace):
+
+| # | task | task_id | 真行为 | Verdict |
+|---|------|---------|------|---------|
+| 1 | sign-in console JS (rerun `7a6613ad05f3`) | `7386e581a0eb` | step 0 goto_url → step 1-9 连续 `click(mark_id=2)` 邮箱框 → LOOP_DETECTED at step 9. rule-16 没 trigger (LLM 没识别为 console JS, 走"登录后 console" 误解). rule-17 信号注入 7 次, LLM 不切策略. | ❌ FAIL |
+| 2 | goto_url × N + chrome shortcut (rerun `6b48e8895a0e`) | `1d721e25ef5b` | step 0 goto_url → step 1 Ctrl+Shift+J ("规则16禁止"被 LLM 引用) → step 2 F12 (rule-16 反例 list 内, LLM 仅 literal 理解 Ctrl+Shift+J ban) → step 3-4 goto_url × 2 alternation LOOP. V0.70.6 信号注入 4 次, LLM 不切策略. | ❌ FAIL |
+| 3 | forgot-password console JS (V0.70.4 已 reaffirm) | `55c9e65ea2ee` (历史) | F12 × 1 → done("工具集不含执行 JS / 操作浏览器控制台的能力, 无法完成此任务"), 2 步. rule-16 命中 done 早退. | ✅ PASS |
+| 4 | 首页 UI menu mark_id 重分配 | `e93e073cc60c` (历史) | mark[2,5,2,4,2] alternation LOOP. `perceiver.py:393-397` 每 perceive DFS `i+1` 重新分配, 无 stable id. prompt 无解. | ❌ FAIL (V0.71 待) |
+
+**真 cover = 1/4 (25%)**, 不是预期的 3-4/4. V0.70.4 rule-16 仅在 task **完全 limit console JS + 无 fallback option** 且 goal 第一行明示 console 时 LLM done 早退 (task 3 类). 给 LLM 任何 fallback option (sign-in page UI / URL bar) 它就走 fallback 路径.
+
+### V0.70.6 数据层 ✅, 行为层 ❌
+
+`_NAV_EXPECTING_ACTIONS` 加 `goto_url` 后, SQL verify trace.db (`7386e581a0eb` step 0/1/2/3/6/7/8 + `1d721e25ef5b` step 0/1/2/3) `no_nav_after_action: true` 信号**全部注入**. **V0.70.6 fix 在数据层 work**.
+
+但 LLM 看到信号**不 react** — 仍连续同 action. rule-17 prompt ("看到此字段 → 切 action type / 切 mark / 连续 2 步 done") 在 prompt 末尾 attention 弱, LLM 不 anchor.
+
+### 深层根因 (post-ship subagent /audit verdict)
+
+1. **prompt 末尾 attention 弱**: rule-16/17 在 prompt 末尾 (rule-16-17), LLM 优先看 goal + 早段 rule, 忽略后段 ban 列表.
+2. **LLM 字面理解 ban specific key**: rule-16 列 4 反例 (`Ctrl+Shift+J` / `F12` / `Ctrl+T` / `Ctrl+L`), LLM 仅 ban 字面 Ctrl+Shift+J, **没 generalize 到 F12** (task 2 step 2 实证).
+3. **任务 fallback option 喧宾夺主**: task 2 goal 给 "console JS 或 URL bar" 双 option, LLM 走 URL bar fallback (`goto_url`), rule-16 不 ban goto_url.
+4. **task identifier 在 goal 后段**: task 1 goal 第一句 "vanboard V0.7 dark-mode dogfood §1 单 route 视觉 smoke (/sign-in). 步骤 1. 访问 ..." — "console JS" / "localStorage" 在 goal 后段, LLM 没 anchor 它作为 task type 标记.
+
+### V0.70.7 / V0.71 决策
+
+prompt-only 路线 (V0.70.4/V0.70.6) 已证 marginal (1/4 cover, LLM 看信号不 react). 待用户决策:
+
+- **V0.70.7 prompt 加强**: rule-16 提前到 prompt 头部 + 加 "类别 ban" 措辞 (ban "任何 Chrome DevTools 快捷键" 而非 list 4 反例) + rule-17 加 "连续 2 步信号 = 强制 done". 风险: LLM 仍不 react (prompt 路线极限).
+- **V0.71 stable mark_id** (perceiver 重构): xpath hash stable id + Mark dataclass + SoM JS 同步 + tests. 1-2 天 dev. 闭 task 4 mark_id LOOP 根因 + 为 task 1/2 提供 stable foundation.
+- **V0.71 EvaluateJSAction** (闭 console JS 根因): types/_schema/loop/safety/trace 5 file + ~150 LOC + ~10 tests + 1-2$ 真测. 让 console JS task **真能跑**而非早退. V0.70.4 defer 决定 revisit.
+
 ## [0.70.5] - 2026-05-14
 
 ### Fix (V0.70.5 start_chrome.sh macOS 支持 — V0.70.4 dogfood 暴露 cross-OS gap)
