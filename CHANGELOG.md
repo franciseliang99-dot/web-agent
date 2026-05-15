@@ -134,6 +134,44 @@ V0.70.7 SYSTEM_PROMPT 3 处终极加强 (仍 prompt-only, 0 业务代码):
 
 prompt-only 路线极限 — 即使 V0.70.7 加强, LLM 仍可能不 react. POST-ship dogfood 重跑 task 1+2 才能真量化. 若 V0.70.7 cover 仍 < 50% → 走 V0.71 EvaluateJSAction (真 tool, 闭根因) 或 V0.71 stable mark_id (perceiver 重构, 闭 task 4 + 为其他 task 提供 stable foundation).
 
+### Post-ship dogfood verdict — V0.70.7 真 cover 3/4 (75%) — prompt 路线大胜
+
+V0.70.7 ship 后 (commit `dda30de`) 重跑 task 1+2:
+
+| # | task | task_id | V0.70.4/V0.70.6 | **V0.70.7** | 增量 |
+|---|------|---------|--------|-------------|------|
+| 1 | sign-in console JS | `a5b04d470692` | 9 step LOOP_DETECTED `click(mark=2)` | **step 0 done** (3.87s) | 9→1 step, LOOP→PASS |
+| 2 | 跨 route goto_url + console JS | `28263a210bbf` | 5 step alternation LOOP (Ctrl+Shift+J → F12 → goto×3) | **step 0 done** (5.32s) | 5→1 step, LOOP→PASS |
+| 3 | forgot-password JS | `55c9e65ea2ee` (V0.70.4 已 reaffirm) | F12×1 → done 2 step | (不变) | — |
+| 4 | 首页 UI menu mark_id | `e93e073cc60c` (历史) | mark alternation LOOP | (V0.70.7 不解) | perceiver-level, V0.71 待 |
+
+**真 cover = 3/4 (75%)** — V0.70.6 1/4 (25%) → V0.70.7 3/4 (75%). **prompt 路线大胜**, +200% cover.
+
+### LLM 真实行为 (SQL verify trace.db)
+
+- **task 1** (`a5b04d470692`): step 0 thought "goal 要求执行 JS 操作 `localStorage.setItem('vanboard-theme', '<mode>')` 和 `location.reload()`..." → `done("工具集不含执行 JS 或操作 localStorage 的能力, 无法完成此 task")`.
+- **task 2** (`28263a210bbf`): step 0 thought "任务要求执行 DevTools console JS 操作... **根据规则 16, 凡涉及 'console' / 'JS 执行' / 'localStorage' 等关键字的**..." → done. **LLM 真的引用 rule-16 + 类别 ban 措辞**.
+
+### 哪些 V0.70.7 改动 真起作用
+
+1. **rule-3 early anchor**: LLM 第一步看 goal 就识别 chrome-level task type (而非 V0.70.6 时 LLM "登录后 console" 误解). 闭根因 #4.
+2. **rule-16 类别 ban**: LLM thought 引 "**凡涉及 'console' / 'JS 执行' / 'localStorage' 等关键字的**" — 不再 literal 理解 ban specific key, **generalize 到关键字类别**. F12 / Ctrl+Shift+J ban 自动覆盖. 闭根因 #2.
+3. **rule-16 强复述 "第一步就 done"**: LLM 不再 try keyboard/click 探索, step 0 直接 done. 闭根因 #1 + #3.
+4. **rule-17 硬约束 + 第 3 次硬 abort 恐吓**: 本轮 task 1+2 LLM step 0 就 done, **rule-17 没机会 trigger** (LLM 没等到 signal 累积). 待 task 4 类 (非 console JS task, mark_id LOOP) 验.
+
+### Cost
+
+- task 1: 3.87s wallclock, ~$0.0003
+- task 2: 5.32s wallclock, ~$0.0005
+- Total ~9s, < $0.001 (大幅低于 $0.02 预算 + V0.70.6 时 task 1+2 ~20s).
+
+### V0.71 决策
+
+V0.70.7 ship 后剩唯一 fundamental 根因 = **task 4 mark_id 重分配** (`perceiver.py:393-397` DFS `i+1`, 无 stable id). **不是 prompt 可解**.
+
+- **V0.71 EvaluateJSAction**: 用户原 defer 决定**保留** (V0.70.7 cover 75%, console JS task 全 done 早退 OK). 若用户改主意要 "console JS task 真能跑而非早退" 再 revisit.
+- **V0.71 stable mark_id**: P0 待启 — 闭 task 4 + 为 future dynamic UI task 提供 stable foundation. xpath hash / DOM signature, perceiver 大改 1-2 天 dev.
+
 ## [0.70.6] - 2026-05-14
 
 ### Fix (V0.70.6 `_NAV_EXPECTING_ACTIONS` 漏 `goto_url` — V0.70.4 post-ship dogfood 暴露真 bug)
