@@ -13,7 +13,9 @@ from typing import Any
 
 # V0.70: 对哪些 action 期望触发 nav, 决定 for_llm 是否注入 no_nav_after_action positive signal.
 # extract/scroll/done/upload 本不该 nav, url 不变正常, 不触发避免误导 LLM.
-_NAV_EXPECTING_ACTIONS = frozenset({"click", "keyboard_shortcut", "switch_tab", "type"})
+# V0.70.6: 加 goto_url (V0.70.1 加的 first-class nav action). V0.70.4 dogfood task 2
+# 跑 10 次相同 goto_url(localhost:3000/) url_before==url_after 但 signal 没注入 → rule-17 空话.
+_NAV_EXPECTING_ACTIONS = frozenset({"click", "keyboard_shortcut", "switch_tab", "type", "goto_url"})
 
 
 @dataclass

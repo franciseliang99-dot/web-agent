@@ -130,3 +130,21 @@ def test_type_url_unchanged_emits_no_nav():
     )
     d = s.for_llm()
     assert d.get("no_nav_after_action") is True
+
+
+def test_goto_url_url_unchanged_emits_no_nav_after_action():
+    """V0.70.6: goto_url 后 url 未变 (反复 goto 同 URL) → no_nav_after_action: True.
+
+    V0.70.4 dogfood task 2 (`6b48e8895a0e`, 2026-05-14 18:11) 跑 10 次相同
+    `goto_url("http://localhost:3000/")`, url_before==url_after 每步成立, 但因
+    `_NAV_EXPECTING_ACTIONS` 漏 goto_url, signal 一次没注入 → SYSTEM_PROMPT rule-17 在
+    goto_url-LOOP 场景空话. V0.70.6 加 goto_url 进 set, signal 触发后 LLM 应切策略或 done 早退.
+    """
+    s = _make_step(
+        action_type="goto_url",
+        action_args={"url": "http://localhost:3000/"},
+        url_before="http://localhost:3000/",
+        url_after="http://localhost:3000/",
+    )
+    d = s.for_llm()
+    assert d.get("no_nav_after_action") is True
