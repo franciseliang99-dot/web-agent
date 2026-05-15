@@ -193,6 +193,54 @@ def test_system_prompt_includes_no_nav_after_action_protocol():
         )
 
 
+def test_v0707_rule_16_category_ban_and_goal_keyword_anchor():
+    """V0.70.7 rule-16 加强: 类别 ban 措辞 + goal 关键字 anchor.
+
+    V0.70.6 dogfood task 2 实证: LLM 仅 literal 理解 ban Ctrl+Shift+J, emit F12 (rule-16 反例 list 内)
+    撞 anti-loop. V0.70.7 prompt 改 "凡是 chrome-level 快捷键一律不开" (类别 ban) + "goal 含
+    chrome-level 关键字 → 第一步 done 早退" (rule-3 early anchor + rule-16 强复述).
+    """
+    from web_agent.llm._schema import SYSTEM_PROMPT
+    # 类别 ban 措辞 (不再是 specific key list ban)
+    assert "类别 ban" in SYSTEM_PROMPT or "凡是" in SYSTEM_PROMPT, (
+        "V0.70.7 rule-16: 应有类别 ban 措辞防 LLM 字面理解 ban specific key"
+    )
+    assert "一律不开" in SYSTEM_PROMPT or "同类" in SYSTEM_PROMPT, (
+        "V0.70.7 rule-16: 应明示同类全 ban (不是穷举反例)"
+    )
+    # goal 关键字 anchor (rule-3 早段 + rule-16 强复述)
+    for keyword in ("console", "localStorage", "Runtime.evaluate"):
+        assert keyword in SYSTEM_PROMPT, (
+            f"V0.70.7 anchor: SYSTEM_PROMPT 应含 chrome-level 关键字示例 {keyword!r}"
+        )
+    # 第一步就 done 早退指引 (rule-3 + rule-16 加强)
+    assert "第一步" in SYSTEM_PROMPT, (
+        "V0.70.7 anchor: 应明示 chrome-level task 第一步就 done 早退, 不要试"
+    )
+
+
+def test_v0707_rule_17_consecutive_forced_done():
+    """V0.70.7 rule-17 硬约束: 连续 2 步 no_nav signal 必须 done(放弃), 不再尝试第 3 次.
+
+    V0.70.6 dogfood: LLM 看 no_nav signal 4 次仍连续 goto_url 撞 anti-loop. rule-17 软措辞
+    ('✅ 连续 2 步 → done 早退') LLM 不 anchor. V0.70.7 改硬约束 ('必须 done 放弃' + 'anti-loop
+    第 3 次硬 abort' 加恐吓).
+    """
+    from web_agent.llm._schema import SYSTEM_PROMPT
+    # 硬约束措辞
+    assert "必须" in SYSTEM_PROMPT and "放弃" in SYSTEM_PROMPT, (
+        "V0.70.7 rule-17: 应改硬约束措辞 (必须 done 放弃, 不再尝试)"
+    )
+    # V0.70.6 goto_url 加入信号 nav-expecting actions list
+    assert "goto_url" in SYSTEM_PROMPT, (
+        "V0.70.6 加 goto_url 进 _NAV_EXPECTING_ACTIONS, rule-17 应反映"
+    )
+    # anti-loop 第 3 次硬 abort 加恐吓 (LLM 主动 done 比被 abort 可控)
+    assert "第 3 次" in SYSTEM_PROMPT or "硬 abort" in SYSTEM_PROMPT, (
+        "V0.70.7 rule-17: 应明示 anti-loop 第 3 次硬 abort, LLM 主动 done 更可控"
+    )
+
+
 def test_system_prompt_includes_multi_field_type_protocol():
     """V0.56.0 pilot #2: SYSTEM_PROMPT 第 7 条多字段 type 协议 example-driven 重写.
 
