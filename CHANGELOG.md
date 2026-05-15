@@ -2,6 +2,77 @@
 
 All notable changes to web-agent. 版本号遵循 SemVer 简化形式（V<major>.<minor>.<patch>）。
 
+## [0.70.4] - 2026-05-14
+
+### Feat (V0.70.4 SYSTEM_PROMPT rule-16/17 — keyboard chrome-level edge + no_nav_after_action protocol)
+
+V0.70.3 vanboard dogfood (主题切换 + console JS 4 task, 1 success + 3 LOOP) subagent /audit 验:
+LLM 在 "用 console JS / URL bar" 类 task 上 hallucinate `keyboard_shortcut("Control+Shift+J")`
+反复按试图开 DevTools (Playwright `page.keyboard.press` 把键发到 page DOM, 不发到 Chrome chrome
+→ 根本不会开 DevTools), 撞 anti-loop. 同时 V0.70 加的 `no_nav_after_action: true` 字段
+LLM 看到 self-documenting key 仍重复同 mark — SYSTEM_PROMPT 没解释含义.
+
+V0.70.4 **仅改 SYSTEM_PROMPT** (0 行业务代码 / tool schema / safety / loop dispatch 全不变), 加 2 条 rule:
+- **rule-16**: `keyboard_shortcut` 仅作用页面层, 反例显式 (`Control+Shift+J` / `F12` / `Control+T` 等).
+  当 task 要求 chrome-level 能力 (JS exec / localStorage / DevTools) → `done(早退)` 不要死磕.
+- **rule-17**: `no_nav_after_action: true` 信号处置 protocol — 切 action type / 切 mark /
+  连续 2 步 done 早退. (V0.70 注入信号, V0.70.4 教 LLM 解释).
+
+### Why (Subagent /audit verdict, `data/trace.db` 4 task 真证据)
+
+| Task | Goal 关键约束 | 关键 action 序列 | Result |
+|------|--------------|----------------|--------|
+| `b25c34175be0` (01:07) "首页"(没禁 click) | click[2] ThemeToggle → click[4] 浅色 → click[5] 深色 → done | ✅ SUCCESS |
+| `b87e0631cb6d` (01:09) "console JS" | click[6] Open Next.js Dev Tools ↔ click[9] Close | LOOP |
+| `6b48e8895a0e` (01:11) "console JS + URL bar" | `goto_url(localhost:3000)` × 4 → backtrack → goto_url × 4 | LOOP |
+| `4cfa9b20774b` (01:14) "console JS + reload" | `keyboard_shortcut("Control+Shift+J")` × 多 → Ctrl+L × 3 → goto_url | LOOP |
+
+诊断: **任务-工具语义鸿沟** — agent tool 集 12 个 action 完全不含 `evaluate_js` / `Runtime.evaluate`.
+LLM 收到不可实现指令 → 在合法工具里挑最像的 → 撞 anti-loop. 不是 "LLM follow-instruction 不可靠".
+用户原诊断 "第 1 次跑通是 LLM 偶然选 Runtime.evaluate" **事实错** — task 1 没禁 click, LLM 自然走拟人
+click 路径, 跟 Runtime.evaluate 无关.
+
+### TDD (2 新测试 `tests/test_llm_schema.py`)
+
+- `test_system_prompt_includes_keyboard_chrome_level_warning` — 验 `Control+Shift+J` / `F12` /
+  `DevTools` / `chrome` / 早退指引 关键字
+- `test_system_prompt_includes_no_nav_after_action_protocol` — 验 `no_nav_after_action` /
+  `切 action` / `切 mark` / `重发` 关键字
+
+红→绿 (darwin 本机): `tests/test_llm_schema.py` **23/23 passed** (V0.70.3 baseline 21 → +2).
+全套件 `pytest -q` 1067 passed + 18 failed + 29 skipped — 18 failures 均 pre-existing darwin baseline
+不破 (16× `test_vault.py` ModuleNotFoundError `keyring` 因 optional extra 未装, 2× `test_safety.py
+test_upload_path_blacklist_block[/etc/passwd|/etc/hosts]` 在 V0.70.3 stash 后同样 fail), 跟
+V0.70.4 prompt-only 改动无关 (V0.70.3 commit 写 "1083/1083 passed" 是在 Linux env, 报错 path
+`/home/myclaw/web-agent/` 印证).
+
+### V0.71 ticket — `EvaluateJSAction` (排队, 闭根因)
+
+V0.70.4 prompt-only 是**止血** — 让 LLM 早退而非死磕. **根因 (工具-任务语义鸿沟) 仍在**:
+"用 console JS" 类 task 当前工具集**无法实现**, 早退后无下文.
+
+V0.71 计划加 first-class `EvaluateJSAction(thought, code)` 工具 (跟 V0.70.1 `GotoUrlAction` 同模式):
+- `types.py`: 加 `@dataclass EvaluateJSAction` + `Action` Union + `action_from_tool_call` arm
+- `_schema.py`: TOOL_SCHEMAS 加 `evaluate_js` entry + SYSTEM_PROMPT rule 改 ("需要执行 JS 时用 evaluate_js,
+  不要 hallucinate `keyboard_shortcut`")
+- `loop.py`: match-case `case EvaluateJSAction: result = await page.evaluate(code); obs = stringified return`
+- `safety.py`: evaluate-js 黑名单 (`document.cookie` 读 / 出站 `fetch('http://...')` /
+  `XMLHttpRequest` / `eval(`) → ABORT
+- `trace.py`: 同步加 evaluate_js 的 success/exception trace 字段
+- `tests/`: ~10 个 TDD test (types / schema / loop dispatch / safety guard / 真 task 烧
+  1-2 \$ 验 Qwen3-VL 是否真敢 emit JS)
+
+Scope: 5 files + ~80-150 行 + ~10 tests + 1-2 \$ 真测. **触发**: V0.70.4 ship 后跑 1-2 dogfood task
+验 LLM 是否真按 rule-16 done 早退 (而非继续 LOOP). 若 done 行为正确, V0.71 优先级看用户是否仍需
+"声明式 console JS task":
+- 需要 → 立即 V0.71 (闭根因)
+- 不需要 (dev-tool task 走 hand-written Playwright script B 路线) → V0.71 永远 defer
+
+### V0.70.2 ticket 状态
+
+- V0.70.2-A: ✅ CLOSED (V0.70.3 allowlist 已上)
+- V0.70.2-B: ⏳ 等用户授权 (真 task 验 V0.70/V0.70.1) — V0.70.4 改完后可顺带跑 (验 rule-16/17 + GotoUrlAction 一起)
+
 ## [0.70.3] - 2026-05-13
 
 ### Refactor (V0.70.2-A close: GotoUrlAction safety blacklist → allowlist)

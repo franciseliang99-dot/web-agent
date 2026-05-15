@@ -155,6 +155,44 @@ def test_system_prompt_includes_failure_recovery_clauses():
     assert "换思路" in SYSTEM_PROMPT or "换策略" in SYSTEM_PROMPT
 
 
+def test_system_prompt_includes_keyboard_chrome_level_warning():
+    """V0.70.4 rule-16: keyboard_shortcut 仅作用页面层, 不开浏览器 chrome / DevTools.
+
+    根因 (vanboard dogfood 4 task / trace.db audit): LLM 在 "用 console JS" task 上
+    hallucinate `keyboard_shortcut("Control+Shift+J")` 反复按试图开 DevTools (Playwright
+    `page.keyboard.press` 把键发到 page DOM, 不发到 Chrome chrome → 根本不会开 DevTools),
+    撞 anti-loop. rule-16 显式警示让 LLM 早退而非死磕.
+    """
+    from web_agent.llm._schema import SYSTEM_PROMPT
+    # 反例关键字 (LLM 应识别这些都不该用 keyboard_shortcut)
+    for keyword in ("Control+Shift+J", "F12", "DevTools", "chrome"):
+        assert keyword in SYSTEM_PROMPT, (
+            f"V0.70.4 rule-16: SYSTEM_PROMPT 应含反例 {keyword!r}"
+        )
+    # chrome-level 能力不支持时 LLM 该 done 早退的指引
+    assert "done" in SYSTEM_PROMPT and (
+        "早退" in SYSTEM_PROMPT or "无法完成" in SYSTEM_PROMPT
+    ), "V0.70.4 rule-16: 应指引 LLM 当 chrome-level task 时 done 早退"
+
+
+def test_system_prompt_includes_no_nav_after_action_protocol():
+    """V0.70.4 rule-17: `no_nav_after_action: true` 信号的处置 protocol.
+
+    V0.70 注入 no_nav_after_action 字段进 trace JSON 但 SYSTEM_PROMPT 没解释含义.
+    Qwen3-VL 真测看到 self-documenting key 仍重复同 mark + 撞 anti-loop. rule-17 显式说明
+    "看到此字段 = 切 action type / 切 mark / done 早退", 让 LLM 不必"自己推断"含义.
+    """
+    from web_agent.llm._schema import SYSTEM_PROMPT
+    assert "no_nav_after_action" in SYSTEM_PROMPT, (
+        "V0.70.4 rule-17: SYSTEM_PROMPT 应明示 no_nav_after_action 字段含义"
+    )
+    # 处置指引: 切 action / 切 mark / 不要重发
+    for keyword in ("切 action", "切 mark", "重发"):
+        assert keyword in SYSTEM_PROMPT, (
+            f"V0.70.4 rule-17: SYSTEM_PROMPT 应含 {keyword!r}"
+        )
+
+
 def test_system_prompt_includes_multi_field_type_protocol():
     """V0.56.0 pilot #2: SYSTEM_PROMPT 第 7 条多字段 type 协议 example-driven 重写.
 
